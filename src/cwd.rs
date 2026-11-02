@@ -1,0 +1,244 @@
+//! Keeping the shell's directory and the panel's the same.
+//!
+//! Shell to panel: the shell is started with a hook that prints its directory
+//! (OSC 7, `ESC ] 7 ; file://host/path BEL`) before every prompt, and
+//! [`Osc7`] picks it out of its output. Panel to shell: [`cd_command`] is the
+//! line that takes the shell where the panel went.
+
+use std::io::Write;
+use std::path::{Path, PathBuf};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Kind {
+    PowerShell,
+    Bash,
+    Zsh,
+    Other,
+}
+
+impl Kind {
+    pub fn of(program: &str) -> Self {
+        let name = Path::new(program).file_stem().map(|s| s.to_string_lossy().to_lowercase()).unwrap_or_default();
+        match name.as_str() {
+            "pwsh" | "powershell" => Self::PowerShell,
+            "bash" => Self::Bash,
+            "zsh" => Self::Zsh,
+            _ => Self::Other,
+        }
+    }
+}
+
+/// How to start a shell so that it reports its directory.
+#[derive(Default, Debug, PartialEq)]
+pub struct Integration {
+    pub args: Vec<String>,
+    pub env: Vec<(String, String)>,
+}
+
+/// The arguments and environment that make `program` print OSC 7 before each
+/// prompt; `dir` is a scratch folder for the start-up files bash and zsh need.
+/// The user's own start-up files still run first.
+pub fn integration(kind: Kind, dir: &Path) -> std::io::Result<Integration> {
+    Ok(match kind {
+        Kind::PowerShell => Integration {
+            // Runs after the profile, so the prompt it wraps is the user's own.
+            args: vec!["-NoExit".into(), "-Command".into(), POWERSHELL_HOOK.into()],
+            env: vec![],
+        },
+        Kind::Bash => {
+            std::fs::create_dir_all(dir)?;
+            let rc = dir.join("bashrc");
+            std::fs::write(&rc, BASH_RC)?;
+            Integration { args: vec!["--rcfile".into(), rc.display().to_string(), "-i".into()], env: vec![] }
+        }
+        Kind::Zsh => {
+            std::fs::create_dir_all(dir)?;
+            for (name, text) in [(".zshenv", ZSH_ENV), (".zshrc", ZSH_RC)] {
+                std::fs::write(dir.join(name), text)?;
+            }
+            let real = std::env::var("ZDOTDIR").unwrap_or_else(|_| std::env::var("HOME").unwrap_or_default());
+            Integration {
+                args: vec![],
+                env: vec![("ZDOTDIR".into(), dir.display().to_string()), ("FARSH_ZDOTDIR".into(), real)],
+            }
+        }
+        Kind::Other => Integration::default(),
+    })
+}
+
+const POWERSHELL_HOOK: &str = "$global:__farsh_prompt = $function:prompt; \
+function global:prompt { \
+$p = (Get-Location).ProviderPath -replace '\\\\', '/'; \
+[Console]::Out.Write(\"$([char]27)]7;file:///$p$([char]7)\"); \
+& $global:__farsh_prompt }";
+
+const BASH_RC: &str = "[ -f ~/.bashrc ] && . ~/.bashrc\n\
+__farsh_osc7() { printf '\\033]7;file://%s%s\\007' \"$HOSTNAME\" \"$PWD\"; }\n\
+PROMPT_COMMAND=\"__farsh_osc7${PROMPT_COMMAND:+;$PROMPT_COMMAND}\"\n";
+
+const ZSH_ENV: &str = "[ -f \"${FARSH_ZDOTDIR:-$HOME}/.zshenv\" ] && . \"${FARSH_ZDOTDIR:-$HOME}/.zshenv\"\n";
+
+const ZSH_RC: &str = "ZDOTDIR=\"${FARSH_ZDOTDIR:-$HOME}\"\n\
+[ -f \"$ZDOTDIR/.zshrc\" ] && . \"$ZDOTDIR/.zshrc\"\n\
+autoload -Uz add-zsh-hook\n\
+__farsh_osc7() { printf '\\033]7;file://%s%s\\007' \"$HOST\" \"$PWD\"; }\n\
+add-zsh-hook precmd __farsh_osc7\n";
+
+/// The line that makes the shell go to `dir`.
+pub fn cd_command(kind: Kind, dir: &Path) -> String {
+    let dir = dir.display().to_string();
+    match kind {
+        Kind::PowerShell => format!("Set-Location -LiteralPath '{}'", dir.replace('\'', "''")),
+        Kind::Other if cfg!(windows) => format!("cd /d \"{dir}\""),
+        _ => format!("cd -- '{}'", dir.replace('\'', "'\\''")),
+    }
+}
+
+/// Finds the directory in a stream of OSC 7 sequences, across chunk borders.
+#[derive(Default)]
+pub struct Osc7 {
+    pending: Vec<u8>,
+}
+
+impl Osc7 {
+    /// Feeds `chunk`; returns the last directory it reported, if any.
+    pub fn feed(&mut self, chunk: &[u8]) -> Option<PathBuf> {
+        const START: &[u8] = b"\x1b]7;";
+        self.pending.extend_from_slice(chunk);
+        let mut found = None;
+        loop {
+            let Some(start) = find(&self.pending, START) else {
+                // Keep a possible beginning of a sequence cut by the chunk.
+                let keep = (1..START.len()).rev().find(|&n| self.pending.ends_with(&START[..n])).unwrap_or(0);
+                let from = self.pending.len() - keep;
+                self.pending.drain(..from);
+                return found;
+            };
+            let body = &self.pending[start + START.len()..];
+            let Some((len, end)) = terminator(body) else {
+                // Unfinished: wait for the rest (but never hoard junk).
+                self.pending.drain(..start);
+                if self.pending.len() > 8192 {
+                    self.pending.clear();
+                }
+                return found;
+            };
+            if let Some(path) = parse_uri(&body[..len]) {
+                found = Some(path);
+            }
+            let consumed = start + START.len() + end;
+            self.pending.drain(..consumed);
+        }
+    }
+}
+
+fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    haystack.windows(needle.len()).position(|w| w == needle)
+}
+
+/// Where an OSC body ends: (length of the text, bytes up to and with the terminator).
+fn terminator(body: &[u8]) -> Option<(usize, usize)> {
+    (0..body.len()).find_map(|i| match body[i] {
+        0x07 => Some((i, i + 1)),
+        0x1b if body.get(i + 1) == Some(&b'\\') => Some((i, i + 2)),
+        _ => None,
+    })
+}
+
+/// `file://host/path` (or `file:///C:/path`) as a local path.
+fn parse_uri(uri: &[u8]) -> Option<PathBuf> {
+    let uri = std::str::from_utf8(uri).ok()?.strip_prefix("file://")?;
+    let path = &uri[uri.find('/')?..];
+    let mut bytes = Vec::with_capacity(path.len());
+    let raw = path.as_bytes();
+    let mut i = 0;
+    while i < raw.len() {
+        if raw[i] == b'%' && i + 2 < raw.len() {
+            if let Ok(byte) = u8::from_str_radix(&path[i + 1..i + 3], 16) {
+                bytes.push(byte);
+                i += 3;
+                continue;
+            }
+        }
+        bytes.push(raw[i]);
+        i += 1;
+    }
+    let text = String::from_utf8(bytes).ok()?;
+    // `/C:/Users/x` is a Windows path.
+    let windows = text.len() > 2 && text.as_bytes()[2] == b':' && text.as_bytes()[1].is_ascii_alphabetic();
+    Some(PathBuf::from(if windows { text[1..].replace('/', "\\") } else { text }))
+}
+
+/// Writes the OSC 7 a hooked shell would print (for tests).
+#[cfg(test)]
+pub fn osc7(path: &str) -> Vec<u8> {
+    let mut out = Vec::new();
+    write!(out, "\x1b]7;file://host{path}\x07").unwrap();
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_reported_directory_is_found_among_other_output() {
+        let mut osc = Osc7::default();
+        let mut bytes = b"hello\r\n".to_vec();
+        bytes.extend(osc7("/home/dnk/my%20dir"));
+        bytes.extend(b"$ ");
+        assert_eq!(osc.feed(&bytes), Some(PathBuf::from("/home/dnk/my dir")));
+        assert_eq!(osc.feed(b"more output"), None);
+    }
+
+    #[test]
+    fn a_sequence_cut_between_chunks_is_still_found() {
+        let mut osc = Osc7::default();
+        let bytes = osc7("/tmp");
+        for (i, byte) in bytes.iter().enumerate() {
+            let found = osc.feed(&[*byte]);
+            assert_eq!(found.is_some(), i == bytes.len() - 1, "byte {i}");
+        }
+    }
+
+    #[test]
+    fn the_last_of_several_directories_wins() {
+        let mut osc = Osc7::default();
+        let mut bytes = osc7("/a");
+        bytes.extend(osc7("/b"));
+        assert_eq!(osc.feed(&bytes), Some(PathBuf::from("/b")));
+    }
+
+    #[test]
+    fn a_string_terminator_ends_it_too() {
+        let mut osc = Osc7::default();
+        assert_eq!(osc.feed(b"\x1b]7;file://h/x\x1b\\"), Some(PathBuf::from("/x")));
+    }
+
+    #[test]
+    fn a_windows_uri_is_a_windows_path() {
+        let mut osc = Osc7::default();
+        assert_eq!(osc.feed(b"\x1b]7;file:///C:/Users/dnk/a%20b\x07"), Some(PathBuf::from(r"C:\Users\dnk\a b")));
+    }
+
+    #[test]
+    fn other_escape_sequences_are_left_alone() {
+        let mut osc = Osc7::default();
+        assert_eq!(osc.feed(b"\x1b]0;title\x07\x1b[31mred\x1b[0m"), None);
+    }
+
+    #[test]
+    fn cd_commands_quote_for_each_shell() {
+        assert_eq!(cd_command(Kind::PowerShell, Path::new("/it's")), "Set-Location -LiteralPath '/it''s'");
+        assert_eq!(cd_command(Kind::Bash, Path::new("/it's")), "cd -- '/it'\\''s'");
+        assert_eq!(cd_command(Kind::Zsh, Path::new("/a b")), "cd -- '/a b'");
+    }
+
+    #[test]
+    fn shells_are_told_apart_by_program_name() {
+        assert_eq!(Kind::of(r"C:\Program Files\PowerShell\7\pwsh.exe"), Kind::PowerShell);
+        assert_eq!(Kind::of("/bin/bash"), Kind::Bash);
+        assert_eq!(Kind::of("/usr/bin/zsh"), Kind::Zsh);
+        assert_eq!(Kind::of("fish"), Kind::Other);
+    }
+}
