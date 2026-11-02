@@ -104,9 +104,24 @@ impl Shell {
 
     /// Makes the shell go to `dir`, as if `cd` were typed at an empty prompt.
     pub fn cd(&mut self, dir: &Path) {
-        let mut line = cwd::cd_command(self.kind, dir).into_bytes();
-        line.push(b'\r');
-        self.write(&line, true);
+        self.run(&cwd::cd_command(self.kind, dir));
+    }
+
+    /// Runs `line` as if it were typed at an empty prompt and Enter pressed.
+    pub fn run(&mut self, line: &str) {
+        let mut bytes = line.as_bytes().to_vec();
+        bytes.push(b'\r');
+        self.write(&bytes, true);
+    }
+
+    /// How the program in the shell wants the mouse reported, if it does.
+    pub fn mouse_mode(&self) -> (vt100::MouseProtocolMode, vt100::MouseProtocolEncoding) {
+        let screen = self.parser.screen();
+        (screen.mouse_protocol_mode(), screen.mouse_protocol_encoding())
+    }
+
+    pub fn kind(&self) -> Kind {
+        self.kind
     }
 
     /// The line the shell's cursor is on (prompt and what is typed after it)
@@ -119,6 +134,11 @@ impl Shell {
             .map(|text| if text.is_empty() { " ".to_string() } else { text })
             .collect();
         (line.trim_end().to_string(), col)
+    }
+
+    /// The screen row the shell's cursor is on.
+    pub fn cursor_row(&self) -> u16 {
+        self.parser.screen().cursor_position().0
     }
 
     /// Whether nothing is typed after the prompt.

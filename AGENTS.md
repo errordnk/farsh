@@ -13,5 +13,7 @@ over the shell screen.
 - Tests: `cargo test` (the shell test starts cmd.exe on Windows, /bin/sh elsewhere).
 - Code, comments and logs in English; talk to the user in Russian.
 
-Next: sync the shell's cwd with the active panel (OSC 7 / shell integration), F-keys
+Next: F-keys
 (view, edit, copy, move, delete), panel selection, mouse, macOS/Linux checks.
+
+- A release build is always installed into `~/.local/bin` (Windows: `~/.local/bin/farsh.exe`) and nowhere else.

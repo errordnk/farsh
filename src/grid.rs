@@ -32,6 +32,21 @@ impl Grid {
         Self { cols, rows, cells: vec![Cell::default(); cols as usize * rows as usize] }
     }
 
+    /// A copy of one row's cells.
+    pub fn row(&self, row: u16) -> Vec<Cell> {
+        let start = row as usize * self.cols as usize;
+        self.cells.get(start..start + self.cols as usize).map(<[Cell]>::to_vec).unwrap_or_default()
+    }
+
+    /// Replaces the cells of `row` with `cells` (as many as fit).
+    pub fn set_row(&mut self, row: u16, cells: &[Cell]) {
+        for (col, cell) in cells.iter().enumerate() {
+            if let Some(target) = self.cell_mut(col as u16, row) {
+                *target = cell.clone();
+            }
+        }
+    }
+
     pub fn clear(&mut self) {
         self.cells.fill(Cell::default());
     }
@@ -48,11 +63,6 @@ impl Grid {
             }
             col += 1;
         }
-    }
-
-    /// Paints the rest of `row`, from `col` on, in `bg`.
-    pub fn fill_from(&mut self, col: u16, row: u16, bg: Color) {
-        self.fill(col, row, self.cols.saturating_sub(col), 1, bg);
     }
 
     pub fn fill(&mut self, col: u16, row: u16, width: u16, height: u16, bg: Color) {

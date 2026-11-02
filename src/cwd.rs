@@ -5,7 +5,6 @@
 //! [`Osc7`] picks it out of its output. Panel to shell: [`cd_command`] is the
 //! line that takes the shell where the panel went.
 
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -172,6 +171,7 @@ fn parse_uri(uri: &[u8]) -> Option<PathBuf> {
 /// Writes the OSC 7 a hooked shell would print (for tests).
 #[cfg(test)]
 pub fn osc7(path: &str) -> Vec<u8> {
+    use std::io::Write;
     let mut out = Vec::new();
     write!(out, "\x1b]7;file://host{path}\x07").unwrap();
     out
