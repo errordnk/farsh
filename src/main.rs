@@ -24,7 +24,7 @@ use crossterm::event::{
 use crossterm::terminal;
 
 use dialog::{Action, Dialog};
-use fileops::{Job, Kind};
+use fileops::{Access, Answer, Existing, Job, Kind, Options};
 use grid::Grid;
 use panels::{Key, Panels, Request};
 use shell::Shell;
@@ -48,7 +48,8 @@ enum Overlay {
     None,
     Dialog(Dialog),
     Viewer(Viewer),
-    Job(Job),
+    /// A copy, move or delete running, and the question it is waiting on, if any.
+    Job(Job, Option<Dialog>),
 }
 
 struct App {
@@ -104,9 +105,9 @@ impl App {
                 dirty = false;
             }
             // A copy in progress redraws as it goes.
-            let wait = if matches!(self.overlay, Overlay::Job(_)) { 50 } else { 10 };
+            let wait = if matches!(self.overlay, Overlay::Job(..)) { 50 } else { 10 };
             if !event::poll(Duration::from_millis(wait))? {
-                dirty |= matches!(self.overlay, Overlay::Job(_));
+                dirty |= matches!(self.overlay, Overlay::Job(..));
                 continue;
             }
             match event::read()? {
@@ -149,9 +150,9 @@ impl App {
                 viewer.paint(frame);
                 cursor = None;
             }
-            Overlay::Job(job) => {
+            Overlay::Job(job, question) => {
                 dialog::paint_progress(job, frame);
-                cursor = None;
+                cursor = question.as_ref().and_then(|dialog| dialog.paint(frame));
             }
         }
         cursor
@@ -159,11 +160,17 @@ impl App {
 
     /// Takes the worker's news; when it is done, closes the box and reads the panels again.
     fn poll_job(&mut self) -> bool {
-        let Overlay::Job(job) = &mut self.overlay else { return false };
+        let Overlay::Job(job, question) = &mut self.overlay else { return false };
         job.poll();
+        if question.is_none() {
+            if let Some(conflict) = &job.conflict {
+                *question = Some(Dialog::conflict(conflict));
+                return true;
+            }
+        }
         let Some(result) = job.result.clone() else { return false };
         self.overlay = match result {
-            Err(error) if error != "Cancelled" => Overlay::Dialog(Dialog::message("Error", &error)),
+            Err(error) if error != "Cancelled" => Overlay::Dialog(Dialog::error(&error)),
             _ => Overlay::None,
         };
         self.panels.refresh(None);
@@ -175,18 +182,27 @@ impl App {
             Overlay::Dialog(mut dialog) => match dialog.key(key) {
                 dialog::Outcome::Open => self.overlay = Overlay::Dialog(dialog),
                 dialog::Outcome::Closed => {}
-                dialog::Outcome::Accepted(action, text) => self.accept(action, &text),
+                dialog::Outcome::Pressed(action, id, values) => self.accept(action, id, &values),
             },
             Overlay::Viewer(mut viewer) => {
                 if matches!(viewer.key(key), viewer::Outcome::Open) {
                     self.overlay = Overlay::Viewer(viewer);
                 }
             }
-            Overlay::Job(job) => {
-                if key.code == KeyCode::Esc {
-                    job.cancel();
+            Overlay::Job(mut job, question) => {
+                match question {
+                    Some(mut dialog) => {
+                        let outcome = dialog.key(key);
+                        let question = answer(&mut job, dialog, outcome);
+                        self.overlay = Overlay::Job(job, question);
+                    }
+                    None => {
+                        if key.code == KeyCode::Esc {
+                            job.cancel();
+                        }
+                        self.overlay = Overlay::Job(job, None);
+                    }
                 }
-                self.overlay = Overlay::Job(job);
             }
             Overlay::None => self.on_panel_or_shell_key(key),
         }
@@ -204,14 +220,23 @@ impl App {
                 match outcome {
                     dialog::Outcome::Open => self.overlay = Overlay::Dialog(dialog),
                     dialog::Outcome::Closed => {}
-                    dialog::Outcome::Accepted(action, text) => self.accept(action, &text),
+                    dialog::Outcome::Pressed(action, id, values) => self.accept(action, id, &values),
                 }
             }
             Overlay::Viewer(mut viewer) => {
                 viewer.mouse(event);
                 self.overlay = Overlay::Viewer(viewer);
             }
-            Overlay::Job(job) => self.overlay = Overlay::Job(job),
+            Overlay::Job(mut job, question) => {
+                let question = match question {
+                    Some(mut dialog) if event.kind == MouseEventKind::Down(MouseButton::Left) => {
+                        let outcome = dialog.click(col, row, self.size);
+                        answer(&mut job, dialog, outcome)
+                    }
+                    other => other,
+                };
+                self.overlay = Overlay::Job(job, question);
+            }
             Overlay::None if self.panels_visible => {
                 let double = event.kind == MouseEventKind::Down(MouseButton::Left) && self.is_double_click(col, row);
                 let dir_before = self.panels.active_dir().to_path_buf();
@@ -288,7 +313,7 @@ impl App {
             Request::View(path) => {
                 self.overlay = match Viewer::open(&path) {
                     Ok(viewer) => Overlay::Viewer(viewer),
-                    Err(error) => Overlay::Dialog(Dialog::message("Error", &format!("{}: {error}", path.display()))),
+                    Err(error) => Overlay::Dialog(Dialog::error(&format!("{}: {error}", path.display()))),
                 };
             }
             Request::Edit(path) => {
@@ -303,61 +328,98 @@ impl App {
             }
             Request::Copy(sources, other) => {
                 let label = format!("Copy {} to:", describe(&sources));
-                let prompt = Dialog::prompt("Copy", label, &other.display().to_string(), "Copy", Action::Copy(sources));
-                self.overlay = Overlay::Dialog(prompt);
+                let dialog = Dialog::copy_or_move(Kind::Copy, label, &other.display().to_string(), Action::Copy(sources));
+                self.overlay = Overlay::Dialog(dialog);
             }
             Request::Move(sources, other) => {
                 let label = format!("Rename or move {} to:", describe(&sources));
-                let prompt = Dialog::prompt("Rename/Move", label, &other.display().to_string(), "Rename", Action::Move(sources));
-                self.overlay = Overlay::Dialog(prompt);
+                let dialog = Dialog::copy_or_move(Kind::Move, label, &other.display().to_string(), Action::Move(sources));
+                self.overlay = Overlay::Dialog(dialog);
             }
-            Request::MkDir => {
-                let prompt = Dialog::prompt("Make folder", "Create the folder".into(), "", "OK", Action::MkDir);
-                self.overlay = Overlay::Dialog(prompt);
-            }
+            Request::MkDir => self.overlay = Overlay::Dialog(Dialog::mkdir()),
             Request::Delete(sources) => {
                 let lines = vec!["Do you wish to delete".to_string(), describe(&sources)];
-                self.overlay = Overlay::Dialog(Dialog::confirm("Delete", lines, "Delete", Action::Delete(sources)));
+                self.overlay = Overlay::Dialog(Dialog::delete(lines, Action::Delete(sources)));
             }
             Request::Quit => {
-                let lines = vec!["Do you want to quit farsh?".to_string()];
-                self.overlay = Overlay::Dialog(Dialog::confirm("Quit", lines, "Quit", Action::Quit));
+                self.overlay = Overlay::Dialog(Dialog::confirm("Quit", "Do you want to quit farsh?", Action::Quit));
             }
         }
     }
 
-    /// A dialog was accepted.
-    fn accept(&mut self, action: Action, text: &str) {
+    /// A button was pressed in a dialog.
+    fn accept(&mut self, action: Action, _id: &str, values: &dialog::Values) {
         match action {
-            Action::Copy(sources) => self.start_job(Kind::Copy, &sources, text),
-            Action::Move(sources) => self.start_job(Kind::Move, &sources, text),
+            Action::Copy(sources) => self.start_job(Kind::Copy, &sources, values),
+            Action::Move(sources) => self.start_job(Kind::Move, &sources, values),
             Action::Delete(sources) => {
                 let items = sources.into_iter().map(|path| (path.clone(), path)).collect();
-                self.overlay = Overlay::Job(fileops::start(Kind::Delete, items));
+                self.overlay = Overlay::Job(fileops::start(Kind::Delete, items, Options::default()), None);
             }
             Action::MkDir => {
-                let name = text.trim();
-                if name.is_empty() {
-                    return;
+                let typed = values.text("name");
+                let names: Vec<&str> = if values.checked("multiple") {
+                    typed.split([';', ',']).map(str::trim).filter(|n| !n.is_empty()).collect()
+                } else {
+                    vec![typed.trim()].into_iter().filter(|n| !n.is_empty()).collect()
+                };
+                let mut first = None;
+                for name in names {
+                    if let Err(error) = std::fs::create_dir_all(self.panels.active_dir().join(name)) {
+                        self.overlay = Overlay::Dialog(Dialog::error(&format!("{name}: {error}")));
+                        break;
+                    }
+                    first.get_or_insert_with(|| name.split(['/', '\\']).find(|part| !part.is_empty()).unwrap_or(name).to_string());
                 }
-                match std::fs::create_dir_all(self.panels.active_dir().join(name)) {
-                    Ok(()) => {
-                        let first = name.split(['/', '\\']).find(|part| !part.is_empty()).unwrap_or(name).to_string();
-                        self.panels.refresh(Some(&first));
-                    }
-                    Err(error) => {
-                        self.overlay = Overlay::Dialog(Dialog::message("Error", &format!("{name}: {error}")));
-                    }
+                if let Some(first) = first {
+                    self.panels.refresh(Some(&first));
                 }
             }
             Action::Quit => self.quit = true,
+            Action::Conflict | Action::Info => {}
         }
     }
 
-    fn start_job(&mut self, kind: Kind, sources: &[PathBuf], typed: &str) {
-        match fileops::targets(sources, typed, self.panels.active_dir()) {
-            Ok(items) => self.overlay = Overlay::Job(fileops::start(kind, items)),
-            Err(error) => self.overlay = Overlay::Dialog(Dialog::message("Error", &error)),
+    fn start_job(&mut self, kind: Kind, sources: &[PathBuf], values: &dialog::Values) {
+        let options = Options {
+            existing: match values.choice("existing") {
+                1 => Existing::Overwrite,
+                2 => Existing::Skip,
+                _ => Existing::Ask,
+            },
+            timestamps: values.checked("timestamps"),
+            follow_links: values.checked("links"),
+            access: match values.choice("access") {
+                1 => Access::Copy,
+                2 => Access::Inherit,
+                _ => Access::Default,
+            },
+        };
+        let base = self.panels.active_dir().to_path_buf();
+        match fileops::targets(sources, &values.text("dest"), &base, values.checked("multiple")) {
+            Ok(items) => self.overlay = Overlay::Job(fileops::start(kind, items, options), None),
+            Err(error) => self.overlay = Overlay::Dialog(Dialog::error(&error)),
+        }
+    }
+}
+
+/// What the user did with the question a job is waiting on: gives the answer to
+/// the job, and hands the dialog back while it is still open.
+fn answer(job: &mut Job, dialog: Dialog, outcome: dialog::Outcome) -> Option<Dialog> {
+    match outcome {
+        dialog::Outcome::Open => Some(dialog),
+        dialog::Outcome::Closed => {
+            job.answer(Answer::Cancel);
+            None
+        }
+        dialog::Outcome::Pressed(_, id, values) => {
+            let remember = values.checked("remember");
+            job.answer(match id {
+                "overwrite" => Answer::Overwrite { remember },
+                "skip" => Answer::Skip { remember },
+                _ => Answer::Cancel,
+            });
+            None
         }
     }
 }
