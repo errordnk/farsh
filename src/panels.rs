@@ -8,7 +8,8 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent,
 use crossterm::style::Color;
 
 use crate::grid::{Cell, Grid};
-use crate::listing::{self, Entry, Sort};
+use crate::listing::{self, Entry};
+use crate::sorting::{self, SortMode, Sorting};
 
 // Far's default palette, as the terminal's own 16 colors (Far's console
 // attributes reach the terminal as these through ConPTY).
@@ -129,8 +130,7 @@ pub struct Panel {
     /// Names of the marked entries.
     pub marked: HashSet<String>,
     pub mode: ViewMode,
-    sort: Sort,
-    reverse: bool,
+    pub sorting: Sorting,
     top: usize,
     /// List rows and stripes at the last paint.
     height: usize,
@@ -149,8 +149,7 @@ impl Panel {
             cursor: 0,
             marked: HashSet::new(),
             mode: ViewMode::Medium,
-            sort: Sort::Extension,
-            reverse: false,
+            sorting: Sorting::default(),
             top: 0,
             height: 20,
             stripes: 1,
@@ -166,25 +165,32 @@ impl Panel {
     /// to the top. Marks are dropped.
     pub fn reload(&mut self, select: Option<&str>) {
         let mut entries = listing::read(&self.dir);
-        listing::sort(&mut entries, self.sort, self.reverse);
         if self.dir.parent().is_some() {
             let modified = std::fs::metadata(&self.dir).and_then(|m| m.modified()).ok();
             entries.insert(0, Entry::up(modified));
         }
-        self.entries = entries;
         self.marked.clear();
+        sorting::sort(&mut entries, &self.sorting, &self.marked, &self.dir);
+        self.entries = entries;
         self.cursor = select.and_then(|name| self.entries.iter().position(|e| e.name == name)).unwrap_or(0);
         self.top = 0;
     }
 
-    /// Ctrl+F3 / Ctrl+F4: sort by name or extension; the same again reverses.
-    pub fn set_sort(&mut self, sort: Sort) {
-        self.reverse = self.sort == sort && !self.reverse;
-        self.sort = sort;
+    /// Ctrl+F3..Ctrl+F11: Far's `SetSortMode` (the same mode again flips).
+    pub fn set_sort(&mut self, mode: SortMode) {
+        self.sorting.choose(mode);
+        self.resort();
+    }
+
+    /// Sorts again by the panel's settings; the cursor stays on its entry.
+    pub fn resort(&mut self) {
         let keep = self.current().map(|e| e.name.clone());
-        let marked = std::mem::take(&mut self.marked);
-        self.reload(keep.as_deref());
-        self.marked = marked;
+        let mut entries = std::mem::take(&mut self.entries);
+        sorting::sort(&mut entries, &self.sorting, &self.marked, &self.dir);
+        self.entries = entries;
+        if let Some(index) = keep.and_then(|name| self.entries.iter().position(|e| e.name == name)) {
+            self.cursor = index;
+        }
     }
 
     pub fn current(&self) -> Option<&Entry> {
@@ -254,6 +260,9 @@ impl Panel {
     pub fn toggle_mark(&mut self) {
         self.toggle_mark_at(self.cursor);
         self.move_cursor(1);
+        if self.sorting.selected_first {
+            self.resort();
+        }
     }
 
     fn toggle_mark_at(&mut self, index: usize) {
@@ -374,7 +383,11 @@ impl Panel {
             grid.put(x, 1, if double { "\u{2551}" } else { "\u{2502}" }, TEXT, BG);
             x += 1;
         }
-        grid.put(left + 1, 1, &self.sort.indicator(self.reverse).to_string(), TITLE, BG);
+        let mut indicator = self.sorting.mode.indicator(self.sorting.reverse).to_string();
+        if self.sorting.selected_first {
+            indicator.push('^');
+        }
+        grid.put(left + 1, 1, &indicator, TITLE, BG);
 
         // the folder in the top border
         let max = inner;
@@ -506,6 +519,8 @@ pub enum Request {
     Menu,
     /// Alt+F1 / Alt+F2: another drive (mount point) for the left / right panel.
     ChangeDrive { right: bool },
+    /// Ctrl+F12: the "Sort by" menu for the active panel.
+    SortMenu,
 }
 
 /// What the panels made of a key.
@@ -575,6 +590,36 @@ impl Panels {
         self.right_active
     }
 
+    /// Ctrl+F12: the "Sort by" menu over the active panel.
+    pub fn sort_menu(&self) -> crate::sortmenu::SortMenu {
+        let panel = self.active_ref();
+        crate::sortmenu::SortMenu::new(&panel.sorting, panel.area.0)
+    }
+
+    /// Far's `SelectSortMode` after a choice: a mode is chosen (Enter flips
+    /// the current one, `+`/`-` set the direction), an option toggled or set.
+    pub fn apply_sort(&mut self, picked: crate::sortmenu::Picked) {
+        use crate::sortmenu::Choice;
+        let panel = self.active();
+        match picked.choice {
+            Choice::Mode(mode) if picked.invert => panel.sorting.choose(mode),
+            Choice::Mode(mode) => {
+                panel.sorting.reverse = !picked.plus;
+                panel.sorting.mode = mode;
+            }
+            Choice::Option(option) => {
+                let sorting = &mut panel.sorting;
+                let flag = match option {
+                    0 => &mut sorting.groups,
+                    1 => &mut sorting.selected_first,
+                    _ => &mut sorting.directories_first,
+                };
+                *flag = picked.plus || (picked.invert && !*flag);
+            }
+        }
+        panel.resort();
+    }
+
     /// Ctrl+U: the panels change places; the active one stays the same panel.
     pub fn swap(&mut self) {
         std::mem::swap(&mut self.left, &mut self.right);
@@ -590,6 +635,9 @@ impl Panels {
             if !panel.marked.remove(&name) {
                 panel.marked.insert(name);
             }
+        }
+        if panel.sorting.selected_first {
+            panel.resort();
         }
     }
 
@@ -647,8 +695,20 @@ impl Panels {
                 self.active().mode = [ViewMode::Brief, ViewMode::Medium, ViewMode::Full, ViewMode::Wide]
                     [c as usize - '1' as usize];
             }
-            KeyCode::F(3) if ctrl_only => self.active().set_sort(Sort::Name),
-            KeyCode::F(4) if ctrl_only => self.active().set_sort(Sort::Extension),
+            KeyCode::F(12) if ctrl_only => return Key::Ask(Request::SortMenu),
+            KeyCode::F(n) if ctrl_only && SortMode::by_key(n).is_some() => {
+                self.active().set_sort(SortMode::by_key(n).unwrap_or(SortMode::Name));
+            }
+            KeyCode::F(11) if key.modifiers == KeyModifiers::SHIFT => {
+                let panel = self.active();
+                panel.sorting.groups = !panel.sorting.groups;
+                panel.resort();
+            }
+            KeyCode::F(12) if key.modifiers == KeyModifiers::SHIFT => {
+                let panel = self.active();
+                panel.sorting.selected_first = !panel.sorting.selected_first;
+                panel.resort();
+            }
             KeyCode::Home if line_is_empty => self.active().move_cursor(isize::MIN / 2),
             KeyCode::End if line_is_empty => self.active().move_cursor(isize::MAX / 2),
             KeyCode::Enter if line_is_empty => self.active().enter(),
@@ -768,11 +828,6 @@ impl Panels {
         self.key_ends.clear();
         for (i, label) in KEY_BAR.iter().enumerate() {
             let two_digits = usize::from(i + 1 > 9);
-            grid.put(x as u16, y, &(i + 1).to_string(), number.0, number.1);
-            x += 1 + two_digits;
-            if x >= cols {
-                break;
-            }
             let mut end = prev + 1 + two_digits + MIN_LABEL + 1;
             if extra > 0 {
                 let even = (i + 1) * cols / count;
@@ -781,8 +836,14 @@ impl Panels {
                     end = even;
                 }
             }
-            self.key_ends.push(end as u16);
             let width = end - prev - 2 - two_digits;
+            // Far 3 leaves out a key that does not fit whole
+            if x + 1 + two_digits + width > cols {
+                break;
+            }
+            self.key_ends.push(end as u16);
+            grid.put(x as u16, y, &(i + 1).to_string(), number.0, number.1);
+            x += 1 + two_digits;
             grid.put(x as u16, y, &format!("{:<width$}", label.chars().take(width).collect::<String>()), text.0, text.1);
             x += width;
             if x >= cols {

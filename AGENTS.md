@@ -25,7 +25,10 @@ over the shell screen.
   attributes become through ConPTY), so a theme changes both alike. Compare
   with the real Far by dumping both consoles' buffers (characters and
   attributes) at the same size, not by eye. Sorting starts by extension, as
-  the user's Far does.
+  the user's Far does. Sort modes (`src/sorting.rs`) are Far's layers and
+  Far's string order (`CompareString`, linguistic, case ignored, digits as
+  numbers); owner, hard links and streams are read only when a mode needs
+  them. The "Sort by" menu's F4 (editing the layers) is not done.
 - Tests: `cargo test` (the shell test starts cmd.exe on Windows, /bin/sh elsewhere).
 - Code, comments and logs in English; talk to the user in Russian.
 

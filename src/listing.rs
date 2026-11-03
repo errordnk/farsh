@@ -11,21 +11,34 @@ use crossterm::style::Color;
 pub const TAG_MOUNT_POINT: u32 = 0xA000_0003;
 pub const TAG_SYMLINK: u32 = 0xA000_000C;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Entry {
     pub name: String,
     pub is_dir: bool,
     pub size: u64,
     pub modified: Option<SystemTime>,
+    pub created: Option<SystemTime>,
+    pub accessed: Option<SystemTime>,
+    pub changed: Option<SystemTime>,
+    /// Space taken on the disk.
+    pub allocated: u64,
     /// Hidden or system (dimmed, as Far's first highlighting groups do).
     pub hidden: bool,
     /// The reparse tag of a junction, symlink, cloud placeholder...
     pub reparse: Option<u32>,
+    /// Place in the folder's own order (Far's "Unsorted").
+    pub position: usize,
+    /// Read only when a sort mode needs them (as Far does).
+    pub owner: Option<String>,
+    pub links: Option<u32>,
+    /// Number and total size of the data streams.
+    pub streams: Option<(u32, u64)>,
+    pub description: Option<String>,
 }
 
 impl Entry {
     pub fn up(modified: Option<SystemTime>) -> Self {
-        Self { name: "..".into(), is_dir: true, size: 0, modified, hidden: false, reparse: None }
+        Self { name: "..".into(), is_dir: true, modified, ..Self::default() }
     }
 
     pub fn is_up(&self) -> bool {
@@ -33,71 +46,103 @@ impl Entry {
     }
 }
 
-/// The entries of `dir` (without `.` and `..`), unsorted.
+/// FILETIME ticks (100 ns from 1601) as a time.
+#[cfg(windows)]
+fn file_time(ticks: i64) -> Option<SystemTime> {
+    // the Unix epoch is 11644473600 s after 1601
+    let since_unix = u64::try_from(ticks).ok()?.checked_sub(116_444_736_000_000_000)?;
+    Some(SystemTime::UNIX_EPOCH + std::time::Duration::from_nanos(since_unix.saturating_mul(100)))
+}
+
+/// The entries of `dir` (without `.` and `..`), in the folder's own order.
+/// Read as Far reads them: one directory handle, FILE_FULL_DIR_INFO records
+/// (all four times, the allocated size and the reparse tag at once).
 #[cfg(windows)]
 pub fn read(dir: &Path) -> Vec<Entry> {
     use std::os::windows::ffi::OsStrExt;
-    use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
+    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::Storage::FileSystem::{
-        FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_HIDDEN, FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_SYSTEM,
-        FIND_FIRST_EX_LARGE_FETCH, FindClose, FindExInfoBasic, FindExSearchNameMatch, FindFirstFileExW, FindNextFileW,
-        WIN32_FIND_DATAW,
+        CreateFileW, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_HIDDEN, FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_SYSTEM,
+        FILE_FLAG_BACKUP_SEMANTICS, FILE_FULL_DIR_INFO, FILE_LIST_DIRECTORY, FILE_SHARE_DELETE, FILE_SHARE_READ,
+        FILE_SHARE_WRITE, FileFullDirectoryInfo, GetFileInformationByHandleEx, OPEN_EXISTING,
     };
 
-    let pattern: Vec<u16> = dir.join("*").as_os_str().encode_wide().chain(Some(0)).collect();
-    let mut data: WIN32_FIND_DATAW = unsafe { std::mem::zeroed() };
-    // SAFETY: `pattern` is NUL-terminated and `data` is a WIN32_FIND_DATAW.
+    let path: Vec<u16> = dir.as_os_str().encode_wide().chain(Some(0)).collect();
+    // SAFETY: `path` is NUL-terminated.
     let handle = unsafe {
-        FindFirstFileExW(
-            pattern.as_ptr(),
-            FindExInfoBasic,
-            (&raw mut data).cast(),
-            FindExSearchNameMatch,
+        CreateFileW(
+            path.as_ptr(),
+            FILE_LIST_DIRECTORY,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
             std::ptr::null(),
-            FIND_FIRST_EX_LARGE_FETCH,
+            OPEN_EXISTING,
+            FILE_FLAG_BACKUP_SEMANTICS,
+            std::ptr::null_mut(),
         )
     };
     if handle == INVALID_HANDLE_VALUE {
         return Vec::new();
     }
     let mut entries = Vec::new();
+    let mut buffer = vec![0u64; 64 * 1024 / 8];
     loop {
-        let len = data.cFileName.iter().position(|&c| c == 0).unwrap_or(data.cFileName.len());
-        let name = String::from_utf16_lossy(&data.cFileName[..len]);
-        if name != "." && name != ".." {
-            let attrs = data.dwFileAttributes;
-            let ticks = (u64::from(data.ftLastWriteTime.dwHighDateTime) << 32) | u64::from(data.ftLastWriteTime.dwLowDateTime);
-            // FILETIME counts 100 ns from 1601; the Unix epoch is 11644473600 s later
-            let modified = ticks
-                .checked_sub(116_444_736_000_000_000)
-                .map(|t| SystemTime::UNIX_EPOCH + std::time::Duration::from_nanos(t.saturating_mul(100)));
-            entries.push(Entry {
-                name,
-                is_dir: attrs & FILE_ATTRIBUTE_DIRECTORY != 0,
-                size: (u64::from(data.nFileSizeHigh) << 32) | u64::from(data.nFileSizeLow),
-                modified,
-                hidden: attrs & (FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM) != 0,
-                reparse: (attrs & FILE_ATTRIBUTE_REPARSE_POINT != 0).then_some(data.dwReserved0),
-            });
-        }
-        // SAFETY: `handle` is an open find handle.
-        if unsafe { FindNextFileW(handle, &mut data) } == 0 {
+        let size = (buffer.len() * 8) as u32;
+        // SAFETY: the buffer is 8-byte aligned and `size` bytes long.
+        if unsafe { GetFileInformationByHandleEx(handle, FileFullDirectoryInfo, buffer.as_mut_ptr().cast(), size) } == 0 {
             break;
         }
+        let base = buffer.as_ptr().cast::<u8>();
+        let mut offset = 0usize;
+        loop {
+            // SAFETY: the system wrote a chain of records into the buffer; each
+            // starts at an 8-byte aligned offset given by the previous one.
+            let info = unsafe { &*base.add(offset).cast::<FILE_FULL_DIR_INFO>() };
+            let len = info.FileNameLength as usize / 2;
+            // SAFETY: the name runs `FileNameLength` bytes from `FileName`.
+            let name16 = unsafe { std::slice::from_raw_parts(info.FileName.as_ptr(), len) };
+            let name = String::from_utf16_lossy(name16);
+            if name != "." && name != ".." {
+                let attrs = info.FileAttributes;
+                entries.push(Entry {
+                    name,
+                    is_dir: attrs & FILE_ATTRIBUTE_DIRECTORY != 0,
+                    size: info.EndOfFile as u64,
+                    modified: file_time(info.LastWriteTime),
+                    created: file_time(info.CreationTime),
+                    accessed: file_time(info.LastAccessTime),
+                    changed: file_time(info.ChangeTime),
+                    allocated: info.AllocationSize as u64,
+                    hidden: attrs & (FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM) != 0,
+                    // for a reparse point the EA size field holds the tag
+                    reparse: (attrs & FILE_ATTRIBUTE_REPARSE_POINT != 0).then_some(info.EaSize),
+                    position: entries.len(),
+                    ..Entry::default()
+                });
+            }
+            if info.NextEntryOffset == 0 {
+                break;
+            }
+            offset += info.NextEntryOffset as usize;
+        }
     }
-    // SAFETY: as above; closed once.
-    unsafe { FindClose(handle) };
+    // SAFETY: opened above, closed once.
+    unsafe { CloseHandle(handle) };
     entries
 }
 
 /// The entries of `dir`, unsorted; a dot name counts as hidden.
 #[cfg(not(windows))]
 pub fn read(dir: &Path) -> Vec<Entry> {
+    use std::os::unix::fs::MetadataExt;
+    let time = |secs: i64, nanos: i64| {
+        u64::try_from(secs).ok().map(|s| SystemTime::UNIX_EPOCH + std::time::Duration::new(s, nanos as u32))
+    };
     std::fs::read_dir(dir)
         .into_iter()
         .flatten()
         .flatten()
-        .map(|item| {
+        .enumerate()
+        .map(|(position, item)| {
             let name = item.file_name().to_string_lossy().into_owned();
             let link = item.file_type().is_ok_and(|t| t.is_symlink());
             let meta = std::fs::metadata(item.path()).ok().or_else(|| item.metadata().ok());
@@ -106,48 +151,22 @@ pub fn read(dir: &Path) -> Vec<Entry> {
                 name,
                 is_dir: meta.as_ref().is_some_and(|m| m.is_dir()),
                 size: meta.as_ref().map_or(0, |m| m.len()),
-                modified: meta.and_then(|m| m.modified().ok()),
+                modified: meta.as_ref().and_then(|m| m.modified().ok()),
+                created: meta.as_ref().and_then(|m| m.created().ok()),
+                accessed: meta.as_ref().and_then(|m| m.accessed().ok()),
+                changed: meta.as_ref().and_then(|m| time(m.ctime(), m.ctime_nsec())),
+                allocated: meta.as_ref().map_or(0, |m| m.blocks() * 512),
                 reparse: link.then_some(TAG_SYMLINK),
+                position,
+                ..Entry::default()
             }
         })
         .collect()
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Sort {
-    Name,
-    Extension,
-}
-
-impl Sort {
-    /// The letter Far shows in the panel's corner (`n`, `x`; upper case reversed).
-    pub fn indicator(self, reverse: bool) -> char {
-        let c = match self {
-            Sort::Name => 'n',
-            Sort::Extension => 'x',
-        };
-        if reverse { c.to_ascii_uppercase() } else { c }
-    }
-}
-
-/// Far's order: folders first, each group by `sort` (folders always by name).
-pub fn sort(entries: &mut [Entry], sort: Sort, reverse: bool) {
-    entries.sort_by(|a, b| {
-        let group = b.is_dir.cmp(&a.is_dir);
-        let by_ext = sort == Sort::Extension && !a.is_dir;
-        let order = if by_ext {
-            extension(&a.name).to_lowercase().cmp(&extension(&b.name).to_lowercase())
-        } else {
-            std::cmp::Ordering::Equal
-        }
-        .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
-        group.then(if reverse { order.reverse() } else { order })
-    });
-}
-
 /// Far's `name_ext`: the extension is from the last dot, a leading dot included
 /// (so `.gitconfig` is all extension).
-fn split_ext(name: &str) -> (&str, &str) {
+pub fn split_ext(name: &str) -> (&str, &str) {
     match name.rfind('.') {
         Some(dot) => (&name[..dot], &name[dot..]),
         None => (name, ""),
@@ -437,7 +456,7 @@ mod tests {
     use super::*;
 
     fn file(name: &str) -> Entry {
-        Entry { name: name.into(), is_dir: false, size: 0, modified: None, hidden: false, reparse: None }
+        Entry { name: name.into(), ..Entry::default() }
     }
 
     #[test]
@@ -481,17 +500,6 @@ mod tests {
         assert_eq!(list_name("README", 8, true), ("README  ".into(), false));
         assert_eq!(list_name("NTUSER.DAT{4359efd9-3ecc}.TM.blf", 19, true), ("NTUSER.DAT{4359efd9".into(), true));
         assert_eq!(list_name("ntuser.dat.LOG1", 19, false), ("ntuser.dat.LOG1    ".into(), false));
-    }
-
-    #[test]
-    fn sorting_by_extension_keeps_folders_first() {
-        let mut list: Vec<Entry> = ["b.txt", ".gitconfig", "README", "a.bak", "c.TXT"].map(file).into();
-        let mut folder = file("zz");
-        folder.is_dir = true;
-        list.push(folder);
-        sort(&mut list, Sort::Extension, false);
-        let names: Vec<&str> = list.iter().map(|e| e.name.as_str()).collect();
-        assert_eq!(names, ["zz", "README", "a.bak", ".gitconfig", "b.txt", "c.TXT"]);
     }
 
     #[test]

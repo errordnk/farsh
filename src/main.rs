@@ -13,6 +13,8 @@ mod menu;
 mod mouse;
 mod panels;
 mod shell;
+mod sorting;
+mod sortmenu;
 mod viewer;
 
 use std::io::Write;
@@ -69,6 +71,7 @@ enum Overlay {
     Menu(Menu),
     /// Alt+F1 / Alt+F2: the drives or mounted file systems.
     Drives(drives::DriveMenu),
+    Sort(sortmenu::SortMenu),
     /// A copy, move or delete running, and the question it is waiting on, if any.
     Job(Job, Option<Dialog>),
 }
@@ -184,6 +187,10 @@ impl App {
                 list.paint(frame);
                 cursor = None;
             }
+            Overlay::Sort(menu) => {
+                menu.paint(frame);
+                cursor = None;
+            }
             Overlay::Job(job, question) => {
                 dialog::paint_progress(job, frame);
                 cursor = question.as_ref().and_then(|dialog| dialog.paint(frame));
@@ -231,6 +238,10 @@ impl App {
                 let outcome = list.key(key);
                 self.after_drives(list, outcome);
             }
+            Overlay::Sort(mut menu) => {
+                let outcome = menu.key(key);
+                self.after_sort(menu, outcome);
+            }
             Overlay::Job(mut job, question) => {
                 match question {
                     Some(mut dialog) => {
@@ -276,6 +287,10 @@ impl App {
             Overlay::Drives(mut list) => {
                 let outcome = list.click(event, self.size.0, self.size.1);
                 self.after_drives(list, outcome);
+            }
+            Overlay::Sort(mut menu) => {
+                let outcome = menu.click(event);
+                self.after_sort(menu, outcome);
             }
             Overlay::Job(mut job, question) => {
                 let question = match question {
@@ -398,6 +413,7 @@ impl App {
                 let list = drives::DriveMenu::new(right, self.panels.dir(right));
                 self.overlay = Overlay::Drives(list);
             }
+            Request::SortMenu => self.overlay = Overlay::Sort(self.panels.sort_menu()),
             Request::Menu => {
                 let side = if self.panels.right_active() { 4 } else { 0 };
                 self.overlay = Overlay::Menu(Menu::new(self.last_menu.unwrap_or(side)));
@@ -428,6 +444,14 @@ impl App {
     }
 
     /// The drive list was used: keeps it open, closes it, or takes its panel there.
+    fn after_sort(&mut self, menu: sortmenu::SortMenu, outcome: sortmenu::Outcome) {
+        match outcome {
+            sortmenu::Outcome::Open => self.overlay = Overlay::Sort(menu),
+            sortmenu::Outcome::Closed => {}
+            sortmenu::Outcome::Picked(picked) => self.panels.apply_sort(picked),
+        }
+    }
+
     fn after_drives(&mut self, list: drives::DriveMenu, outcome: drives::Outcome) {
         match outcome {
             drives::Outcome::Open => self.overlay = Overlay::Drives(list),
