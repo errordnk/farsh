@@ -27,6 +27,10 @@ pub struct Shell {
     osc7: Osc7,
     /// The directory the shell last reported, until `take_cwd` hands it over.
     cwd: Option<PathBuf>,
+    /// Nothing has come from the PTY yet. Windows' ConPTY (created with
+    /// INHERIT_CURSOR by portable-pty) starts with a cursor query and shows
+    /// nothing until it is answered.
+    first_output: bool,
 }
 
 impl Shell {
@@ -66,13 +70,19 @@ impl Shell {
                 }
             }
         });
-        Ok(Self { master: pair.master, writer, child, output, parser: vt100::Parser::new(nz(rows), nz(cols), 0), prompt_line: String::new(), awaiting_prompt: true, kind, osc7: Osc7::default(), cwd: None })
+        Ok(Self { master: pair.master, writer, child, output, parser: vt100::Parser::new(nz(rows), nz(cols), 0), prompt_line: String::new(), awaiting_prompt: true, kind, osc7: Osc7::default(), cwd: None, first_output: true })
     }
 
     /// Feeds what the shell wrote to the screen; reports whether there was any.
     pub fn pump(&mut self) -> bool {
         let mut any = false;
-        while let Ok(bytes) = self.output.try_recv() {
+        while let Ok(mut bytes) = self.output.try_recv() {
+            if std::mem::take(&mut self.first_output) && bytes.starts_with(CURSOR_QUERY) {
+                // the screen is new: the cursor is at the top left
+                let _ = self.writer.write_all(b"\x1b[1;1R");
+                let _ = self.writer.flush();
+                bytes.drain(..CURSOR_QUERY.len());
+            }
             self.parser.process(&bytes);
             if let Some(dir) = self.osc7.feed(&bytes) {
                 self.cwd = Some(dir);
@@ -222,6 +232,9 @@ fn windows_powershell() -> String {
         .or_else(|| default.is_file().then_some(default))
         .map_or_else(|| "powershell.exe".into(), |path| path.display().to_string())
 }
+
+/// The device status report ConPTY sends first to learn where the cursor is.
+const CURSOR_QUERY: &[u8] = b"\x1b[6n";
 
 fn nz(n: u16) -> NonZeroU16 {
     NonZeroU16::new(n.max(1)).unwrap()

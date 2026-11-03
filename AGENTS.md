@@ -8,8 +8,15 @@ over the shell screen.
 - The command line is the SHELL's own line (the cursor row of its screen), never a
   buffer of ours. `Shell::command_line_is_empty` compares that row with the last
   bare prompt; Enter/Home/End belong to the panel only while it is empty.
-- No terminal replies are needed from us for ConPTY (a DSR answer gets echoed by
-  cmd as text).
+- Windows' own ConPTY (portable-pty creates it with INHERIT_CURSOR) starts with a
+  cursor query `ESC[6n` and shows nothing until it is answered: `Shell::pump`
+  answers that first query only. Any later DSR is not ours to answer (cmd would
+  echo the reply as text).
+- farsh runs on Windows' defaults only. portable-pty loads `conpty.dll` by bare
+  name, so `main` calls `SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS)`
+  first: DLLs come from System32 and farsh's own folder, never from PATH (a
+  Contour Terminal copy on PATH once replaced the system ConPTY unnoticed). Any
+  departure from a Windows default must be written here with the reason.
 - Tests: `cargo test` (the shell test starts cmd.exe on Windows, /bin/sh elsewhere).
 - Code, comments and logs in English; talk to the user in Russian.
 

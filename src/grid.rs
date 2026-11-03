@@ -32,6 +32,14 @@ impl Grid {
         Self { cols, rows, cells: vec![Cell::default(); cols as usize * rows as usize] }
     }
 
+    /// A grid that matches no screen: flushing against it sends every cell.
+    /// After a resize the terminal shows something we do not know (its own
+    /// reflow of the old picture), so nothing on it may be taken as drawn.
+    pub fn unknown(cols: u16, rows: u16) -> Self {
+        let cell = Cell { text: "\u{FFFF}".into(), ..Cell::default() };
+        Self { cols, rows, cells: vec![cell; cols as usize * rows as usize] }
+    }
+
     /// A copy of one row's cells.
     pub fn row(&self, row: u16) -> Vec<Cell> {
         let start = row as usize * self.cols as usize;

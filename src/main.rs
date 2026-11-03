@@ -34,6 +34,7 @@ use shell::Shell;
 use viewer::Viewer;
 
 fn main() -> Result<()> {
+    system_dlls_only();
     let (cols, rows) = terminal::size()?;
     let mut app = App::new(cols, rows)?;
 
@@ -45,6 +46,18 @@ fn main() -> Result<()> {
     terminal::disable_raw_mode()?;
     result
 }
+
+/// DLLs load from Windows itself (and farsh's own folder), never from PATH or
+/// the current folder. portable-pty loads `conpty.dll` by bare name: a copy
+/// some other program put on PATH would replace Windows' own ConPTY.
+#[cfg(windows)]
+fn system_dlls_only() {
+    use windows_sys::Win32::System::LibraryLoader::{SetDefaultDllDirectories, LOAD_LIBRARY_SEARCH_DEFAULT_DIRS};
+    unsafe { SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS) };
+}
+
+#[cfg(not(windows))]
+fn system_dlls_only() {}
 
 /// What is on top of the shell and the panels.
 enum Overlay {
@@ -131,9 +144,11 @@ impl App {
                     self.on_mouse(mouse);
                 }
                 Event::Resize(cols, rows) => {
+                    // while a window is dragged the events queue up: the last size is the real one
+                    let (cols, rows) = terminal::size().unwrap_or((cols, rows));
                     self.size = (cols, rows);
                     self.shell.resize(cols, rows);
-                    screen = Grid::new(cols, rows);
+                    screen = Grid::unknown(cols, rows);
                     frame = Grid::new(cols, rows);
                     dirty = true;
                 }
