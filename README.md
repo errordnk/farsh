@@ -13,6 +13,9 @@ shell screen; the command line under the panels is the shell's own prompt line.
 |---|---|
 | `Tab` | switch panel |
 | `Up` `Down` `PgUp` `PgDn` | move the cursor in the panel |
+| `Left` `Right` | to the next column of names (one-column views: while the command line is empty) |
+| `Ctrl+1` `Ctrl+2` `Ctrl+3` `Ctrl+4` | Far's Brief, Medium, Full and Wide views |
+| `Ctrl+F3` `Ctrl+F4` | sort by name / by extension (again: reversed) |
 | `Home` `End` `Enter` | panel cursor / open folder, while the command line is empty |
 | `Ctrl+E` `Ctrl+X` | shell history up / down (Far's keys; the arrows belong to the panel) |
 | anything else | the shell's command line |

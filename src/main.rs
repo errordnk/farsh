@@ -8,6 +8,7 @@ mod editor;
 mod fileops;
 mod grid;
 mod keys;
+mod listing;
 mod menu;
 mod mouse;
 mod panels;

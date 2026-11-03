@@ -17,6 +17,15 @@ over the shell screen.
   first: DLLs come from System32 and farsh's own folder, never from PATH (a
   Contour Terminal copy on PATH once replaced the system ConPTY unnoticed). Any
   departure from a Windows default must be written here with the reason.
+- The panels copy Far Manager 3 cell for cell (its filelist.cpp, panelmix.cpp,
+  strmix.cpp, keybar.cpp and the default modes/highlighting in config.cpp and
+  hilight.cpp): view modes and column widths, `Folder`/`Up`/`Juncti`, sizes in
+  K/M/G, extension alignment, `}` over the divider, the status line, totals,
+  the key bar. Colors are the terminal's 16 colors (what Far's console
+  attributes become through ConPTY), so a theme changes both alike. Compare
+  with the real Far by dumping both consoles' buffers (characters and
+  attributes) at the same size, not by eye. Sorting starts by extension, as
+  the user's Far does.
 - Tests: `cargo test` (the shell test starts cmd.exe on Windows, /bin/sh elsewhere).
 - Code, comments and logs in English; talk to the user in Russian.
 
