@@ -74,10 +74,15 @@ impl Grid {
     }
 
     pub fn fill(&mut self, col: u16, row: u16, width: u16, height: u16, bg: Color) {
+        self.fill_with(col, row, width, height, Color::Reset, bg);
+    }
+
+    /// Blanks in `fg` on `bg` (the colors Far gives a box's empty cells).
+    pub fn fill_with(&mut self, col: u16, row: u16, width: u16, height: u16, fg: Color, bg: Color) {
         for r in row..row.saturating_add(height) {
             for c in col..col.saturating_add(width) {
                 if let Some(cell) = self.cell_mut(c, r) {
-                    *cell = Cell { bg, ..Cell::default() };
+                    *cell = Cell { fg, bg, ..Cell::default() };
                 }
             }
         }

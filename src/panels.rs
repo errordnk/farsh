@@ -590,6 +590,26 @@ impl Panels {
         self.right_active
     }
 
+    const VIEWS: [ViewMode; 4] = [ViewMode::Brief, ViewMode::Medium, ViewMode::Full, ViewMode::Wide];
+
+    /// The left and right panels' views as Far numbers them (1 Brief .. 4 Wide).
+    pub fn view_modes(&self) -> [u8; 2] {
+        let number = |mode: ViewMode| Self::VIEWS.iter().position(|&m| m == mode).map_or(2, |i| i as u8 + 1);
+        [number(self.left.mode), number(self.right.mode)]
+    }
+
+    /// Ctrl+1..Ctrl+4 (or the F9 menu) for the left or right panel.
+    pub fn set_view(&mut self, right: bool, mode: u8) {
+        if let Some(&view) = Self::VIEWS.get(usize::from(mode).wrapping_sub(1)) {
+            if right { self.right.mode = view } else { self.left.mode = view }
+        }
+    }
+
+    /// Makes the left or right panel the active one.
+    pub fn activate(&mut self, right: bool) {
+        self.right_active = right;
+    }
+
     /// Ctrl+F12: the "Sort by" menu over the active panel.
     pub fn sort_menu(&self) -> crate::sortmenu::SortMenu {
         let panel = self.active_ref();
@@ -692,8 +712,8 @@ impl Panels {
             }
             // Ctrl+1..Ctrl+4: Far's Brief, Medium, Full and Wide views
             KeyCode::Char(c @ '1'..='4') if ctrl_only => {
-                self.active().mode = [ViewMode::Brief, ViewMode::Medium, ViewMode::Full, ViewMode::Wide]
-                    [c as usize - '1' as usize];
+                let right = self.right_active;
+                self.set_view(right, c as u8 - b'0');
             }
             KeyCode::F(12) if ctrl_only => return Key::Ask(Request::SortMenu),
             KeyCode::F(n) if ctrl_only && SortMode::by_key(n).is_some() => {

@@ -214,10 +214,7 @@ impl SortMenu {
         self.frame = (left, top, right, bottom);
 
         let margin_left = left.saturating_sub(2);
-        let blank = " ".repeat((right + 3 - margin_left) as usize);
-        for y in top.saturating_sub(1)..=bottom + 1 {
-            grid.put(margin_left, y, &blank, TEXT, BG);
-        }
+        grid.fill_with(margin_left, top.saturating_sub(1), right + 3 - margin_left, height + 2, TEXT, BG);
         let horizontal = "\u{2550}".repeat(inner);
         grid.put(left, top, &format!("\u{2554}{horizontal}\u{2557}"), TEXT, BG);
         grid.put(left, bottom, &format!("\u{255A}{horizontal}\u{255D}"), TEXT, BG);
@@ -257,7 +254,8 @@ impl SortMenu {
                 grid.put(right, top + 1 + i as u16, &c.to_string(), TEXT, BG);
             }
         }
-        shadow(grid, margin_left, top.saturating_sub(1), right + 2, bottom + 1);
+        let margin_top = top.saturating_sub(1);
+        palette::drop_shadow(grid, margin_left, margin_top, right + 3 - margin_left, bottom + 2 - margin_top);
     }
 }
 
@@ -289,24 +287,6 @@ fn scroll_bar(length: usize, start: usize, size: usize) -> String {
         *c = '\u{2588}';
     }
     bar.into_iter().collect()
-}
-
-/// Far's `DropShadow` for the rectangle: two columns on the right and a row
-/// below, shifted by two and one, darkened as Far darkens console colors.
-pub fn shadow(grid: &mut Grid, left: u16, top: u16, right: u16, bottom: u16) {
-    let mut darken = |col: u16, row: u16| {
-        if let Some(cell) = grid.cell_mut(col, row) {
-            cell.fg = palette::shadow(cell.fg, true);
-            cell.bg = palette::shadow(cell.bg, false);
-        }
-    };
-    for col in left + 2..=right + 2 {
-        darken(col, bottom + 1);
-    }
-    for row in top + 1..=bottom {
-        darken(right + 1, row);
-        darken(right + 2, row);
-    }
 }
 
 #[cfg(test)]

@@ -417,7 +417,7 @@ impl App {
             Request::SortMenu => self.overlay = Overlay::Sort(self.panels.sort_menu()),
             Request::Menu => {
                 let side = if self.panels.right_active() { 4 } else { 0 };
-                self.overlay = Overlay::Menu(Menu::new(self.last_menu.unwrap_or(side)));
+                self.overlay = Overlay::Menu(Menu::new(self.last_menu.unwrap_or(side), self.panels.view_modes()));
             }
         }
     }
@@ -441,6 +441,11 @@ impl App {
             menu::Command::TogglePanels => self.panels_visible = !self.panels_visible,
             menu::Command::InvertSelection => self.panels.invert_marks(),
             menu::Command::ChangeDrive { right } => self.request(Request::ChangeDrive { right }),
+            menu::Command::View { right, mode } => self.panels.set_view(right, mode),
+            menu::Command::SortModes { right } => {
+                self.panels.activate(right);
+                self.request(Request::SortMenu);
+            }
         }
     }
 

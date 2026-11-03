@@ -9,17 +9,15 @@ use crossterm::event::{KeyCode, KeyEvent, MouseButton, MouseEvent, MouseEventKin
 use crossterm::style::Color;
 
 use crate::grid::Grid;
+use crate::palette;
 
-const fn rgb(r: u8, g: u8, b: u8) -> Color {
-    Color::Rgb { r, g, b }
-}
 
-const BG: Color = rgb(0, 170, 170);
-const TEXT: Color = rgb(255, 255, 255);
-const HOT: Color = rgb(255, 255, 85);
-const SELECTED_BG: Color = rgb(0, 0, 0);
-const SELECTED_TEXT: Color = rgb(255, 255, 255);
-const SHADOW: Color = rgb(0, 0, 0);
+// Far's menu colors: white on cyan, yellow hotkeys, the selection on black
+const BG: Color = palette::bg(palette::CYAN);
+const TEXT: Color = palette::fg(palette::WHITE);
+const HOT: Color = palette::fg(palette::YELLOW);
+const SELECTED_BG: Color = palette::bg(palette::BLACK);
+const SELECTED_TEXT: Color = palette::fg(palette::WHITE);
 
 /// How long the sizes may take: a dead network share must not hang the panel.
 const SIZE_TIMEOUT: Duration = Duration::from_millis(500);
@@ -309,8 +307,8 @@ impl DriveMenu {
         let (name_w, kind_w, size_w) = self.widths();
         // the box around the frame, and its shadow
         let (bx, by, bw, bh) = (x.saturating_sub(3), y.saturating_sub(1), w + 6, h + 2);
-        grid.fill(bx + 2, by + 1, bw, bh, SHADOW);
-        grid.fill(bx, by, bw, bh, BG);
+        grid.fill_with(bx, by, bw, bh, TEXT, BG);
+        palette::drop_shadow(grid, bx, by, bw, bh);
 
         let first = 1 + 1 + name_w + 1 + kind_w + 1;
         let second = first + 1 + 1 + size_w + 1;
@@ -335,7 +333,7 @@ impl DriveMenu {
             let (fg, bg) = if selected { (SELECTED_TEXT, SELECTED_BG) } else { (TEXT, BG) };
             grid.put(x, row, "\u{2551}", TEXT, BG);
             grid.put(x + w - 1, row, "\u{2551}", TEXT, BG);
-            grid.fill(x + 1, row, w - 2, 1, bg);
+            grid.fill_with(x + 1, row, w - 2, 1, fg, bg);
             let name: String = drive.name.chars().take(name_w).collect();
             let shown = |n: Option<u64>| n.map(size).unwrap_or_default();
             let text = format!(
@@ -346,9 +344,9 @@ impl DriveMenu {
             );
             let text: String = text.chars().take(inner).collect();
             grid.put(x + 1, row, &text, fg, bg);
-            // the drive letter is its hot key
-            if !selected && drive.name.len() == 2 && drive.name.ends_with(':') {
-                grid.put(x + 2, row, &drive.name, HOT, bg);
+            // the drive letter is its hot key, yellow on the selection too
+            if drive.name.len() == 2 && drive.name.ends_with(':') {
+                grid.put(x + 2, row, &drive.name[..1], HOT, bg);
             }
         }
     }

@@ -10,10 +10,8 @@ use crossterm::style::Color;
 
 use crate::fileops::{Conflict, Job, Kind};
 use crate::grid::Grid;
+use crate::palette;
 
-const fn rgb(r: u8, g: u8, b: u8) -> Color {
-    Color::Rgb { r, g, b }
-}
 
 /// What an accepted dialog asks for.
 #[derive(Clone, Debug, PartialEq)]
@@ -50,25 +48,27 @@ struct Palette {
 impl Style {
     fn palette(self) -> Palette {
         match self {
+            // Far's COL_DIALOG*: black on light gray, yellow hotkeys, cyan focus and edits
             Style::Normal => Palette {
-                bg: rgb(170, 170, 170),
-                fg: rgb(0, 0, 0),
-                hot: rgb(255, 255, 85),
-                focus_bg: rgb(0, 170, 170),
-                focus_fg: rgb(0, 0, 0),
-                edit_bg: rgb(0, 170, 170),
-                edit_fg: rgb(0, 0, 0),
-                dim: rgb(110, 110, 110),
+                bg: palette::bg(palette::LIGHT_GRAY),
+                fg: palette::fg(palette::BLACK),
+                hot: palette::fg(palette::YELLOW),
+                focus_bg: palette::bg(palette::CYAN),
+                focus_fg: palette::fg(palette::BLACK),
+                edit_bg: palette::bg(palette::CYAN),
+                edit_fg: palette::fg(palette::BLACK),
+                dim: palette::fg(palette::DARK_GRAY),
             },
+            // COL_WARNDIALOG*: white on red, the focus black on light gray
             Style::Warning => Palette {
-                bg: rgb(170, 0, 0),
-                fg: rgb(255, 255, 255),
-                hot: rgb(255, 255, 85),
-                focus_bg: rgb(170, 170, 170),
-                focus_fg: rgb(0, 0, 0),
-                edit_bg: rgb(0, 170, 170),
-                edit_fg: rgb(0, 0, 0),
-                dim: rgb(255, 170, 170),
+                bg: palette::bg(palette::RED),
+                fg: palette::fg(palette::WHITE),
+                hot: palette::fg(palette::YELLOW),
+                focus_bg: palette::bg(palette::LIGHT_GRAY),
+                focus_fg: palette::fg(palette::BLACK),
+                edit_bg: palette::bg(palette::CYAN),
+                edit_fg: palette::fg(palette::BLACK),
+                dim: palette::fg(palette::DARK_GRAY),
             },
         }
     }
@@ -311,8 +311,8 @@ impl Frame {
 
     /// The shadow, the box, the double frame and the title in it.
     fn draw(&self, grid: &mut Grid, title: &str, p: &Palette) {
-        grid.fill(self.x + 2, self.y + 1, self.w, self.h, rgb(0, 0, 0));
-        grid.fill(self.x, self.y, self.w, self.h, p.bg);
+        grid.fill_with(self.x, self.y, self.w, self.h, p.fg, p.bg);
+        palette::drop_shadow(grid, self.x, self.y, self.w, self.h);
         let line = "\u{2550}".repeat(self.fw.saturating_sub(2) as usize);
         grid.put(self.fx, self.fy, &format!("\u{2554}{line}\u{2557}"), p.fg, p.bg);
         grid.put(self.fx, self.fy + self.fh - 1, &format!("\u{255A}{line}\u{255D}"), p.fg, p.bg);

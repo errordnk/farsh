@@ -6,19 +6,17 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent,
 use crossterm::style::Color;
 
 use crate::grid::Grid;
+use crate::palette;
 
-const fn rgb(r: u8, g: u8, b: u8) -> Color {
-    Color::Rgb { r, g, b }
-}
-
-const BG: Color = rgb(0, 170, 170);
-const TEXT: Color = rgb(255, 255, 255);
-const HOT: Color = rgb(255, 255, 85);
-const DISABLED: Color = rgb(0, 85, 85);
-const BAR_TEXT: Color = rgb(255, 255, 85);
-const SELECTED_BG: Color = rgb(0, 0, 0);
-const SELECTED_TEXT: Color = rgb(255, 255, 255);
-const SHADOW: Color = rgb(0, 0, 0);
+// Far's COL_MENU*: white on cyan, the bar black on cyan, yellow hotkeys,
+// the selection white on black, what farsh does not do yet dark gray
+const BG: Color = palette::bg(palette::CYAN);
+const TEXT: Color = palette::fg(palette::WHITE);
+const HOT: Color = palette::fg(palette::YELLOW);
+const DISABLED: Color = palette::fg(palette::DARK_GRAY);
+const BAR_TEXT: Color = palette::fg(palette::BLACK);
+const SELECTED_BG: Color = palette::bg(palette::BLACK);
+const SELECTED_TEXT: Color = palette::fg(palette::WHITE);
 
 /// What a menu item does.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -30,6 +28,10 @@ pub enum Command {
     TogglePanels,
     InvertSelection,
     ChangeDrive { right: bool },
+    /// Ctrl+1..Ctrl+4 for the left or right panel.
+    View { right: bool, mode: u8 },
+    /// Ctrl+F12 for the left or right panel.
+    SortModes { right: bool },
 }
 
 struct Item {
@@ -48,6 +50,11 @@ const fn checked(label: &'static str, shortcut: &'static str) -> Item {
     Item { label, shortcut, command: None, checked: true }
 }
 
+/// A view mode item, checked when the panel shows it.
+fn view(label: &'static str, shortcut: &'static str, right: bool, mode: u8, current: u8) -> Item {
+    Item { label, shortcut, command: Some(Command::View { right, mode }), checked: mode == current }
+}
+
 const SEPARATOR: Item = item("-", "", None);
 
 struct Title {
@@ -55,15 +62,17 @@ struct Title {
     items: Vec<Item>,
 }
 
-fn panel_menu(title: &'static str, f: u8) -> Title {
+/// `mode`: the panel's view, 1 Brief .. 4 Wide.
+fn panel_menu(title: &'static str, f: u8, mode: u8) -> Title {
     let (on_off, drive) = if f == 1 { ("Ctrl+F1", "Alt+F1") } else { ("Ctrl+F2", "Alt+F2") };
+    let right = f == 2;
     Title {
         label: title,
         items: vec![
-            item("&Brief", "Ctrl+1", None),
-            checked("&Medium", "Ctrl+2"),
-            item("&Full", "Ctrl+3", None),
-            item("&Wide", "Ctrl+4", None),
+            view("&Brief", "Ctrl+1", right, 1, mode),
+            view("&Medium", "Ctrl+2", right, 2, mode),
+            view("&Full", "Ctrl+3", right, 3, mode),
+            view("&Wide", "Ctrl+4", right, 4, mode),
             item("Detai&led", "Ctrl+5", None),
             item("&Descriptions", "Ctrl+6", None),
             item("Lon&g descriptions", "Ctrl+7", None),
@@ -74,7 +83,7 @@ fn panel_menu(title: &'static str, f: u8) -> Title {
             item("&Info panel", "Ctrl+L", None),
             item("Quick &view", "Ctrl+Q", None),
             SEPARATOR,
-            item("&Sort modes", "Ctrl+F12", None),
+            item("&Sort modes", "Ctrl+F12", Some(Command::SortModes { right })),
             checked("Show long &names", "Ctrl+N"),
             item("Panel &On/Off", on_off, None),
             item("&Re-read", "Ctrl+R", Some(Command::Reread)),
@@ -83,9 +92,9 @@ fn panel_menu(title: &'static str, f: u8) -> Title {
     }
 }
 
-fn titles() -> Vec<Title> {
+fn titles(modes: [u8; 2]) -> Vec<Title> {
     vec![
-        panel_menu("&Left", 1),
+        panel_menu("&Left", 1, modes[0]),
         Title {
             label: "&Files",
             items: vec![
@@ -167,7 +176,7 @@ fn titles() -> Vec<Title> {
                 item("&Save setup", "Shift+F9", None),
             ],
         },
-        panel_menu("&Right", 2),
+        panel_menu("&Right", 2, modes[1]),
     ]
 }
 
@@ -211,9 +220,10 @@ pub struct Menu {
 }
 
 impl Menu {
-    /// Opens on title `current` (0 is Left, 4 is Right).
-    pub fn new(current: usize) -> Self {
-        let mut menu = Self { titles: titles(), current: 0, item: 0 };
+    /// Opens on title `current` (0 is Left, 4 is Right); `modes` are the
+    /// left and right panels' views (1 Brief .. 4 Wide).
+    pub fn new(current: usize, modes: [u8; 2]) -> Self {
+        let mut menu = Self { titles: titles(modes), current: 0, item: 0 };
         menu.open(current);
         menu
     }
@@ -316,11 +326,11 @@ impl Menu {
 
     pub fn paint(&self, grid: &mut Grid) {
         let cols = grid.cols;
-        grid.fill(0, 0, cols, 1, BG);
+        grid.fill_with(0, 0, cols, 1, BAR_TEXT, BG);
         for (index, (title, (col, width))) in self.titles.iter().zip(self.title_spans()).enumerate() {
             if index == self.current {
-                grid.fill(col, 0, width, 1, SELECTED_BG);
-                grid.put(col + 2, 0, &plain(title.label), SELECTED_TEXT, SELECTED_BG);
+                grid.fill_with(col, 0, width, 1, SELECTED_TEXT, SELECTED_BG);
+                put_label(grid, col + 2, 0, title.label, SELECTED_TEXT, SELECTED_BG, HOT);
             } else {
                 put_label(grid, col + 2, 0, title.label, BAR_TEXT, BG, HOT);
             }
@@ -328,8 +338,8 @@ impl Menu {
 
         let (x, y, w, h) = self.drop_down(cols);
         // the shadow, then the box with one more row under the frame
-        grid.fill(x + 2, y + 1, w, h + 1, SHADOW);
-        grid.fill(x, y, w, h + 1, BG);
+        grid.fill_with(x, y, w, h + 1, TEXT, BG);
+        palette::drop_shadow(grid, x, y, w, h + 1);
         let line = "\u{2550}".repeat(w.saturating_sub(2) as usize);
         grid.put(x, y, &format!("\u{2554}{line}\u{2557}"), TEXT, BG);
         grid.put(x, y + h - 1, &format!("\u{255A}{line}\u{255D}"), TEXT, BG);
@@ -345,12 +355,12 @@ impl Menu {
             grid.put(x + w - 1, row, "\u{2551}", TEXT, BG);
             let selected = index == self.item;
             let (fg, bg, hot) = match (selected, item.command.is_some()) {
-                (true, _) => (SELECTED_TEXT, SELECTED_BG, SELECTED_TEXT),
+                (true, _) => (SELECTED_TEXT, SELECTED_BG, HOT),
                 (false, true) => (TEXT, BG, HOT),
                 (false, false) => (DISABLED, BG, DISABLED),
             };
             if selected {
-                grid.fill(x + 1, row, w - 2, 1, bg);
+                grid.fill_with(x + 1, row, w - 2, 1, fg, bg);
             }
             if item.checked {
                 grid.put(x + 1, row, "\u{221A}", fg, bg);
@@ -397,7 +407,7 @@ mod tests {
 
     #[test]
     fn opens_on_the_first_item_that_can_be_chosen_and_skips_grey_ones() {
-        let mut menu = Menu::new(1);
+        let mut menu = Menu::new(1, [2, 2]);
         assert_eq!(menu.key(key(KeyCode::Enter)), Outcome::Chosen(Command::FKey(3)));
         menu.key(key(KeyCode::Down));
         menu.key(key(KeyCode::Down));
@@ -413,7 +423,7 @@ mod tests {
 
     #[test]
     fn left_and_right_go_round_the_bar_and_letters_pick_items() {
-        let mut menu = Menu::new(0);
+        let mut menu = Menu::new(0, [2, 2]);
         menu.key(key(KeyCode::Left));
         assert_eq!(menu.current(), 4, "Left from Left is Right");
         menu.key(key(KeyCode::Right));
@@ -434,7 +444,7 @@ mod tests {
     #[test]
     fn painting_puts_the_bar_on_top_and_the_drop_down_under_its_title() {
         let mut grid = Grid::new(80, 30);
-        let menu = Menu::new(1);
+        let menu = Menu::new(1, [2, 2]);
         menu.paint(&mut grid);
         let top: String = (0..40).map(|c| grid.row(0)[c].text.clone()).collect();
         assert!(top.contains("Left") && top.contains("Files") && top.contains("Commands"), "{top}");
@@ -444,7 +454,7 @@ mod tests {
 
     #[test]
     fn clicks_open_titles_choose_items_and_close_outside() {
-        let mut menu = Menu::new(0);
+        let mut menu = Menu::new(0, [2, 2]);
         let click = |col, row| MouseEvent {
             kind: MouseEventKind::Down(MouseButton::Left),
             column: col,

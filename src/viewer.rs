@@ -11,10 +11,11 @@ use crate::grid::Grid;
 /// Bigger files are shown up to this much from the start.
 const LIMIT: u64 = 32 << 20;
 
-const BG: Color = Color::Rgb { r: 0, g: 0, b: 0 };
-const FG: Color = Color::Rgb { r: 170, g: 170, b: 170 };
-const BAR_FG: Color = Color::Rgb { r: 0, g: 0, b: 0 };
-const BAR_BG: Color = Color::Rgb { r: 0, g: 170, b: 170 };
+// Far's viewer: light cyan on blue, the title bar black on cyan
+const BG: Color = crate::palette::bg(crate::palette::BLUE);
+const FG: Color = crate::palette::fg(crate::palette::LIGHT_CYAN);
+const BAR_FG: Color = crate::palette::fg(crate::palette::BLACK);
+const BAR_BG: Color = crate::palette::bg(crate::palette::CYAN);
 
 pub struct Viewer {
     name: String,
@@ -88,13 +89,13 @@ impl Viewer {
     }
 
     pub fn paint(&mut self, grid: &mut Grid) {
-        grid.fill(0, 0, grid.cols, grid.rows, BG);
+        grid.fill_with(0, 0, grid.cols, grid.rows, FG, BG);
         if grid.rows < 3 {
             return;
         }
         self.page = grid.rows as usize - 2;
         let title: String = self.name.chars().take(grid.cols as usize).collect();
-        grid.fill(0, 0, grid.cols, 1, BAR_BG);
+        grid.fill_with(0, 0, grid.cols, 1, BAR_FG, BAR_BG);
         grid.put(0, 0, &title, BAR_FG, BAR_BG);
         for (row, line) in self.lines.iter().skip(self.top).take(self.page).enumerate() {
             let shown: String = line.chars().skip(self.left).take(grid.cols as usize).collect();
@@ -103,7 +104,7 @@ impl Viewer {
         let percent = if self.lines.len() <= self.page { 100 } else { (self.top + self.page).min(self.lines.len()) * 100 / self.lines.len() };
         let note = if self.truncated { " (cut)" } else { "" };
         let status = format!(" Line {}/{}  {}%{} -- Esc, F3 or F10 closes", self.top + 1, self.lines.len().max(1), percent, note);
-        grid.fill(0, grid.rows - 1, grid.cols, 1, BAR_BG);
+        grid.fill_with(0, grid.rows - 1, grid.cols, 1, BAR_FG, BAR_BG);
         grid.put(0, grid.rows - 1, &status, BAR_FG, BAR_BG);
     }
 }

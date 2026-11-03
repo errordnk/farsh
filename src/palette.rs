@@ -7,6 +7,8 @@
 
 use crossterm::style::Color;
 
+use crate::grid::Grid;
+
 const TABLE: [(u8, u8, u8); 16] = [
     (0, 0, 0),
     (0, 0, 128),
@@ -29,6 +31,7 @@ const TABLE: [(u8, u8, u8); 16] = [
 pub const BLACK: u8 = 0;
 pub const BLUE: u8 = 1;
 pub const CYAN: u8 = 3;
+pub const RED: u8 = 4;
 pub const BROWN: u8 = 6;
 pub const LIGHT_GRAY: u8 = 7;
 pub const DARK_GRAY: u8 = 8;
@@ -75,6 +78,25 @@ pub fn shadow(color: Color, foreground: bool) -> Color {
             Color::Rgb { r, g, b } => Color::Rgb { r: r / 2, g: g / 2, b: b / 2 },
             _ => paint(BLACK),
         },
+    }
+}
+
+/// Far's `DropShadow` for a box at (`x`, `y`) of `w` x `h`: two columns on
+/// the right and a row below, shifted by two and one, darkened.
+pub fn drop_shadow(grid: &mut Grid, x: u16, y: u16, w: u16, h: u16) {
+    let (right, bottom) = (x + w.max(1) - 1, y + h.max(1) - 1);
+    let mut darken = |col: u16, row: u16| {
+        if let Some(cell) = grid.cell_mut(col, row) {
+            cell.fg = shadow(cell.fg, true);
+            cell.bg = shadow(cell.bg, false);
+        }
+    };
+    for col in x + 2..=right + 2 {
+        darken(col, bottom + 1);
+    }
+    for row in y + 1..=bottom {
+        darken(right + 1, row);
+        darken(right + 2, row);
     }
 }
 
