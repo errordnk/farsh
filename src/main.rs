@@ -11,6 +11,7 @@ mod keys;
 mod listing;
 mod menu;
 mod mouse;
+mod palette;
 mod panels;
 mod shell;
 mod sorting;

@@ -21,8 +21,11 @@ over the shell screen.
   strmix.cpp, keybar.cpp and the default modes/highlighting in config.cpp and
   hilight.cpp): view modes and column widths, `Folder`/`Up`/`Juncti`, sizes in
   K/M/G, extension alignment, `}` over the divider, the status line, totals,
-  the key bar. Colors are the terminal's 16 colors (what Far's console
-  attributes become through ConPTY), so a theme changes both alike. Compare
+  the key bar. Colors are `src/palette.rs`: Far's console attributes as
+  they reach a terminal through ConPTY — the classic console table in RGB
+  (blue 0,0,128...), with light gray text and a black background as the
+  terminal's own defaults. Not the terminal's 16-color palette: Som's theme
+  maps ANSI blue to a light Nord blue, while Far stays navy (checked live). Compare
   with the real Far by dumping both consoles' buffers (characters and
   attributes) at the same size, not by eye. Sorting starts by extension, as
   the user's Far does. Sort modes (`src/sorting.rs`) are Far's layers and

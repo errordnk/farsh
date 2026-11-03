@@ -9,18 +9,18 @@ use crossterm::style::Color;
 
 use crate::grid::{Cell, Grid};
 use crate::listing::{self, Entry};
+use crate::palette;
 use crate::sorting::{self, SortMode, Sorting};
 
-// Far's default palette, as the terminal's own 16 colors (Far's console
-// attributes reach the terminal as these through ConPTY).
+// Far's default colors, as Far's console attributes reach the terminal.
 /// Blue: the panels' background.
-const BG: Color = Color::DarkBlue;
+const BG: Color = palette::bg(palette::BLUE);
 /// Light cyan: panel text, frames, totals.
-const TEXT: Color = Color::Cyan;
+const TEXT: Color = palette::fg(palette::LIGHT_CYAN);
 /// Yellow: column titles, the sort letter, marked names.
-const TITLE: Color = Color::Yellow;
-const CURSOR_BG: Color = Color::DarkCyan;
-const BLACK: Color = Color::Black;
+const TITLE: Color = palette::fg(palette::YELLOW);
+const CURSOR_BG: Color = palette::bg(palette::CYAN);
+const BLACK: Color = palette::fg(palette::BLACK);
 
 const KEY_BAR: [&str; 12] =
     ["Help", "UserMn", "View", "Edit", "Copy", "RenMov", "MkFold", "Delete", "ConfMn", "Quit", "", ""];
@@ -822,7 +822,8 @@ impl Panels {
         let count = KEY_BAR.len();
         let min_full = (1 + MIN_LABEL + 1) * count + (count - 9) - 1;
         let mut extra = cols.saturating_sub(min_full);
-        let (number, text, gap) = ((Color::Grey, BLACK), (BLACK, CURSOR_BG), (Color::Grey, BLACK));
+        let default = (palette::fg(palette::LIGHT_GRAY), palette::bg(palette::BLACK));
+        let (number, text, gap) = (default, (BLACK, CURSOR_BG), default);
         let mut x = 0usize;
         let mut prev = 0usize;
         self.key_ends.clear();

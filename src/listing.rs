@@ -8,6 +8,8 @@ use std::time::SystemTime;
 
 use crossterm::style::Color;
 
+use crate::palette::{self, fg};
+
 pub const TAG_MOUNT_POINT: u32 = 0xA000_0003;
 pub const TAG_SYMLINK: u32 = 0xA000_000C;
 
@@ -182,18 +184,19 @@ pub fn extension(name: &str) -> &str {
 pub fn highlight(entry: &Entry) -> (Color, Color) {
     const ARC: &str = "*.zip,*.rar,*.[7bgxl]z,*.[bg]zip,*.tar,*.t[agbxl]z,*.z,*.ar[cj],*.r[0-9][0-9],*.a[0-9][0-9],*.bz2,*.cab,*.jar,*.lha,*.lzh,*.ha,*.ac[bei],*.pa[ck],*.rk,*.cpio,*.rpm,*.zoo,*.hqx,*.sit,*.ice,*.uc2,*.ain,*.imp,*.777,*.ufa,*.boa,*.bs[2a],*.sea,*.[ah]pk,*.ddi,*.x2,*.rkv,*.[lw]sz,*.h[ay]p,*.lim,*.sqz,*.chz,*.aa[br],*.zst";
     const TEMP: &str = "*.bak,*.tmp";
+    let both = |c| (fg(c), fg(c));
     if entry.hidden {
-        (Color::DarkCyan, Color::DarkGrey)
+        (fg(palette::CYAN), fg(palette::DARK_GRAY))
     } else if entry.is_dir {
-        (Color::White, Color::White)
+        both(palette::WHITE)
     } else if is_executable(&entry.name) {
-        (Color::Green, Color::Green)
+        both(palette::LIGHT_GREEN)
     } else if matches_any(ARC, &entry.name) {
-        (Color::Magenta, Color::Magenta)
+        both(palette::LIGHT_MAGENTA)
     } else if matches_any(TEMP, &entry.name) {
-        (Color::DarkYellow, Color::DarkYellow)
+        both(palette::BROWN)
     } else {
-        (Color::Cyan, Color::Black)
+        (fg(palette::LIGHT_CYAN), fg(palette::BLACK))
     }
 }
 
@@ -506,8 +509,8 @@ mod tests {
     fn masks_and_paths() {
         assert!(matches_any("*.r[0-9][0-9]", "x.r07"));
         assert!(!matches_any("*.r[0-9][0-9]", "x.rar7"));
-        assert_eq!(highlight(&file("a.7z")).0, Color::Magenta);
-        assert_eq!(highlight(&file("a.bak")).0, Color::DarkYellow);
+        assert_eq!(highlight(&file("a.7z")).0, fg(palette::LIGHT_MAGENTA));
+        assert_eq!(highlight(&file("a.bak")).0, fg(palette::BROWN));
         assert_eq!(truncate_path("C:\\Users\\dnk\\very\\long", 13), "C:\\\u{2026}very\\long");
     }
 }

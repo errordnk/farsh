@@ -6,12 +6,13 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent,
 use crossterm::style::Color;
 
 use crate::grid::Grid;
+use crate::palette;
 use crate::sorting::{SortMode, Sorting};
 
-const BG: Color = Color::DarkCyan;
-const TEXT: Color = Color::White;
-const HOT: Color = Color::Yellow;
-const SELECTED_BG: Color = Color::Black;
+const BG: Color = palette::bg(palette::CYAN);
+const TEXT: Color = palette::fg(palette::WHITE);
+const HOT: Color = palette::fg(palette::YELLOW);
+const SELECTED_BG: Color = palette::bg(palette::BLACK);
 
 const TITLE: &str = "Sort by";
 const BOTTOM: &str = "+ - * F4";
@@ -295,8 +296,8 @@ fn scroll_bar(length: usize, start: usize, size: usize) -> String {
 pub fn shadow(grid: &mut Grid, left: u16, top: u16, right: u16, bottom: u16) {
     let mut darken = |col: u16, row: u16| {
         if let Some(cell) = grid.cell_mut(col, row) {
-            cell.fg = dim(cell.fg, true);
-            cell.bg = dim(cell.bg, false);
+            cell.fg = palette::shadow(cell.fg, true);
+            cell.bg = palette::shadow(cell.bg, false);
         }
     };
     for col in left + 2..=right + 2 {
@@ -305,24 +306,6 @@ pub fn shadow(grid: &mut Grid, left: u16, top: u16, right: u16, bottom: u16) {
     for row in top + 1..=bottom {
         darken(right + 1, row);
         darken(right + 2, row);
-    }
-}
-
-/// Bright colors lose their brightness, light gray becomes dark gray, the rest black.
-fn dim(color: Color, foreground: bool) -> Color {
-    match color {
-        Color::White => Color::Grey,
-        Color::Cyan => Color::DarkCyan,
-        Color::Yellow => Color::DarkYellow,
-        Color::Green => Color::DarkGreen,
-        Color::Magenta => Color::DarkMagenta,
-        Color::Blue => Color::DarkBlue,
-        Color::Red => Color::DarkRed,
-        Color::DarkGrey => Color::Black,
-        Color::Grey => Color::DarkGrey,
-        Color::Reset if foreground => Color::DarkGrey,
-        Color::Rgb { r, g, b } => Color::Rgb { r: r / 2, g: g / 2, b: b / 2 },
-        _ => Color::Black,
     }
 }
 
