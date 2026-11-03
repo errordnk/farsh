@@ -176,8 +176,10 @@ dependencies = [
  "anyhow",
  "chrono",
  "crossterm",
+ "libc",
  "portable-pty",
  "vt100",
+ "windows-sys",
 ]
 
 [[package]]

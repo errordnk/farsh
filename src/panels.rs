@@ -202,6 +202,10 @@ pub enum Request {
     MkDir,
     Delete(Vec<PathBuf>),
     Quit,
+    /// F9: the menu bar.
+    Menu,
+    /// Alt+F1 / Alt+F2: another drive (mount point) for the left / right panel.
+    ChangeDrive { right: bool },
 }
 
 /// What the panels made of a key.
@@ -252,6 +256,41 @@ impl Panels {
         }
     }
 
+    /// The folder the left or right panel shows.
+    pub fn dir(&self, right: bool) -> &Path {
+        if right { &self.right.dir } else { &self.left.dir }
+    }
+
+    /// Takes the left or right panel to `dir` and makes it the active one.
+    pub fn open_dir(&mut self, right: bool, dir: PathBuf) {
+        self.right_active = right;
+        let panel = self.active();
+        panel.dir = dir;
+        panel.reload(None);
+    }
+
+    pub fn right_active(&self) -> bool {
+        self.right_active
+    }
+
+    /// Ctrl+U: the panels change places; the active one stays the same panel.
+    pub fn swap(&mut self) {
+        std::mem::swap(&mut self.left, &mut self.right);
+        self.right_active = !self.right_active;
+    }
+
+    /// Gray *: marks what is not marked and unmarks what is (files only, as Far does).
+    pub fn invert_marks(&mut self) {
+        let panel = self.active();
+        let names: Vec<String> =
+            panel.entries.iter().filter(|e| e.name != ".." && !e.is_dir).map(|e| e.name.clone()).collect();
+        for name in names {
+            if !panel.marked.remove(&name) {
+                panel.marked.insert(name);
+            }
+        }
+    }
+
     /// Reads both panels again (after a copy, a delete...); the active
     /// panel's cursor goes to `select` if given.
     pub fn refresh(&mut self, select: Option<&str>) {
@@ -299,6 +338,12 @@ impl Panels {
             KeyCode::End if line_is_empty => self.active().move_cursor(isize::MAX / 2),
             KeyCode::Enter if line_is_empty => self.active().enter(),
             KeyCode::Insert => self.active().toggle_mark(),
+            // Far's Ctrl+R and Ctrl+U, while nothing is typed (else they are the shell's)
+            KeyCode::Char('r') if !plain && line_is_empty => self.refresh(None),
+            KeyCode::Char('u') if !plain && line_is_empty => self.swap(),
+            KeyCode::F(n @ (1 | 2)) if key.modifiers.contains(KeyModifiers::ALT) => {
+                return Key::Ask(Request::ChangeDrive { right: n == 2 });
+            }
             KeyCode::F(n) => return self.function_key(n),
             _ => return Key::Pass,
         }
@@ -352,7 +397,7 @@ impl Panels {
         Key::Taken
     }
 
-    fn function_key(&mut self, n: u8) -> Key {
+    pub fn function_key(&mut self, n: u8) -> Key {
         let sources = self.active_ref().sources();
         let file = sources.first().filter(|path| path.is_file()).cloned();
         let other = self.other_dir().to_path_buf();
@@ -363,6 +408,7 @@ impl Panels {
             6 => (!sources.is_empty()).then(|| Request::Move(sources, other)),
             7 => Some(Request::MkDir),
             8 => (!sources.is_empty()).then(|| Request::Delete(sources)),
+            9 => Some(Request::Menu),
             10 => Some(Request::Quit),
             _ => None,
         };

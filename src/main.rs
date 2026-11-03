@@ -3,10 +3,12 @@
 
 mod cwd;
 mod dialog;
+mod drives;
 mod editor;
 mod fileops;
 mod grid;
 mod keys;
+mod menu;
 mod mouse;
 mod panels;
 mod shell;
@@ -26,6 +28,7 @@ use crossterm::terminal;
 use dialog::{Action, Dialog};
 use fileops::{Access, Answer, Existing, Job, Kind, Options};
 use grid::Grid;
+use menu::Menu;
 use panels::{Key, Panels, Request};
 use shell::Shell;
 use viewer::Viewer;
@@ -48,6 +51,10 @@ enum Overlay {
     None,
     Dialog(Dialog),
     Viewer(Viewer),
+    /// F9: the menu bar with a drop-down.
+    Menu(Menu),
+    /// Alt+F1 / Alt+F2: the drives or mounted file systems.
+    Drives(drives::DriveMenu),
     /// A copy, move or delete running, and the question it is waiting on, if any.
     Job(Job, Option<Dialog>),
 }
@@ -60,6 +67,8 @@ struct App {
     quit: bool,
     /// The last left click: when and where, to tell a double click.
     last_click: Option<(std::time::Instant, u16, u16)>,
+    /// The menu title F9 opened last, to open there again.
+    last_menu: Option<usize>,
     size: (u16, u16),
 }
 
@@ -72,6 +81,7 @@ impl App {
             overlay: Overlay::None,
             quit: false,
             last_click: None,
+            last_menu: None,
             size: (cols, rows),
         })
     }
@@ -150,6 +160,14 @@ impl App {
                 viewer.paint(frame);
                 cursor = None;
             }
+            Overlay::Menu(menu) => {
+                menu.paint(frame);
+                cursor = None;
+            }
+            Overlay::Drives(list) => {
+                list.paint(frame);
+                cursor = None;
+            }
             Overlay::Job(job, question) => {
                 dialog::paint_progress(job, frame);
                 cursor = question.as_ref().and_then(|dialog| dialog.paint(frame));
@@ -189,6 +207,14 @@ impl App {
                     self.overlay = Overlay::Viewer(viewer);
                 }
             }
+            Overlay::Menu(mut menu) => {
+                let outcome = menu.key(key);
+                self.after_menu(menu, outcome);
+            }
+            Overlay::Drives(mut list) => {
+                let outcome = list.key(key);
+                self.after_drives(list, outcome);
+            }
             Overlay::Job(mut job, question) => {
                 match question {
                     Some(mut dialog) => {
@@ -226,6 +252,14 @@ impl App {
             Overlay::Viewer(mut viewer) => {
                 viewer.mouse(event);
                 self.overlay = Overlay::Viewer(viewer);
+            }
+            Overlay::Menu(mut menu) => {
+                let outcome = menu.click(event, self.size.0);
+                self.after_menu(menu, outcome);
+            }
+            Overlay::Drives(mut list) => {
+                let outcome = list.click(event, self.size.0, self.size.1);
+                self.after_drives(list, outcome);
             }
             Overlay::Job(mut job, question) => {
                 let question = match question {
@@ -343,6 +377,50 @@ impl App {
             }
             Request::Quit => {
                 self.overlay = Overlay::Dialog(Dialog::confirm("Quit", "Do you want to quit farsh?", Action::Quit));
+            }
+            Request::ChangeDrive { right } => {
+                let list = drives::DriveMenu::new(right, self.panels.dir(right));
+                self.overlay = Overlay::Drives(list);
+            }
+            Request::Menu => {
+                let side = if self.panels.right_active() { 4 } else { 0 };
+                self.overlay = Overlay::Menu(Menu::new(self.last_menu.unwrap_or(side)));
+            }
+        }
+    }
+
+    /// The menu was used: keeps it open, closes it, or does the chosen item.
+    fn after_menu(&mut self, menu: Menu, outcome: menu::Outcome) {
+        self.last_menu = Some(menu.current());
+        let command = match outcome {
+            menu::Outcome::Open => return self.overlay = Overlay::Menu(menu),
+            menu::Outcome::Closed => return,
+            menu::Outcome::Chosen(command) => command,
+        };
+        match command {
+            menu::Command::FKey(n) => {
+                if let Key::Ask(request) = self.panels.function_key(n) {
+                    self.request(request);
+                }
+            }
+            menu::Command::Reread => self.panels.refresh(None),
+            menu::Command::SwapPanels => self.panels.swap(),
+            menu::Command::TogglePanels => self.panels_visible = !self.panels_visible,
+            menu::Command::InvertSelection => self.panels.invert_marks(),
+            menu::Command::ChangeDrive { right } => self.request(Request::ChangeDrive { right }),
+        }
+    }
+
+    /// The drive list was used: keeps it open, closes it, or takes its panel there.
+    fn after_drives(&mut self, list: drives::DriveMenu, outcome: drives::Outcome) {
+        match outcome {
+            drives::Outcome::Open => self.overlay = Overlay::Drives(list),
+            drives::Outcome::Closed => {}
+            drives::Outcome::Chosen(dir) => {
+                self.panels.open_dir(list.right, dir);
+                if self.shell.command_line_is_empty() {
+                    self.shell.cd(self.panels.active_dir());
+                }
             }
         }
     }
