@@ -142,8 +142,7 @@ over the shell screen.
     commands Enter ran from the prompt (`Shell::typed`), the files F3/F4
     opened, the folders the active panel visited; a date separator a day,
     Ins locks, Shift+Del deletes one, Del clears (asked), Ctrl+R forgets
-    what is gone, Ctrl+Enter puts it on the command line, Ctrl+Shift+Enter
-    a folder into the passive panel.
+    what is gone, Ctrl+Enter puts it on the command line.
   - Alt+F9 (Video mode) is Far's maximize/restore as xterm's `CSI 9;1t` /
     `CSI 9;0t`: only a terminal that does window operations follows it.
   - Compare folders is FileList::CompareDir. Edit user menu and F2 are
@@ -152,9 +151,13 @@ over the shell screen.
     profile's ("Main menu (User)"). File associations are filetype.cpp
     (`src/assoc.rs`): Enter, Ctrl+PgDn, F3, Alt+F3, F4, Alt+F4 on a file
     run their command in the shell (several: "Select association").
-  - Folder shortcuts (`src/shortcuts.rs`): Far's RightCtrl+0..9 cannot be
-    told from the left Ctrl in a terminal, so they are Ctrl+Alt+0..9;
-    Ctrl+Shift+0..9 sets one; a key has one folder, not a list.
+  - Folder shortcuts (`src/shortcuts.rs`): only through Commands > Folder
+    shortcuts (Ins sets, Enter or the digit goes); a shortcut has one folder,
+    not a list.
+  - No keys with two modifiers (the user's rule): Far's Ctrl+Shift+Enter,
+    RightCtrl/Ctrl+Shift+0..9, Ctrl+Shift+F3/F4, Alt+Shift+F9 are left out,
+    and the key bar changes only for Shift, Ctrl or Alt alone. Alt++ / Alt+-
+    still take Shift along, as the main keyboard's `+` needs it.
   - Ctrl+I (the filters, `src/filter.rs`: filefilter.cpp, the dialog of
     filefilterparams.cpp without the highlighting part) is often sent as
     Tab by terminals: then the menu is the way. Each panel keeps its marks

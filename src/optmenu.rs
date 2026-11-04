@@ -400,7 +400,7 @@ fn panel_modes_menu(select: usize) -> VMenu {
         .collect();
     let mut menu = VMenu::with("Edit panel modes", entries);
     menu.max_height_margin = Some(4);
-    menu.bottom = "Ins, Del, F4, Ctrl+Enter, Ctrl+Shift+Enter".into();
+    menu.bottom = "Ins, Del, F4, Ctrl+Enter".into();
     menu.select(select);
     menu
 }
@@ -664,10 +664,9 @@ impl App {
             Outcome::Chosen(_) => edit(self, menu),
             Outcome::Closed => {}
             Outcome::Key(k) if k.code == KeyCode::F(4) => edit(self, menu),
-            // Ctrl+Enter: the active panel takes the mode, Ctrl+Shift+Enter the passive one
-            Outcome::Key(k) if k.code == KeyCode::Enter && k.modifiers.contains(KeyModifiers::CONTROL) => {
-                let right = self.panels.right_active() != k.modifiers.contains(KeyModifiers::SHIFT);
-                self.panels.set_view(right, mode_number(row) as u8);
+            // Ctrl+Enter: the active panel takes the mode (no keys with two modifiers in farsh)
+            Outcome::Key(k) if k.code == KeyCode::Enter && k.modifiers == KeyModifiers::CONTROL => {
+                self.panels.set_view(self.panels.right_active(), mode_number(row) as u8);
                 self.overlay = Overlay::List(Box::new(List::PanelModes(menu)));
             }
             _ => self.overlay = Overlay::List(Box::new(List::PanelModes(menu))),

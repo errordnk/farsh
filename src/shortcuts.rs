@@ -1,11 +1,11 @@
 //! Far's folder shortcuts (shortcuts.cpp): ten of them, kept in the
 //! profile. Commands > Folder shortcuts is Shortcuts::Configure: one line a
-//! shortcut, `Ctrl+Alt+0 │ C:\path` (`<none>` when it is not set), Ins sets
-//! it to the active panel's folder, Del clears it, F4 edits its title and
-//! path (EditItemImpl: 60 by 10), Enter goes there. Far jumps with
-//! RightCtrl+0..9, which a terminal cannot tell from the left one: here it
-//! is Ctrl+Alt+0..9; Ctrl+Shift+0..9 sets one, as in Far. A key has one
-//! folder, not a list.
+//! shortcut, `0 │ C:\path` (`<none>` when it is not set), Ins sets it to the
+//! active panel's folder, Del clears it, F4 edits its title and path
+//! (EditItemImpl: 60 by 10), Enter (or the digit) goes there. Far's keys for
+//! them (RightCtrl+0..9 to go, Ctrl+Shift+0..9 to set) are left out: farsh
+//! has no keys with two modifiers, and a terminal cannot tell the right Ctrl
+//! from the left. A shortcut has one folder, not a list.
 
 use std::path::{Path, PathBuf};
 
@@ -75,14 +75,14 @@ impl Shortcuts {
         menu
     }
 
-    /// MakeListName: `Ctrl+Alt+&N │ name`.
+    /// MakeListName without the key: `&N │ name`.
     fn label(&self, index: usize) -> String {
         let name = match &self.items[index] {
             None => "<none>".to_string(),
             Some(s) if !s.title.is_empty() => expand(&s.title),
             Some(s) => crate::dialog::escape_ampersands(&expand(&s.folder)),
         };
-        format!("Ctrl+Alt+&{index} \u{2502} {name}")
+        format!("&{index} \u{2502} {name}")
     }
 }
 
@@ -142,8 +142,8 @@ mod tests {
         let mut shortcuts = Shortcuts::load_from(file.clone());
         shortcuts.set(3, Path::new("/tmp/a&b"));
         let shortcuts = Shortcuts::load_from(file.clone());
-        assert_eq!(shortcuts.label(3), "Ctrl+Alt+&3 \u{2502} /tmp/a&&b");
-        assert_eq!(shortcuts.label(0), "Ctrl+Alt+&0 \u{2502} <none>");
+        assert_eq!(shortcuts.label(3), "&3 \u{2502} /tmp/a&&b");
+        assert_eq!(shortcuts.label(0), "&0 \u{2502} <none>");
         assert_eq!(shortcuts.folder(3), Some(PathBuf::from("/tmp/a&b")));
         std::fs::remove_file(file).unwrap();
     }

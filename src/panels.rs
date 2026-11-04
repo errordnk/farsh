@@ -36,10 +36,10 @@ fn BLACK() -> Color {
     crate::colors::fg("Panel.Cursor")
 }
 
-/// Far's panel key bar for each set of modifiers held (farlang.templ.m4's
-/// MF1.., MShiftF1.., MCtrlF1..), indexed by `modkeys::held()`: English, Russian.
+/// Far's panel key bar, plain and with Shift, Ctrl or Alt held
+/// (farlang.templ.m4's MF1.., MShiftF1.., MCtrlF1.., MAltF1..): English, Russian.
 type KeyBarLabels = [(&'static str, &'static str); 12];
-const KEY_BARS: [KeyBarLabels; 8] = {
+const KEY_BARS: [KeyBarLabels; 4] = {
     const E: (&str, &str) = ("", "");
     [
         [
@@ -86,8 +86,6 @@ const KEY_BARS: [KeyBarLabels; 8] = {
             ("Owner", "Владел"),
             ("Sort", "Сорт"),
         ],
-        // Ctrl+Shift
-        [E, E, ("View", "Просм"), ("Edit", "Редакт"), E, E, E, E, E, E, E, E],
         // Alt
         [
             ("Left", "Левая"),
@@ -103,21 +101,21 @@ const KEY_BARS: [KeyBarLabels; 8] = {
             ("ViewHs", "ИстПр"),
             ("FoldHs", "ИстПап"),
         ],
-        // Alt+Shift
-        [E, E, E, E, E, E, E, E, ("ConfPl", "КонфПл"), E, E, E],
-        // Ctrl+Alt, Ctrl+Alt+Shift
-        [E; 12],
-        [E; 12],
     ]
 };
 
 /// The key bar's labels for the modifiers held: one modifier changes them,
-/// two or more leave the plain ones.
+/// two or more leave the plain ones (farsh has no keys with two modifiers).
 fn key_bar_labels(held: u8) -> impl Iterator<Item = &'static str> {
+    use crate::modkeys::{ALT, CTRL, SHIFT};
     let russian = crate::lang::russian();
-    let held = held & 7;
-    let set = if held.count_ones() == 1 { held } else { 0 };
-    KEY_BARS[usize::from(set)].iter().map(move |&(en, ru)| if russian { ru } else { en })
+    let set = match held & (SHIFT | CTRL | ALT) {
+        SHIFT => 1,
+        CTRL => 2,
+        ALT => 3,
+        _ => 0,
+    };
+    KEY_BARS[set].iter().map(move |&(en, ru)| if russian { ru } else { en })
 }
 
 /// Far's ten view modes (config.cpp's InitialModes): Ctrl+1..Ctrl+9, Ctrl+0.
@@ -1347,14 +1345,6 @@ impl Panels {
         panel.dir = dir;
         panel.archive = None;
         panel.reload(select);
-    }
-
-    /// Takes the passive panel to `dir` (Ctrl+Shift+Enter in the folders history).
-    pub fn open_passive(&mut self, dir: PathBuf) {
-        let panel = if self.right_active { &mut self.left } else { &mut self.right };
-        panel.dir = dir;
-        panel.archive = None;
-        panel.reload(None);
     }
 
     /// Commands > Compare folders (FileList::CompareDir): every file of both

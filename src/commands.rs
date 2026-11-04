@@ -86,14 +86,6 @@ fn quote(text: &str) -> String {
     format!("\"{text}\"")
 }
 
-/// Ctrl+Shift+digit may come as the shifted character (US layout).
-fn digit_of(c: char) -> Option<usize> {
-    if let Some(d) = c.to_digit(10) {
-        return Some(d as usize);
-    }
-    ")!@#$%^&*(".find(c).or_else(|| ")!\"№;%:?*(".chars().position(|r| r == c))
-}
-
 impl App {
     /// The menu's commands and their keys (F2, F11 and F12 come as requests).
     pub(crate) fn run_command(&mut self, cmd: Cmd) {
@@ -163,8 +155,6 @@ impl App {
     pub(crate) fn command_key(&mut self, key: KeyEvent) -> bool {
         let m = key.modifiers;
         let alt = m == KeyModifiers::ALT;
-        let ctrl_alt = m.contains(KeyModifiers::CONTROL) && m.contains(KeyModifiers::ALT);
-        let ctrl_shift = m.contains(KeyModifiers::CONTROL) && m.contains(KeyModifiers::SHIFT) && !m.contains(KeyModifiers::ALT);
         let cmd = match key.code {
             KeyCode::F(7) if alt => Some(Cmd::FindFile),
             KeyCode::F(8) if alt => Some(Cmd::History),
@@ -183,19 +173,6 @@ impl App {
         if let Some(cmd) = cmd {
             self.run_command(cmd);
             return true;
-        }
-        // folder shortcuts: Ctrl+Alt+0..9 go, Ctrl+Shift+0..9 set
-        if let KeyCode::Char(c) = key.code
-            && let Some(index) = digit_of(c)
-        {
-            if ctrl_alt {
-                self.jump_to_shortcut(index);
-                return true;
-            }
-            if ctrl_shift {
-                shortcuts::Shortcuts::load().set(index, &self.panels.active_dir().to_path_buf());
-                return true;
-            }
         }
         // the file's associations (ProcessLocalFileTypes)
         let mode = match key.code {
@@ -570,7 +547,6 @@ impl App {
                     self.shell.cd(self.panels.active_dir());
                 }
             }
-            (Which::Folders, Picked::Passive(name)) => self.panels.open_passive(PathBuf::from(name)),
             _ => {}
         }
     }

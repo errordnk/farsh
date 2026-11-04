@@ -185,8 +185,6 @@ pub enum Picked {
     Enter(Record, bool),
     /// Ctrl+Enter: to the command line.
     ToCommandLine(String),
-    /// Ctrl+Shift+Enter: the folder in the passive panel.
-    Passive(String),
     /// F3 / F4 on a viewed or edited file.
     View(String),
     Edit(String),
@@ -253,11 +251,8 @@ impl HistoryMenu {
                 match (key.code, current) {
                     (KeyCode::Enter, Some(index)) => {
                         let record = picked(history, index);
-                        MenuOutcome::Picked(match (ctrl, shift) {
-                            (true, true) if self.which == Which::Folders => Picked::Passive(record.name),
-                            (true, _) => Picked::ToCommandLine(record.name),
-                            _ => Picked::Enter(record, true),
-                        })
+                        // no keys with two modifiers in farsh (Far's Ctrl+Shift+Enter is left out)
+                        MenuOutcome::Picked(if ctrl { Picked::ToCommandLine(record.name) } else { Picked::Enter(record, true) })
                     }
                     (KeyCode::F(3), Some(index)) if self.which == Which::Views => MenuOutcome::Picked(Picked::View(picked(history, index).name)),
                     (KeyCode::F(4), Some(index)) if self.which == Which::Views => MenuOutcome::Picked(Picked::Edit(picked(history, index).name)),
