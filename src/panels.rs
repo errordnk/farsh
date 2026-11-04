@@ -111,10 +111,13 @@ const KEY_BARS: [KeyBarLabels; 8] = {
     ]
 };
 
-/// The key bar's labels for the modifiers held.
+/// The key bar's labels for the modifiers held: one modifier changes them,
+/// two or more leave the plain ones.
 fn key_bar_labels(held: u8) -> impl Iterator<Item = &'static str> {
     let russian = crate::lang::russian();
-    KEY_BARS[usize::from(held & 7)].iter().map(move |&(en, ru)| if russian { ru } else { en })
+    let held = held & 7;
+    let set = if held.count_ones() == 1 { held } else { 0 };
+    KEY_BARS[usize::from(set)].iter().map(move |&(en, ru)| if russian { ru } else { en })
 }
 
 /// Far's ten view modes (config.cpp's InitialModes): Ctrl+1..Ctrl+9, Ctrl+0.
@@ -2438,6 +2441,16 @@ mod tests {
         assert_eq!(to_shell(ctrl('e')).code, KeyCode::Up);
         assert_eq!(to_shell(ctrl('x')).code, KeyCode::Down);
         assert_eq!(to_shell(ctrl('a')).code, KeyCode::Char('a'));
+    }
+
+    #[test]
+    fn one_modifier_changes_the_key_bar_two_do_not() {
+        use crate::modkeys::{ALT, CTRL, SHIFT};
+        let first = |held| key_bar_labels(held).next().unwrap();
+        assert_eq!(first(CTRL), "Left");
+        assert_eq!(first(SHIFT), "Add");
+        assert_eq!(first(CTRL | SHIFT), "Help");
+        assert_eq!(first(CTRL | ALT | SHIFT), "Help");
     }
 
     #[test]
