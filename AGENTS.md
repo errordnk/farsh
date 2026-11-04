@@ -252,4 +252,10 @@ over the shell screen.
 Next: F-keys
 (view, edit, copy, move, delete), panel selection, mouse, macOS/Linux checks.
 
+- The F3 viewer and the Ctrl+Q quick view are not to become a copy of
+  Far's viewer: they get Som's SRP built in, everything `somsrp` does
+  (`som/crates/somsrp`: images, GIF, audio, video with its streams and
+  subtitles, .cue; the placeholder grid on the PTY, the bytes over
+  somsrv's side channel), the user's decision of 2026-11-05.
+
 - A release build is always installed into `~/.local/bin` (Windows: `~/.local/bin/farsh.exe`) and nowhere else.
