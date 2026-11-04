@@ -255,6 +255,20 @@ fn extract_hook(dialog: &mut Dialog, event: Event) {
     }
 }
 
+// ---------------------------------------------------------------- Enter directory name
+
+/// F7 in a zip: arclite's create_dir asks with Far's InputBox (GetString in
+/// stddlg.cpp, no buttons): 76 by 6, the prompt at (5, 2), the line from 5
+/// to 70 on row 3; Enter is OK.
+pub fn create_folder(view: crate::panels::ArchiveView) -> Dialog {
+    let items = vec![
+        Item::Text { text: "Enter directory name:".into(), align: crate::dialog::Align::Left, highlight: false },
+        Item::Edit { id: "name", label: None, x: 5, text: vec![], cursor: 0, unchanged: false, enabled: true, history: false, secret: false },
+    ];
+    let places = vec![Place { x: 5, y: 2, x2: 0, y2: 0 }, Place { x: 5, y: 3, x2: 70, y2: 0 }];
+    Dialog::placed("ArcLite".into(), (76, 6), items, places, 1, None, Action::CreateDirInArchive(Box::new(view)))
+}
+
 // ---------------------------------------------------------------- Overwrite file
 
 /// arclite's OverwriteDialog (c_client_xs 60, FDLG_WARNING) for extracting:
@@ -915,5 +929,26 @@ mod tests {
         assert_eq!(at(&row(9), 31, 8), "( ) Skip");
         assert_eq!(at(&row(11), 5, 32), "[x] Delete files after archiving", "F6 moves");
         assert!(!rows.iter().any(|r| r.contains("Profile") || r.contains("Select archiver") || r.contains("volumes")));
+    }
+
+    #[test]
+    fn enter_directory_name_is_fars_input_box_and_enter_accepts_it() {
+        let listing = crate::archive::Listing { chain: vec![Format::Zip], items: vec![] };
+        let view = crate::panels::ArchiveView { file: PathBuf::from("a.zip"), listing, dir: String::new(), password: None };
+        let mut dialog = create_folder(view);
+        let rows = screen(&dialog, 76, 6);
+        assert_eq!(at(&rows[1], 3, 1), "\u{2554}");
+        assert_eq!(at(&rows[1], 33, 9), " ArcLite ");
+        assert_eq!(at(&rows[2], 5, 21), "Enter directory name:");
+        assert_eq!(at(&rows[4], 3, 1), "\u{255A}");
+        for c in "docs".chars() {
+            dialog.key(crossterm::event::KeyEvent::new(crossterm::event::KeyCode::Char(c), crossterm::event::KeyModifiers::NONE));
+        }
+        let crate::dialog::Outcome::Pressed(Action::CreateDirInArchive(_), "ok", values) =
+            dialog.key(crossterm::event::KeyEvent::new(crossterm::event::KeyCode::Enter, crossterm::event::KeyModifiers::NONE))
+        else {
+            panic!("Enter accepts")
+        };
+        assert_eq!(values.text("name"), "docs");
     }
 }

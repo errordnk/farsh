@@ -645,6 +645,8 @@ pub enum Request {
     AddToArchive(Vec<PathBuf>, ArchiveView, bool),
     /// F8 in a zip.
     DeleteInArchive(ArchivePick),
+    /// F7 in a zip.
+    CreateDirInArchive(ArchiveView),
     /// F3 on a file in an archive.
     ViewInArchive(ArchivePick),
 }
@@ -1030,7 +1032,8 @@ impl Panels {
                 5 | 6 => (!pick.items.is_empty()).then(|| Request::Extract(pick, other, n == 6)),
                 8 if !updatable => Some(Request::Error(crate::archive::NOT_UPDATABLE.into())),
                 8 => (!pick.items.is_empty()).then(|| Request::DeleteInArchive(pick)),
-                7 => Some(Request::Error("farsh does not create folders in archives".into())),
+                7 if !updatable => Some(Request::Error(crate::archive::NOT_UPDATABLE.into())),
+                7 => Some(Request::CreateDirInArchive(pick.view)),
                 9 => Some(Request::Menu),
                 10 => Some(Request::Quit),
                 _ => None,

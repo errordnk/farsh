@@ -656,6 +656,36 @@ pub fn zip_delete(path: &Path, items: &[String]) -> io::Result<()> {
     rewrite_zip(path, |name| !picked(items, name), |_| Ok(()))
 }
 
+/// F7 in a zip: the folder `name` (`a/b` makes both) in the folder
+/// `inside` (arclite's create_dir: one that is there already stays).
+pub fn zip_create_dir(path: &Path, listing: &Listing, inside: &str, name: &str) -> io::Result<()> {
+    let name = name.trim().trim_matches(['/', '\\']).replace('\\', "/");
+    if name.is_empty() || name.split('/').any(|part| part.is_empty() || part == "." || part == "..") {
+        return Err(io::Error::other(format!("{name}: not a folder name")));
+    }
+    let full = if inside.is_empty() { name } else { format!("{inside}/{name}") };
+    let mut missing = Vec::new();
+    let mut at = String::new();
+    for part in full.split('/') {
+        at = if at.is_empty() { part.to_string() } else { format!("{at}/{part}") };
+        if listing.items.iter().any(|i| i.path == at && !i.is_dir) {
+            return Err(io::Error::other(format!("{at} is a file in the archive")));
+        }
+        if !listing.items.iter().any(|i| i.path == at) {
+            missing.push(at.clone());
+        }
+    }
+    if missing.is_empty() {
+        return Ok(());
+    }
+    rewrite_zip(path, |_| true, |writer| {
+        for dir in &missing {
+            writer.add_directory(dir.as_str(), zip::write::SimpleFileOptions::default()).map_err(to_io)?;
+        }
+        Ok(())
+    })
+}
+
 /// F5/F6 into a zip's panel: `sources` go into the folder `inside` of the
 /// archive with the method, level and password `options` say; a file
 /// that is there already is asked about (Overwrite or Skip, arclite's
@@ -1010,5 +1040,24 @@ mod tests {
         for chain in [vec![Format::SevenZ], vec![Format::Tar], vec![Format::Gzip], vec![Format::Gzip, Format::Tar]] {
             assert!(!updatable(&Listing { chain, items: vec![] }));
         }
+    }
+
+    #[test]
+    fn f7_makes_a_folder_in_a_zip_and_its_parents_and_leaves_one_that_is_there() {
+        let dir = scratch("zipdir");
+        let o = options(&dir, Format::Zip, "Deflate");
+        create(&o, &[dir.join("src")], &mut Quiet).unwrap();
+        let listing = list(&o.path, None).unwrap();
+        zip_create_dir(&o.path, &listing, "src", "new/deeper").unwrap();
+        let listing = list(&o.path, None).unwrap();
+        let mut dirs: Vec<_> = listing.items.iter().filter(|i| i.is_dir).map(|i| i.path.clone()).collect();
+        dirs.sort();
+        assert_eq!(dirs, ["src", "src/new", "src/new/deeper", "src/sub"]);
+        let size = fs::metadata(&o.path).unwrap().len();
+        zip_create_dir(&o.path, &listing, "", "src").unwrap();
+        assert_eq!(fs::metadata(&o.path).unwrap().len(), size, "there already: the archive is not touched");
+        assert!(zip_create_dir(&o.path, &listing, "src", "a.txt").is_err(), "a file has that name");
+        assert!(zip_create_dir(&o.path, &listing, "", "..").is_err());
+        fs::remove_dir_all(dir).unwrap();
     }
 }

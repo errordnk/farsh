@@ -93,6 +93,8 @@ struct App {
     size: (u16, u16),
     /// F4 ran an editor over the panels: they come back when it ends.
     editing: Option<Editing>,
+    /// Where the cursor goes when the running job is done (a folder made in a zip).
+    select_after_job: Option<String>,
 }
 
 /// A file being edited in the shell (F4), started at the shell's prompt
@@ -114,6 +116,7 @@ impl App {
             last_menu: None,
             size: (cols, rows),
             editing: None,
+            select_after_job: None,
         })
     }
 
@@ -244,7 +247,8 @@ impl App {
             Err(error) if error != "Cancelled" => Overlay::Dialog(Dialog::error(&error)),
             _ => Overlay::None,
         };
-        self.panels.refresh(None);
+        let select = self.select_after_job.take();
+        self.panels.refresh(select.as_deref());
         true
     }
 
@@ -460,6 +464,7 @@ impl App {
                 let base = self.panels.active_dir().to_path_buf();
                 self.overlay = Overlay::Dialog(arcdialog::add_to_archive(sources, &base, view, moving));
             }
+            Request::CreateDirInArchive(view) => self.overlay = Overlay::Dialog(arcdialog::create_folder(view)),
             Request::DeleteInArchive(pick) => {
                 let action = Action::DeleteInArchive(Box::new(pick));
                 self.overlay = Overlay::Dialog(Dialog::ok_cancel("ArcLite", "Do you want to delete selected files?", action));
@@ -555,6 +560,19 @@ impl App {
                 let base = self.panels.active_dir().to_path_buf();
                 let work: fileops::Work = Box::new(move |reporter| unpack(&pick, &values, &base, reporter));
                 self.overlay = Overlay::Job(fileops::spawn(Kind::Unpack, work), None);
+            }
+            Action::CreateDirInArchive(view) => {
+                let name = values.text("name");
+                if name.trim().is_empty() {
+                    return;
+                }
+                let first = name.trim().split(['/', '\\']).find(|p| !p.is_empty()).unwrap_or_default().to_string();
+                let work: fileops::Work = Box::new(move |reporter| {
+                    reporter.progress().to = view.file.display().to_string();
+                    archive::zip_create_dir(&view.file, &view.listing, &view.dir, &name)
+                });
+                self.overlay = Overlay::Job(fileops::spawn(Kind::Update, work), None);
+                self.select_after_job = Some(first);
             }
             Action::DeleteInArchive(pick) => {
                 let (file, items) = (pick.view.file.clone(), pick.items.clone());

@@ -38,6 +38,8 @@ pub enum Action {
     Extract(Box<crate::arcdialog::ExtractSetup>),
     /// F8 in a zip: arclite's "Do you want to delete selected files?".
     DeleteInArchive(Box<crate::panels::ArchivePick>),
+    /// F7 in a zip: the folder's name.
+    CreateDirInArchive(Box<crate::panels::ArchiveView>),
     Quit,
     /// The answer to a file that already exists.
     Conflict,
@@ -1374,7 +1376,13 @@ impl Dialog {
             Item::Buttons(buttons) => buttons.iter().find(|b| b.default && b.enabled).map(|b| b.id),
             _ => None,
         });
-        id.map_or(Outcome::Open, |id| self.press(id))
+        // no buttons (Far's InputBox): the line itself is DIF_DEFAULTBUTTON
+        let has_buttons = self.items.iter().any(|item| matches!(item, Item::Buttons(_)));
+        match id {
+            Some(id) => self.press(id),
+            None if !has_buttons => self.press("ok"),
+            None => Outcome::Open,
+        }
     }
 
     fn press(&mut self, id: &'static str) -> Outcome {

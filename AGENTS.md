@@ -85,10 +85,11 @@ over the shell screen.
   the other panel shows open Add files to archive (UpdateDialog without the
   new-archive part, with "When destination file exists"), F8 in it asks
   "Do you want to delete selected files?", F6 out of it also deletes from
-  it; the zip is written again into a temporary file, the old entries
+  it, F7 asks "Enter directory name:" (Far's InputBox, 76 by 6, Enter
+  accepts; `a/b` makes both); the zip is written again into a temporary file, the old entries
   copied as they are (not recompressed), which then takes its place. Any
   other archive says arclite's "Archive modification not supported".
-  Known differences: no F7 inside a zip, new files in an encrypted zip are
+  Known differences: new files in an encrypted zip are
   not encrypted unless a password is typed, no SFX (7-Zip's modules), no
   profiles or saved settings (those buttons are disabled), zip cannot be
   written with LZMA or Deflate64 nor 7z with Deflate64 (an error says so),
