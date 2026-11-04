@@ -47,12 +47,12 @@ pub fn integration(kind: Kind, dir: &Path) -> std::io::Result<Integration> {
         Kind::Bash => {
             std::fs::create_dir_all(dir)?;
             let rc = dir.join("bashrc");
-            std::fs::write(&rc, BASH_RC)?;
+            std::fs::write(&rc, format!("{DIR_FN}{BASH_RC}"))?;
             Integration { args: vec!["--rcfile".into(), rc.display().to_string(), "-i".into()], env: vec![] }
         }
         Kind::Zsh => {
             std::fs::create_dir_all(dir)?;
-            for (name, text) in [(".zshenv", ZSH_ENV), (".zshrc", ZSH_RC)] {
+            for (name, text) in [(".zshenv", ZSH_ENV.to_string()), (".zshrc", format!("{DIR_FN}{ZSH_RC}"))] {
                 std::fs::write(dir.join(name), text)?;
             }
             let real = std::env::var("ZDOTDIR").unwrap_or_else(|_| std::env::var("HOME").unwrap_or_default());
@@ -71,8 +71,15 @@ $p = (Get-Location).ProviderPath -replace '\\\\', '/'; \
 [Console]::Out.Write(\"$([char]27)]7;file:///$p$([char]7)\"); \
 & $global:__farsh_prompt }";
 
+/// The directory for OSC 7. On Windows (Git Bash, MSYS2, Cygwin) `$PWD` is a
+/// path of their own (`/c/Users/x`, `/tmp`): `cygpath -m` gives the Windows
+/// one (`C:/Users/x`, sent as `/C:/Users/x`). Elsewhere there is no
+/// `cygpath` and `$PWD` goes as it is.
+const DIR_FN: &str = "__farsh_cygpath=$(command -v cygpath 2>/dev/null)\n\
+__farsh_dir() { if [ -n \"$__farsh_cygpath\" ]; then printf '/%s' \"$(cygpath -m \"$PWD\")\"; else printf '%s' \"$PWD\"; fi; }\n";
+
 const BASH_RC: &str = "[ -f ~/.bashrc ] && . ~/.bashrc\n\
-__farsh_osc7() { printf '\\033]7;file://%s%s\\007' \"$HOSTNAME\" \"$PWD\"; }\n\
+__farsh_osc7() { printf '\\033]7;file://%s%s\\007' \"$HOSTNAME\" \"$(__farsh_dir)\"; }\n\
 PROMPT_COMMAND=\"__farsh_osc7${PROMPT_COMMAND:+;$PROMPT_COMMAND}\"\n";
 
 const ZSH_ENV: &str = "[ -f \"${FARSH_ZDOTDIR:-$HOME}/.zshenv\" ] && . \"${FARSH_ZDOTDIR:-$HOME}/.zshenv\"\n";
@@ -80,7 +87,7 @@ const ZSH_ENV: &str = "[ -f \"${FARSH_ZDOTDIR:-$HOME}/.zshenv\" ] && . \"${FARSH
 const ZSH_RC: &str = "ZDOTDIR=\"${FARSH_ZDOTDIR:-$HOME}\"\n\
 [ -f \"$ZDOTDIR/.zshrc\" ] && . \"$ZDOTDIR/.zshrc\"\n\
 autoload -Uz add-zsh-hook\n\
-__farsh_osc7() { printf '\\033]7;file://%s%s\\007' \"$HOST\" \"$PWD\"; }\n\
+__farsh_osc7() { printf '\\033]7;file://%s%s\\007' \"$HOST\" \"$(__farsh_dir)\"; }\n\
 add-zsh-hook precmd __farsh_osc7\n";
 
 /// The line that makes the shell go to `dir`.

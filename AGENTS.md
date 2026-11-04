@@ -8,6 +8,9 @@ over the shell screen.
 - The command line is the SHELL's own line (the cursor row of its screen), never a
   buffer of ours. `Shell::command_line_is_empty` compares that row with the last
   bare prompt; Enter/Home/End belong to the panel only while it is empty.
+- bash/zsh on Windows (Git Bash, MSYS2, Cygwin) report `$PWD` in their own
+  paths (`/c/Users/x`, `/tmp`); the OSC 7 hook sends `cygpath -m` of it
+  instead, when `cygpath` is there (`cwd.rs`, `DIR_FN`).
 - Windows' own ConPTY (portable-pty creates it with INHERIT_CURSOR) starts with a
   cursor query `ESC[6n` and shows nothing until it is answered: `Shell::pump`
   answers that first query only. Any later DSR is not ours to answer (cmd would
