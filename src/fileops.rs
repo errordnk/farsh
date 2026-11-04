@@ -23,6 +23,8 @@ pub enum Kind {
     Unpack,
     /// F5/F6 into a zip, F8 in it: the archive is written again.
     Update,
+    /// Shift+F3 on an archive: arclite's "Test archive files".
+    Test,
 }
 
 impl Kind {
@@ -36,6 +38,7 @@ impl Kind {
             Kind::Pack => "Creating archive...",
             Kind::Unpack => "Extracting files...",
             Kind::Update => "Updating archive...",
+            Kind::Test => "Testing archive...",
         }
     }
 }
@@ -360,7 +363,7 @@ impl Worker {
                 self.copy_all(&plan)
             }
             Kind::Move => self.move_all(items),
-            Kind::Pack | Kind::Unpack | Kind::Update => Ok(()),
+            Kind::Pack | Kind::Unpack | Kind::Update | Kind::Test => Ok(()),
             Kind::Delete | Kind::Wipe => {
                 for (src, _) in items {
                     self.remove(src)?;

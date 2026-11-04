@@ -106,6 +106,28 @@ over the shell screen.
   Ctrl+T does nothing. Known differences: the info panel has no computer
   or user description lines, no plugin (archive) section, and the folder
   description is shown as text, not in a scrollable viewer.
+- The Files menu is whole. Far's Gray +, Gray - and Gray * are Alt++
+  (Alt+= too), Alt+- and Alt+* here, so that keyboards without a keypad
+  have them (the user's decision): Select/Deselect group (SelectFiles: 55
+  by 7, the last mask kept, `src/masks.rs` is filemasks.cpp + CmpName,
+  folders only unmarked as with SelectFolders off), Invert (a marked folder
+  unmarked). Ctrl+M restores the marks saved by the last group operation,
+  Copy/Move, Link, Apply command or Describe (SaveSelection). Alt+F6 is
+  copy.cpp's Link dialog (76 by 14, hard link / junction / symbolic link,
+  `src/links.rs`; a junction is a mount point reparse point). Ctrl+G is
+  GetString with buttons (76 by 8), then each file's line (`src/subst.rs`:
+  fnparce.cpp's metasymbols; not the list files `!@!`/`!$!` nor the input
+  `!?..!`) is run in the shell; the panels come back after the last
+  prompt. Ctrl+Z asks "Describe file" for each name in turn and writes
+  `Descript.ion` as DizList::Flush does (`src/diz.rs`: order kept, CRLF,
+  hidden, removed when empty; UTF-8 with a signature when not ASCII, where
+  Far writes OEM). Shift+F3 on an archive (or in one) is arclite's
+  ProcessHostFile menu (`src/vmenu.rs`), "Test archive files": everything
+  read through into a temporary folder, then "Archive test complete".
+  Known differences: no Filter buttons (disabled), no Shift+Gray +/-
+  (select/unselect all), the read-only Descript.ion question is an error.
+- A left click on the top row (the panels' frame) opens the menu bar, on
+  the title under the mouse, as in Far with the menu bar hidden.
 - Enter on a link: a junction or symlink is entered by its own path; one
   that denies listing itself (Windows' compatibility junctions `My Documents`,
   `Application Data`, `Start Menu`...) is followed to its target, as Far does.

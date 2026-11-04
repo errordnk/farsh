@@ -40,6 +40,14 @@ pub enum Action {
     DeleteInArchive(Box<crate::panels::ArchivePick>),
     /// F7 in a zip: the folder's name.
     CreateDirInArchive(Box<crate::panels::ArchiveView>),
+    /// Alt++ (true) / Alt+-: the mask.
+    SelectGroup(bool),
+    /// Alt+F6: links to these.
+    Link(Vec<PathBuf>),
+    /// Ctrl+G: the command for each of these names (in the active folder).
+    ApplyCommand(Vec<String>),
+    /// Ctrl+Z: the description of `names[0]`, then the rest in turn.
+    Describe(PathBuf, Vec<String>),
     Quit,
     /// The answer to a file that already exists.
     Conflict,
@@ -417,6 +425,22 @@ impl Dialog {
     pub fn confirm(title: &str, line: &str, action: Action) -> Self {
         let items = vec![centered(line), Item::Separator(None), Item::Buttons(vec![button("Yes", "ok", true), button("No", "cancel", false)])];
         Self { title: title.into(), style: Style::Normal, layout: Layout::Message, items, focus: 2, button: 0, places: vec![], disabled: vec![], hidden: vec![], hook: None, sub: None, closing: None, action }
+    }
+
+    /// Far::info_dlg / Message with OK: something to read, not red.
+    pub fn info(title: &str, text: &str) -> Self {
+        let mut items: Vec<Item> = text.lines().map(centered).collect();
+        items.push(Item::Separator(None));
+        items.push(Item::Buttons(vec![button("OK", "ok", true)]));
+        let focus = items.len() - 1;
+        Self { title: title.into(), style: Style::Normal, layout: Layout::Message, items, focus, button: 0, places: vec![], disabled: vec![], hidden: vec![], hook: None, sub: None, closing: None, action: Action::Info }
+    }
+
+    /// Message(MSG_WARNING) with OK.
+    pub fn warning_ok(title: &str, text: &str) -> Self {
+        let mut dialog = Self::error(text);
+        dialog.title = title.into();
+        dialog
     }
 
     /// An error to read.
@@ -1286,6 +1310,61 @@ impl Dialog {
     }
 }
 
+// ---------------------------------------------------------------- Files menu
+
+impl Dialog {
+    /// Alt++ / Alt+- (filelist.cpp's SelectFiles): 55 by 7, the mask from
+    /// 5 to 49, OK / Filter / Cancel. The filter is not done: disabled.
+    pub fn select_group(add: bool, mask: &str) -> Self {
+        let items = vec![
+            edit("mask", mask),
+            Item::Separator(None),
+            Item::Buttons(vec![button("OK", "ok", true), Button { label: "&Filter", id: "filter", default: false, enabled: false, stay: false }, button("Cancel", "cancel", false)]),
+        ];
+        let places = vec![span(5, 2, 49), at(-1, 3), at(-1, 4)];
+        Self::placed(if add { "Select" } else { "Deselect" }.into(), (55, 7), items, places, 0, None, Action::SelectGroup(add))
+    }
+
+    /// Far's GetString with FIB_BUTTONS (stddlg.cpp): 76 by 8, the prompt
+    /// at (5, 2) cut to 66, the line from 5 to 70, OK and Cancel.
+    pub fn get_string(title: &str, prompt: &str, value: &str, action: Action) -> Self {
+        let prompt: String = prompt.chars().take(66).collect();
+        let items = vec![
+            text(prompt),
+            edit("text", value),
+            Item::Separator(None),
+            Item::Buttons(vec![button("OK", "ok", true), button("Cancel", "cancel", false)]),
+        ];
+        let places = vec![at(5, 2), span(5, 3, 70), at(-1, 4), at(-1, 5)];
+        Self::placed(title.into(), (76, 8), items, places, 1, None, action)
+    }
+
+    /// Alt+F6 (copy.cpp with Link): the copy dialog, 76 by 14, without the
+    /// access rights, the timestamps and the link contents; the link type
+    /// where "Already existing files" is, a hard link when files are among
+    /// the sources, else a junction.
+    pub fn link(label: String, dest: &str, files_present: bool, sources: Vec<PathBuf>) -> Self {
+        let items = vec![
+            Item::Label(label),
+            edit("dest", dest),
+            Item::Separator(None),
+            Item::Label("Link t&ype:".into()),
+            Item::Combo { id: "kind", label: "", x: 29, options: crate::links::LinkType::LABELS.to_vec(), selected: if files_present { 0 } else { 1 }, unchanged: true },
+            Item::Check { id: "multiple", label: "Process &multiple destinations", checked: false, enabled: true },
+            Item::Separator(None),
+            Item::Check { id: "filter", label: "&Use filter", checked: false, enabled: false },
+            Item::Separator(None),
+            Item::Buttons(vec![
+                button("Create &link", "ok", true),
+                Button { label: "Filt&er", id: "filter", default: false, enabled: false, stay: false },
+                button("Ca&ncel", "cancel", false),
+            ]),
+        ];
+        let places = vec![at(5, 2), span(5, 3, 70), at(-1, 4), at(5, 5), span(29, 5, 70), at(5, 7), at(-1, 8), at(5, 9), at(-1, 10), at(-1, 11)];
+        Self::placed("Link".into(), (76, 14), items, places, 1, None, Action::Link(sources))
+    }
+}
+
 // ---------------------------------------------------------------- input
 
 impl Dialog {
@@ -1839,7 +1918,7 @@ pub fn paint_progress(job: &Job, grid: &mut Grid) {
     if matches!(job.kind, Kind::Delete | Kind::Wipe) {
         return paint_delete_progress(job, grid);
     }
-    if matches!(job.kind, Kind::Pack | Kind::Unpack | Kind::Update) {
+    if matches!(job.kind, Kind::Pack | Kind::Unpack | Kind::Update | Kind::Test) {
         return paint_pack_progress(job, grid);
     }
     let p = Style::Normal.palette();
@@ -1866,7 +1945,7 @@ pub fn paint_progress(job: &Job, grid: &mut Grid) {
         Kind::Copy => "Copying the file",
         Kind::Move => "Moving the file",
         Kind::Delete | Kind::Wipe => "Deleting the file",
-        Kind::Pack | Kind::Unpack | Kind::Update => "Adding the file",
+        Kind::Pack | Kind::Unpack | Kind::Update | Kind::Test => "Adding the file",
     };
     line(grid, verb);
     line(grid, &fit(&progress.from));
@@ -2296,5 +2375,32 @@ mod tests {
         assert_eq!(at_col(&row(5), 5, 1), "\u{255F}");
         assert_eq!(at_col(&row(6), 7, 61), format!("Files: {:>54}", "1 234"));
         assert_eq!(at_col(&row(7), 5, 1), "\u{255A}");
+    }
+
+    #[test]
+    fn select_get_string_and_link_are_placed_as_far_places_them() {
+        // Select: 55 by 7 on 80 by 25 at (12, 9): the frame from (15, 10), the mask from 17, its arrow at 62
+        let rows = screen(&Dialog::select_group(true, "*.*"));
+        assert_eq!(at_col(&rows[10], 15, 1), "\u{2554}");
+        assert!(rows[10].contains(" Select "), "{}", rows[10]);
+        assert_eq!(at_col(&rows[11], 17, 4), "*.* ");
+        assert_eq!(at_col(&rows[11], 62, 1), "\u{2193}");
+        assert!(rows[13].contains("{ OK }") && rows[13].contains("[ Filter ]") && rows[13].contains("[ Cancel ]"), "{}", rows[13]);
+        assert!(screen(&Dialog::select_group(false, ""))[10].contains(" Deselect "));
+        // GetString with buttons: 76 by 8 at (2, 8): the prompt at (7, 10), the line from 7, its arrow at 73
+        let rows = screen(&Dialog::get_string("Apply command", "Enter command to process selected files", "", Action::Info));
+        assert!(rows[9].contains(" Apply command "));
+        assert_eq!(at_col(&rows[10], 7, 39), "Enter command to process selected files");
+        assert_eq!(at_col(&rows[11], 73, 1), "\u{2193}");
+        assert!(rows[13].contains("{ OK }") && rows[13].contains("[ Cancel ]"));
+        // Link: 76 by 14 at (2, 5): the label at row 7, the type at 10 (its list at 31), multiple at 12, buttons at 16
+        let link = Dialog::link("Create link to a.txt &in:".into(), "dest", true, vec![]);
+        let rows = screen(&link);
+        assert!(rows[6].contains(" Link "));
+        assert_eq!(at_col(&rows[7], 7, 23), "Create link to a.txt in");
+        assert_eq!(at_col(&rows[10], 7, 10), "Link type:");
+        assert_eq!(at_col(&rows[10], 31, 9), "hard link");
+        assert_eq!(at_col(&rows[12], 7, 33), "[ ] Process multiple destinations");
+        assert!(rows[16].contains("{ Create link }") && rows[16].contains("[ Filter ]") && rows[16].contains("[ Cancel ]"), "{}", rows[16]);
     }
 }

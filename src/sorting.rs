@@ -278,7 +278,7 @@ fn natural(a: &str, b: &str) -> Ordering {
 /// Reads what the layers need and the folder listing does not carry.
 pub fn fill(entries: &mut [Entry], needs: &[SortMode], dir: &Path) {
     if needs.contains(&Descriptions) {
-        let descriptions = read_descriptions(dir);
+        let descriptions = crate::diz::Diz::read(dir).map();
         for entry in entries.iter_mut() {
             entry.description = Some(descriptions.get(&entry.name.to_lowercase()).cloned().unwrap_or_default());
         }
@@ -297,28 +297,6 @@ pub fn fill(entries: &mut [Entry], needs: &[SortMode], dir: &Path) {
     }
 }
 
-/// `Descript.ion` / `Files.bbs`: `name description` per line (a name with
-/// spaces in quotes); lines that start with a space continue the one before.
-fn read_descriptions(dir: &Path) -> std::collections::HashMap<String, String> {
-    let mut map = std::collections::HashMap::new();
-    let Ok(listing) = std::fs::read_dir(dir) else { return map };
-    let file = listing
-        .flatten()
-        .map(|e| e.file_name().to_string_lossy().into_owned())
-        .find(|n| n.eq_ignore_ascii_case("descript.ion") || n.eq_ignore_ascii_case("files.bbs"));
-    let Some(text) = file.and_then(|f| std::fs::read(dir.join(f)).ok()) else { return map };
-    for line in String::from_utf8_lossy(&text).lines() {
-        if line.is_empty() || line.starts_with([' ', '\t']) {
-            continue;
-        }
-        let (name, rest) = match line.strip_prefix('"') {
-            Some(quoted) => quoted.split_once('"').unwrap_or((quoted, "")),
-            None => line.split_once([' ', '\t']).unwrap_or((line, "")),
-        };
-        map.insert(name.to_lowercase(), rest.trim_start().to_string());
-    }
-    map
-}
 
 #[cfg(windows)]
 mod system {

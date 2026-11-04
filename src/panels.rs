@@ -312,6 +312,9 @@ pub struct Panel {
     pub cursor: usize,
     /// Names of the marked entries.
     pub marked: HashSet<String>,
+    /// Far's PrevSelected: the marks before the last group operation, and
+    /// the folder they were in (Ctrl+M brings them back).
+    prev_marked: (PathBuf, HashSet<String>),
     pub mode: ViewMode,
     pub sorting: Sorting,
     top: usize,
@@ -335,6 +338,7 @@ impl Panel {
             entries: Vec::new(),
             cursor: 0,
             marked: HashSet::new(),
+            prev_marked: (PathBuf::new(), HashSet::new()),
             mode: ViewMode::Medium,
             sorting: Sorting::default(),
             top: 0,
@@ -496,6 +500,53 @@ impl Panel {
                 self.marked.insert(name);
             }
         }
+    }
+
+    /// Far's SaveSelection.
+    pub fn save_selection(&mut self) {
+        self.prev_marked = (self.dir.clone(), self.marked.clone());
+    }
+
+    /// Ctrl+M (Far's RestoreSelection): the marks saved before the last group
+    /// operation come back, and the ones replaced are saved in their place.
+    pub fn restore_selection(&mut self) {
+        let prev = if self.prev_marked.0 == self.dir { std::mem::take(&mut self.prev_marked.1) } else { HashSet::new() };
+        let names: HashSet<&str> = self.entries.iter().filter(|e| !e.is_up()).map(|e| e.name.as_str()).collect();
+        let prev: HashSet<String> = prev.into_iter().filter(|n| names.contains(n.as_str())).collect();
+        let replaced = std::mem::replace(&mut self.marked, prev);
+        self.prev_marked = (self.dir.clone(), replaced);
+        if self.sorting.selected_first {
+            self.resort();
+        }
+    }
+
+    /// Select group / Deselect group (Far's SelectFiles with SELECT_ADD and
+    /// SELECT_REMOVE): the names the masks take (the short ones when shown)
+    /// are marked, folders only unmarked (Far's SelectFolders is off).
+    pub fn select_mask(&mut self, masks: &crate::masks::Masks, add: bool) {
+        self.save_selection();
+        for entry in self.entries.iter().filter(|e| !e.is_up()) {
+            let shown = if self.short_names && !entry.short_name.is_empty() { &entry.short_name } else { &entry.name };
+            if !masks.check(shown) {
+                continue;
+            }
+            if !add {
+                self.marked.remove(&entry.name);
+            } else if !entry.is_dir {
+                self.marked.insert(entry.name.clone());
+            }
+        }
+        if self.sorting.selected_first {
+            self.resort();
+        }
+    }
+
+    /// The names a command works on: the marked ones, or the one under the cursor (never `..`).
+    pub fn selected_names(&self) -> Vec<String> {
+        if self.marked.is_empty() {
+            return self.current().filter(|e| !e.is_up()).map(|e| vec![e.name.clone()]).unwrap_or_default();
+        }
+        self.entries.iter().filter(|e| self.marked.contains(&e.name)).map(|e| e.name.clone()).collect()
     }
 
     fn contains(&self, col: u16, row: u16) -> bool {
@@ -844,6 +895,16 @@ pub enum Request {
     CreateDirInArchive(ArchiveView),
     /// F3 on a file in an archive.
     ViewInArchive(ArchivePick),
+    /// Alt++ (true) / Alt+-: Select group / Deselect group.
+    SelectGroup(bool),
+    /// Alt+F6: links to these, in the other panel's folder by default.
+    Link(Vec<PathBuf>, PathBuf),
+    /// Ctrl+G: a command for each of these names.
+    ApplyCommand(Vec<String>),
+    /// Ctrl+Z: describe these names of this folder.
+    Describe(PathBuf, Vec<String>),
+    /// Shift+F3: arclite's menu for these archives (or the items picked in one).
+    ArchiveCommands(Vec<ArchivePick>),
 }
 
 /// Where the link at `path` points, as an ordinary path: a relative target
@@ -1103,13 +1164,14 @@ impl Panels {
         self.right_active = !self.right_active;
     }
 
-    /// Gray *: marks what is not marked and unmarks what is (files only, as Far does).
+    /// Alt+* (Far's Gray *, SELECT_INVERT): files are marked or unmarked,
+    /// a marked folder is unmarked, an unmarked one stays so.
     pub fn invert_marks(&mut self) {
         let panel = self.active();
-        let names: Vec<String> =
-            panel.entries.iter().filter(|e| !e.is_up() && !e.is_dir).map(|e| e.name.clone()).collect();
-        for name in names {
-            if !panel.marked.remove(&name) {
+        panel.save_selection();
+        let entries: Vec<(String, bool)> = panel.entries.iter().filter(|e| !e.is_up()).map(|e| (e.name.clone(), e.is_dir)).collect();
+        for (name, is_dir) in entries {
+            if !panel.marked.remove(&name) && !is_dir {
                 panel.marked.insert(name);
             }
         }
@@ -1168,6 +1230,8 @@ impl Panels {
     pub fn key(&mut self, key: KeyEvent, line_is_empty: bool) -> Key {
         let plain = !key.modifiers.contains(KeyModifiers::CONTROL);
         let ctrl_only = key.modifiers == KeyModifiers::CONTROL;
+        // Alt with a character that needs Shift (`+`, `*`) comes with Shift too
+        let alt_only = key.modifiers.contains(KeyModifiers::ALT) && !key.modifiers.contains(KeyModifiers::CONTROL);
         // Far's FilePanels keys: Ctrl+L, Ctrl+Q, Ctrl+T, Ctrl+F1, Ctrl+F2
         match key.code {
             KeyCode::Char('l') if ctrl_only => return self.toggle_kind(Kind::Info),
@@ -1217,16 +1281,23 @@ impl Panels {
             }
             KeyCode::F(12) if ctrl_only => return Key::Ask(Request::SortMenu),
             // Shift+F1: arclite's "Add to archive"
-            KeyCode::F(1) if key.modifiers == KeyModifiers::SHIFT => {
-                let sources = if self.in_archive() { vec![] } else { self.active_ref().sources() };
-                return if sources.is_empty() { Key::Taken } else { Key::Ask(Request::CreateArchive(sources)) };
-            }
+            KeyCode::F(1) if key.modifiers == KeyModifiers::SHIFT => return self.add_to_archive_request(),
             // Shift+F2: arclite's "Extract files" of the archive under the cursor
             KeyCode::F(2) if key.modifiers == KeyModifiers::SHIFT => return self.extract_archive_request(),
             // Far's Alt+Del: Wipe
             KeyCode::Delete if key.modifiers == KeyModifiers::ALT => return self.wipe_request(),
             // Far's Ctrl+A, whatever is typed
             KeyCode::Char('a') if ctrl_only => return self.attributes_request(),
+            // Far's Gray +, Gray - and Gray * are Alt++, Alt+- and Alt+* here
+            // (keyboards without a keypad); Ctrl+M brings the marks back
+            KeyCode::Char('+' | '=') if alt_only => return Key::Ask(Request::SelectGroup(true)),
+            KeyCode::Char('-') if alt_only => return Key::Ask(Request::SelectGroup(false)),
+            KeyCode::Char('*') if alt_only => self.invert_marks(),
+            KeyCode::Char('m') if ctrl_only => self.restore_selection(),
+            KeyCode::Char('g') if ctrl_only => return self.apply_command_request(),
+            KeyCode::Char('z') if ctrl_only => return self.describe_request(),
+            KeyCode::F(6) if key.modifiers == KeyModifiers::ALT => return self.link_request(),
+            KeyCode::F(3) if key.modifiers == KeyModifiers::SHIFT => return self.archive_commands_request(),
             KeyCode::F(n) if ctrl_only && SortMode::by_key(n).is_some() => {
                 self.active().set_sort(SortMode::by_key(n).unwrap_or(SortMode::Name));
             }
@@ -1319,6 +1390,107 @@ impl Panels {
     }
 
     /// Ctrl+A: the selection's attributes, or the entry's under the cursor (not `..`).
+    /// Ctrl+G: not in an archive (arclite has no real names).
+    pub fn apply_command_request(&mut self) -> Key {
+        let names = self.active_ref().selected_names();
+        if self.in_archive() || names.is_empty() {
+            return Key::Taken;
+        }
+        self.active().save_selection();
+        Key::Ask(Request::ApplyCommand(names))
+    }
+
+    /// Ctrl+Z: only on a folder of the disk (Far's NORMAL_PANEL).
+    pub fn describe_request(&mut self) -> Key {
+        let names = self.active_ref().selected_names();
+        if self.in_archive() || names.is_empty() {
+            return Key::Taken;
+        }
+        let panel = self.active();
+        panel.save_selection();
+        Key::Ask(Request::Describe(panel.dir.clone(), names))
+    }
+
+    /// Alt+F6: links to what is selected.
+    pub fn link_request(&mut self) -> Key {
+        let sources = if self.in_archive() { vec![] } else { self.active_ref().sources() };
+        if sources.is_empty() {
+            return Key::Taken;
+        }
+        self.active().save_selection();
+        Key::Ask(Request::Link(sources, self.other_dir().to_path_buf()))
+    }
+
+    /// Shift+F3 (Far's ProcessHostFile): in an archive, what is picked in
+    /// it; outside, the archives selected (or under the cursor).
+    pub fn archive_commands_request(&mut self) -> Key {
+        if self.in_archive() {
+            return match self.archive_pick() {
+                Some(pick) if !pick.items.is_empty() => Key::Ask(Request::ArchiveCommands(vec![pick])),
+                _ => Key::Taken,
+            };
+        }
+        let mut picks = Vec::new();
+        for path in self.active_ref().sources().into_iter().filter(|p| p.is_file() && crate::archive::detect(p).is_some()) {
+            match crate::archive::list(&path, None) {
+                Ok(listing) => {
+                    let items = listing.children("").iter().map(|i| i.path.clone()).collect();
+                    picks.push(ArchivePick { view: ArchiveView { file: path, listing, dir: String::new(), password: None }, items });
+                }
+                Err(error) => return Key::Ask(Request::Error(format!("{}: {error}", path.display()))),
+            }
+        }
+        if picks.is_empty() { Key::Taken } else { Key::Ask(Request::ArchiveCommands(picks)) }
+    }
+
+    /// Shift+F1: arclite's "Add to archive" of what is selected.
+    pub fn add_to_archive_request(&mut self) -> Key {
+        let sources = if self.in_archive() { vec![] } else { self.active_ref().sources() };
+        if sources.is_empty() { Key::Taken } else { Key::Ask(Request::CreateArchive(sources)) }
+    }
+
+    /// Ctrl+M over the active panel.
+    pub fn restore_selection(&mut self) {
+        self.active().restore_selection();
+    }
+
+    /// The descriptions changed (Ctrl+Z): panels that show them read them
+    /// again, keeping their marks and cursor.
+    pub fn refresh_descriptions(&mut self) {
+        for panel in [&mut self.left, &mut self.right] {
+            if panel.archive.is_none() && panel.entries.iter().any(|e| e.description.is_some()) {
+                crate::sorting::fill(&mut panel.entries, &[SortMode::Descriptions], &panel.dir);
+                panel.resort();
+            }
+        }
+    }
+
+    /// Alt++ / Alt+- accepted: the mask over the active panel.
+    pub fn select_group(&mut self, add: bool, masks: &crate::masks::Masks) {
+        self.active().select_mask(masks, add);
+    }
+
+    /// A mark no longer wanted (a file a command or a description was done for).
+    pub fn unmark(&mut self, name: &str) {
+        let panel = self.active();
+        panel.marked.remove(name);
+        if panel.sorting.selected_first {
+            panel.resort();
+        }
+    }
+
+    /// The other panel's folder and the name under its cursor (Far's `!#` metasymbols).
+    pub fn passive_current(&self) -> (PathBuf, String, String) {
+        let panel = self.passive_ref();
+        let entry = panel.current().filter(|e| !e.is_up());
+        (panel.dir.clone(), entry.map(|e| e.name.clone()).unwrap_or_default(), entry.map(|e| e.short_name.clone()).unwrap_or_default())
+    }
+
+    /// The short name of `name` in the active panel ("" when it has none).
+    pub fn short_name_of(&self, name: &str) -> String {
+        self.active_ref().entries.iter().find(|e| e.name == name).map(|e| e.short_name.clone()).unwrap_or_default()
+    }
+
     pub fn attributes_request(&mut self) -> Key {
         if self.in_archive() {
             return Key::Taken;
@@ -1361,6 +1533,10 @@ impl Panels {
         }
         let file = sources.first().filter(|path| path.is_file()).cloned();
         let other = self.other_dir().to_path_buf();
+        // copy.cpp saves the selection: Ctrl+M brings it back after the copy
+        if matches!(n, 5 | 6) && !sources.is_empty() {
+            self.active().save_selection();
+        }
         let request = match n {
             3 => file.map(Request::View),
             4 => file.map(Request::Edit),
@@ -2012,6 +2188,47 @@ mod tests {
         panels.key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL), true);
         assert!(panels.left.short_names);
         assert_eq!(panels.states()[0], (Kind::Files, true, false), "the menu: long names unchecked");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn alt_plus_minus_star_select_by_mask_and_ctrl_m_brings_the_marks_back() {
+        let dir = scratch("select");
+        let mut panels = Panels::new(dir.clone());
+        let alt = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::ALT | KeyModifiers::SHIFT);
+        assert_eq!(panels.key(alt('+'), false), Key::Ask(Request::SelectGroup(true)), "whatever is typed");
+        assert_eq!(panels.key(alt('-'), false), Key::Ask(Request::SelectGroup(false)));
+        panels.select_group(true, &crate::masks::Masks::new("*.*").unwrap());
+        let mut marked: Vec<&String> = panels.left.marked.iter().collect();
+        marked.sort();
+        assert_eq!(marked, ["apple.txt", "zeta.txt"], "files only: Far's SelectFolders is off");
+        panels.select_group(false, &crate::masks::Masks::new("z*").unwrap());
+        assert!(panels.left.marked.contains("apple.txt") && !panels.left.marked.contains("zeta.txt"));
+        // Ctrl+M: the marks before the last operation; again, back
+        panels.key(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::CONTROL), true);
+        assert_eq!(panels.left.marked.len(), 2);
+        panels.key(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::CONTROL), true);
+        assert_eq!(panels.left.marked.len(), 1);
+        // Alt+*: files flip, a marked folder is unmarked, an unmarked one stays so
+        panels.left.marked.insert("Alpha".into());
+        panels.key(alt('*'), true);
+        let mut marked: Vec<&String> = panels.left.marked.iter().collect();
+        marked.sort();
+        assert_eq!(marked, ["zeta.txt"]);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn ctrl_g_ctrl_z_alt_f6_and_shift_f3_ask_for_what_is_selected() {
+        let dir = scratch("files-menu");
+        let mut panels = Panels::new(dir.clone());
+        let ctrl = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL);
+        assert_eq!(panels.key(ctrl('g'), true), Key::Taken, "nothing on ..");
+        panels.key(key(KeyCode::End), true); // zeta.txt
+        assert_eq!(panels.key(ctrl('g'), true), Key::Ask(Request::ApplyCommand(vec!["zeta.txt".into()])));
+        assert_eq!(panels.key(ctrl('z'), true), Key::Ask(Request::Describe(dir.clone(), vec!["zeta.txt".into()])));
+        assert_eq!(panels.key(KeyEvent::new(KeyCode::F(6), KeyModifiers::ALT), true), Key::Ask(Request::Link(vec![dir.join("zeta.txt")], dir.clone())));
+        assert_eq!(panels.key(KeyEvent::new(KeyCode::F(3), KeyModifiers::SHIFT), true), Key::Taken, "not an archive");
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

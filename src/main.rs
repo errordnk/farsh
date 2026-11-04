@@ -6,13 +6,16 @@ mod archive;
 mod attributes;
 mod cwd;
 mod dialog;
+mod diz;
 mod drives;
 mod editor;
 mod fileops;
 mod grid;
 mod infopanel;
 mod keys;
+mod links;
 mod listing;
+mod masks;
 mod menu;
 mod mouse;
 mod palette;
@@ -21,7 +24,9 @@ mod qview;
 mod shell;
 mod sorting;
 mod sortmenu;
+mod subst;
 mod viewer;
+mod vmenu;
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -80,6 +85,8 @@ enum Overlay {
     Sort(sortmenu::SortMenu),
     /// A copy, move or delete running, and the question it is waiting on, if any.
     Job(Job, Option<Dialog>),
+    /// Shift+F3: arclite's menu for these archives.
+    ArcMenu(vmenu::VMenu, Vec<panels::ArchivePick>),
 }
 
 struct App {
@@ -97,13 +104,20 @@ struct App {
     editing: Option<Editing>,
     /// Where the cursor goes when the running job is done (a folder made in a zip).
     select_after_job: Option<String>,
+    /// What to say when the running job ends well (arclite's "Archive test complete").
+    done_message: Option<(String, String)>,
+    /// The last mask of Select group (Far's static strPrevMask) and the last applied command.
+    last_mask: String,
+    last_command: String,
 }
 
 /// A file being edited in the shell (F4), started at the shell's prompt
 /// number `prompts`.
 struct Editing {
-    prompts: u64,
-    name: String,
+    /// The prompt number the shell reaches when the commands are done.
+    until: u64,
+    /// The file to put the cursor on then.
+    name: Option<String>,
 }
 
 impl App {
@@ -119,6 +133,9 @@ impl App {
             size: (cols, rows),
             editing: None,
             select_after_job: None,
+            done_message: None,
+            last_mask: "*.*".into(),
+            last_command: String::new(),
         })
     }
 
@@ -142,11 +159,11 @@ impl App {
             }
             // The editor F4 started has ended (the shell is at its next prompt):
             // the panels are back as they were, on the file edited, as in Far.
-            if self.editing.as_ref().is_some_and(|editing| self.shell.prompts() > editing.prompts)
+            if self.editing.as_ref().is_some_and(|editing| self.shell.prompts() >= editing.until)
                 && let Some(editing) = self.editing.take()
             {
                 self.panels_visible = true;
-                self.panels.refresh(Some(&editing.name));
+                self.panels.refresh(editing.name.as_deref());
                 dirty = true;
             }
             if self.poll_job() {
@@ -220,6 +237,10 @@ impl App {
                 menu.paint(frame);
                 cursor = None;
             }
+            Overlay::ArcMenu(menu, _) => {
+                menu.paint(frame);
+                cursor = None;
+            }
             Overlay::Job(job, question) => {
                 dialog::paint_progress(job, frame);
                 cursor = question.as_ref().and_then(|dialog| dialog.paint(frame));
@@ -246,8 +267,10 @@ impl App {
             }
         }
         let Some(result) = job.result.clone() else { return false };
-        self.overlay = match result {
-            Err(error) if error != "Cancelled" => Overlay::Dialog(Dialog::error(&error)),
+        let message = self.done_message.take();
+        self.overlay = match (result, message) {
+            (Err(error), _) if error != "Cancelled" => Overlay::Dialog(Dialog::error(&error)),
+            (Ok(()), Some((title, text))) => Overlay::Dialog(Dialog::info(&title, &text)),
             _ => Overlay::None,
         };
         let select = self.select_after_job.take();
@@ -279,6 +302,11 @@ impl App {
                 let outcome = menu.key(key);
                 self.after_sort(menu, outcome);
             }
+            Overlay::ArcMenu(mut menu, picks) => match menu.key(key) {
+                vmenu::Outcome::Open => self.overlay = Overlay::ArcMenu(menu, picks),
+                vmenu::Outcome::Closed => {}
+                vmenu::Outcome::Chosen(_) => self.test_archives(picks),
+            },
             Overlay::Job(mut job, question) => {
                 match question {
                     Some(mut dialog) => {
@@ -329,6 +357,11 @@ impl App {
                 let outcome = menu.click(event);
                 self.after_sort(menu, outcome);
             }
+            Overlay::ArcMenu(mut menu, picks) => match menu.click(event) {
+                vmenu::Outcome::Open => self.overlay = Overlay::ArcMenu(menu, picks),
+                vmenu::Outcome::Closed => {}
+                vmenu::Outcome::Chosen(_) => self.test_archives(picks),
+            },
             Overlay::Job(mut job, question) => {
                 let question = match question {
                     Some(mut dialog) if event.kind == MouseEventKind::Down(MouseButton::Left) => {
@@ -338,6 +371,13 @@ impl App {
                     other => other,
                 };
                 self.overlay = Overlay::Job(job, question);
+            }
+            // Far: a click on the top line opens the menu bar, on the title under it
+            Overlay::None if self.panels_visible && row == 0 && event.kind == MouseEventKind::Down(MouseButton::Left) => {
+                let side = if self.panels.right_active() { 4 } else { 0 };
+                let mut menu = Menu::new(self.last_menu.unwrap_or(side), self.panels.view_modes(), self.panels.states());
+                let outcome = menu.click(event, self.size.0);
+                self.after_menu(menu, outcome);
             }
             Overlay::None if self.panels_visible => {
                 let double = event.kind == MouseEventKind::Down(MouseButton::Left) && self.is_double_click(col, row);
@@ -426,7 +466,7 @@ impl App {
                 // reports its prompts (see `Shell::prompts`); else Ctrl+O does.
                 if self.panels_visible && self.shell.kind() != cwd::Kind::Other {
                     let name = path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
-                    self.editing = Some(Editing { prompts: self.shell.prompts(), name });
+                    self.editing = Some(Editing { until: self.shell.prompts() + 1, name: Some(name) });
                 }
                 self.shell.run(&line);
                 self.panels_visible = false;
@@ -488,6 +528,23 @@ impl App {
                 let base = self.panels.active_dir().to_path_buf();
                 self.overlay = Overlay::Dialog(arcdialog::create_archive(sources, &base));
             }
+            Request::SelectGroup(add) => self.overlay = Overlay::Dialog(Dialog::select_group(add, &self.last_mask)),
+            Request::Link(sources, other) => {
+                let label = match sources.as_slice() {
+                    [one] => format!("Create link to {} &in:", dialog::escape_ampersands(&dialog::quote_outer_space(&file_name(one)))),
+                    many => format!("Create links to {} item{} &in:", many.len(), if many.len() == 1 { "" } else { "s" }),
+                };
+                let files_present = sources.iter().any(|path| !path.is_dir());
+                self.overlay = Overlay::Dialog(Dialog::link(label, &default_dest(&sources, &other), files_present, sources));
+            }
+            Request::ApplyCommand(names) => {
+                let dialog = Dialog::get_string("Apply command", "Enter command to process selected files", &self.last_command, Action::ApplyCommand(names));
+                self.overlay = Overlay::Dialog(dialog);
+            }
+            Request::Describe(dir, names) => self.describe_next(dir, names),
+            Request::ArchiveCommands(picks) => {
+                self.overlay = Overlay::ArcMenu(vmenu::VMenu::new("ArcLite", vec!["Test archive files".into()]), picks);
+            }
             Request::Menu => {
                 let side = if self.panels.right_active() { 4 } else { 0 };
                 self.overlay = Overlay::Menu(Menu::new(self.last_menu.unwrap_or(side), self.panels.view_modes(), self.panels.states()));
@@ -529,6 +586,21 @@ impl App {
             menu::Command::SwapPanels => self.panels.swap(),
             menu::Command::TogglePanels => self.panels_visible = !self.panels_visible,
             menu::Command::InvertSelection => self.panels.invert_marks(),
+            menu::Command::SelectGroup(add) => self.request(Request::SelectGroup(add)),
+            menu::Command::RestoreSelection => self.panels.restore_selection(),
+            menu::Command::Ask(which) => {
+                let asked = match which {
+                    menu::Asked::Link => self.panels.link_request(),
+                    menu::Asked::AddToArchive => self.panels.add_to_archive_request(),
+                    menu::Asked::Extract => self.panels.extract_archive_request(),
+                    menu::Asked::ArchiveCommands => self.panels.archive_commands_request(),
+                    menu::Asked::ApplyCommand => self.panels.apply_command_request(),
+                    menu::Asked::Describe => self.panels.describe_request(),
+                };
+                if let Key::Ask(request) = asked {
+                    self.request(request);
+                }
+            }
             menu::Command::ChangeDrive { right } => self.request(Request::ChangeDrive { right }),
             menu::Command::View { right, mode } => self.panels.set_view(right, mode),
             menu::Command::SortModes { right } => {
@@ -655,9 +727,113 @@ impl App {
                     self.panels.refresh(Some(&first));
                 }
             }
+            Action::SelectGroup(add) => {
+                let typed = values.text("mask");
+                match masks::Masks::new(&typed) {
+                    Some(masks) => {
+                        self.last_mask = typed;
+                        self.panels.select_group(add, &masks);
+                    }
+                    None => self.overlay = Overlay::Dialog(Dialog::warning_ok("Warning", "File-mask string contains errors")),
+                }
+            }
+            Action::Link(sources) => {
+                let typed = values.text("dest");
+                let kind = links::LinkType::from_index(values.choice("kind"));
+                let base = self.panels.active_dir().to_path_buf();
+                // "Process multiple destinations": `;` or `,` between them
+                let targets: Vec<String> = if values.checked("multiple") {
+                    typed.split([';', ',']).map(str::trim).filter(|t| !t.is_empty()).map(String::from).collect()
+                } else {
+                    vec![typed]
+                };
+                'all: for target in &targets {
+                    for source in &sources {
+                        if let Err(error) = links::create(source, &links::target(source, target, &base), kind) {
+                            self.overlay = Overlay::Dialog(Dialog::error(&error));
+                            break 'all;
+                        }
+                    }
+                }
+                self.panels.refresh(None);
+            }
+            Action::ApplyCommand(names) => {
+                let typed = values.text("text");
+                if typed.trim().is_empty() {
+                    return;
+                }
+                self.last_command = typed.clone();
+                let command = typed.trim_start();
+                let lines: Vec<String> = names.iter().map(|name| self.substitute(command, name, &names)).filter(|line| !line.is_empty()).collect();
+                if lines.is_empty() {
+                    return;
+                }
+                self.shell.clear_line();
+                // the panels come back when the last command is done (as after F4)
+                if self.panels_visible && self.shell.kind() != cwd::Kind::Other {
+                    self.editing = Some(Editing { until: self.shell.prompts() + lines.len() as u64, name: None });
+                }
+                for line in &lines {
+                    self.shell.run(line);
+                }
+                for name in &names {
+                    self.panels.unmark(name);
+                }
+                self.panels_visible = false;
+            }
+            Action::Describe(dir, mut names) => {
+                let name = names.remove(0);
+                let text = values.text("text");
+                let mut diz = diz::Diz::read(&dir);
+                if text.is_empty() { diz.erase(&name) } else { diz.set(&name, &text) }
+                if let Err(error) = diz.flush() {
+                    self.overlay = Overlay::Dialog(Dialog::error(&error));
+                    return;
+                }
+                self.panels.unmark(&name);
+                self.panels.refresh_descriptions();
+                self.describe_next(dir, names);
+            }
             Action::Quit => self.quit = true,
             Action::Conflict | Action::Info => {}
         }
+    }
+
+    /// Ctrl+Z: Far's DescribeFiles asks for each name in turn (Esc stops).
+    fn describe_next(&mut self, dir: PathBuf, names: Vec<String>) {
+        let Some(name) = names.first() else { return };
+        let prev = diz::Diz::read(&dir).get(name).unwrap_or_default();
+        let prompt = format!("Enter description for {}:", dialog::quote_outer_space(name));
+        self.overlay = Overlay::Dialog(Dialog::get_string("Describe file", &prompt, &prev, Action::Describe(dir, names)));
+    }
+
+    /// Far's SubstFileName for one file of Ctrl+G.
+    fn substitute(&self, command: &str, name: &str, names: &[String]) -> String {
+        let (other_dir, other_name, other_short) = self.panels.passive_current();
+        let this = subst::Subject { dir: self.panels.active_dir().to_path_buf(), name: name.to_string(), short: self.panels.short_name_of(name), list: names.to_vec() };
+        let other = subst::Subject { dir: other_dir, name: other_name, short: other_short, list: vec![] };
+        subst::substitute(command, &this, &other, self.panels.right_active())
+    }
+
+    /// arclite's "Test archive files": everything picked is read through
+    /// (the checksums checked) into a folder that is removed afterwards.
+    fn test_archives(&mut self, picks: Vec<panels::ArchivePick>) {
+        let work: fileops::Work = Box::new(move |reporter| {
+            let scratch = std::env::temp_dir().join(format!("farsh-test-{}", std::process::id()));
+            let mut result = Ok(());
+            for pick in &picks {
+                let view = &pick.view;
+                reporter.progress().to = view.file.display().to_string();
+                result = archive::extract(&view.file, &view.listing, &pick.items, &view.dir, &scratch, view.password.as_deref(), archive::Overwrite::Overwrite, &mut ArcReport { reporter, remembered: None });
+                let _ = std::fs::remove_dir_all(&scratch);
+                if result.is_err() {
+                    break;
+                }
+            }
+            result
+        });
+        self.done_message = Some(("ArcLite".into(), "Archive test complete".into()));
+        self.overlay = Overlay::Job(fileops::spawn(Kind::Test, work), None);
     }
 
     /// Ctrl+A over the panels: the attributes of what is selected (or under the cursor).

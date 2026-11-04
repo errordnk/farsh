@@ -46,6 +46,29 @@ pub enum Command {
     LongNames { right: bool },
     /// Panel On/Off (Ctrl+F1, Ctrl+F2).
     PanelOnOff { right: bool },
+    /// Select group (true) / Unselect group: Far's Gray + and Gray -, Alt++ and Alt+- here.
+    SelectGroup(bool),
+    /// Ctrl+M.
+    RestoreSelection,
+    /// What that key asks of the active panel.
+    Ask(Asked),
+}
+
+/// The Files menu items that ask the active panel as their key does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Asked {
+    /// Alt+F6.
+    Link,
+    /// Shift+F1.
+    AddToArchive,
+    /// Shift+F2.
+    Extract,
+    /// Shift+F3.
+    ArchiveCommands,
+    /// Ctrl+G.
+    ApplyCommand,
+    /// Ctrl+Z.
+    Describe,
 }
 
 struct Item {
@@ -119,23 +142,24 @@ fn titles(modes: [u8; 2], states: [(Kind, bool, bool); 2]) -> Vec<Title> {
                 item("&Edit", "F4", Some(Command::FKey(4))),
                 item("&Copy", "F5", Some(Command::FKey(5))),
                 item("&Rename or move", "F6", Some(Command::FKey(6))),
-                item("Lin&k", "Alt+F6", None),
+                item("Lin&k", "Alt+F6", Some(Command::Ask(Asked::Link))),
                 item("&Make folder", "F7", Some(Command::FKey(7))),
                 item("&Delete", "F8", Some(Command::FKey(8))),
                 item("&Wipe", "Alt+Del", Some(Command::Wipe)),
                 SEPARATOR,
-                item("Add &to archive", "Shift+F1", None),
-                item("E&xtract files", "Shift+F2", None),
-                item("Arc&hive commands", "Shift+F3", None),
+                item("Add &to archive", "Shift+F1", Some(Command::Ask(Asked::AddToArchive))),
+                item("E&xtract files", "Shift+F2", Some(Command::Ask(Asked::Extract))),
+                item("Arc&hive commands", "Shift+F3", Some(Command::Ask(Asked::ArchiveCommands))),
                 SEPARATOR,
                 item("File &attributes", "Ctrl+A", Some(Command::Attributes)),
-                item("A&pply command", "Ctrl+G", None),
-                item("Descri&be files", "Ctrl+Z", None),
+                item("A&pply command", "Ctrl+G", Some(Command::Ask(Asked::ApplyCommand))),
+                item("Descri&be files", "Ctrl+Z", Some(Command::Ask(Asked::Describe))),
                 SEPARATOR,
-                item("Select &group", "Gray +", None),
-                item("U&nselect group", "Gray -", None),
-                item("&Invert selection", "Gray *", Some(Command::InvertSelection)),
-                item("Re&store selection", "Ctrl+M", None),
+                // Far's Gray +, - and * are Alt with the same character here (keyboards without a keypad)
+                item("Select &group", "Alt++", Some(Command::SelectGroup(true))),
+                item("U&nselect group", "Alt+-", Some(Command::SelectGroup(false))),
+                item("&Invert selection", "Alt+*", Some(Command::InvertSelection)),
+                item("Re&store selection", "Ctrl+M", Some(Command::RestoreSelection)),
             ],
         },
         Title {
@@ -467,11 +491,10 @@ mod tests {
         assert_eq!(menu.key(key(KeyCode::Enter)), Outcome::Open);
         assert!(menu.dropped);
         assert_eq!(menu.key(key(KeyCode::Enter)), Outcome::Chosen(Command::FKey(3)));
-        // the highlight stops on grey items too, which do nothing
         for _ in 0..4 {
             menu.key(key(KeyCode::Down));
         }
-        assert_eq!(menu.key(key(KeyCode::Enter)), Outcome::Open, "Link is grey");
+        assert_eq!(menu.key(key(KeyCode::Enter)), Outcome::Chosen(Command::Ask(Asked::Link)));
         menu.key(key(KeyCode::Down));
         assert_eq!(menu.key(key(KeyCode::Enter)), Outcome::Chosen(Command::FKey(7)));
         // a panel menu opens on Brief, not on the checked mode
