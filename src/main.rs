@@ -377,6 +377,17 @@ impl App {
 
     fn on_key(&mut self, key: KeyEvent) {
         let key = keys::normalize(key);
+        // farsh's keys have one modifier at most: a chord is none of them.
+        // Over the panels it is the shell's; in a window it does nothing.
+        let key = match keys::chord(key) {
+            keys::Chord::Text(key) | keys::Chord::Single(key) => key,
+            keys::Chord::Many(key) => {
+                if matches!(self.overlay, Overlay::None) {
+                    self.send_to_shell(key);
+                }
+                return;
+            }
+        };
         match std::mem::replace(&mut self.overlay, Overlay::None) {
             Overlay::Dialog(mut dialog) => match dialog.key(key) {
                 dialog::Outcome::Open => self.overlay = Overlay::Dialog(dialog),
@@ -561,6 +572,11 @@ impl App {
                 Key::Pass => {}
             }
         }
+        self.send_to_shell(key);
+    }
+
+    /// A key the shell gets, as typed on its line.
+    fn send_to_shell(&mut self, key: KeyEvent) {
         if let Some(bytes) = keys::encode(panels::to_shell(key)) {
             let runs = key.code == KeyCode::Enter;
             // Far's command history: what Enter runs from the prompt

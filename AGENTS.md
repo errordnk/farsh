@@ -154,10 +154,13 @@ over the shell screen.
   - Folder shortcuts (`src/shortcuts.rs`): only through Commands > Folder
     shortcuts (Ins sets, Enter or the digit goes); a shortcut has one folder,
     not a list.
-  - No keys with two modifiers (the user's rule): Far's Ctrl+Shift+Enter,
-    RightCtrl/Ctrl+Shift+0..9, Ctrl+Shift+F3/F4, Alt+Shift+F9 are left out,
-    and the key bar changes only for Shift, Ctrl or Alt alone. Alt++ / Alt+-
-    still take Shift along, as the main keyboard's `+` needs it.
+  - Every key of farsh has no modifier or one (the user's rule):
+    `keys::chord` stops any key with two or more before panels, menus and
+    dialogs see it (over the panels it goes to the shell). So Far's
+    Ctrl+Shift+Enter, RightCtrl/Ctrl+Shift+0..9, Ctrl+Shift+F3/F4,
+    Alt+Shift+F9 are left out, Alt++ is the keypad's (the main keyboard's
+    `+` takes Shift), and the key bar changes only for Shift, Ctrl or Alt
+    alone. AltGr's characters (Ctrl+Alt + a non-Latin key) are typed text.
   - Ctrl+I (the filters, `src/filter.rs`: filefilter.cpp, the dialog of
     filefilterparams.cpp without the highlighting part) is often sent as
     Tab by terminals: then the menu is the way. Each panel keeps its marks

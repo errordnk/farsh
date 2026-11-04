@@ -58,6 +58,35 @@ pub fn normalize(mut key: KeyEvent) -> KeyEvent {
     key
 }
 
+/// A key by its modifiers: farsh's keys have one at most (the user's rule).
+#[derive(Debug, PartialEq)]
+pub enum Chord {
+    /// A character AltGr typed (Ctrl+Alt with anything but a Latin letter or
+    /// digit): text, its modifiers dropped.
+    Text(KeyEvent),
+    /// No modifier or one.
+    Single(KeyEvent),
+    /// Two or more: no key of farsh's.
+    Many(KeyEvent),
+}
+
+pub fn chord(mut key: KeyEvent) -> Chord {
+    let mods = key.modifiers & (KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SHIFT);
+    if mods.bits().count_ones() < 2 {
+        return Chord::Single(key);
+    }
+    let alt_gr = mods.contains(KeyModifiers::CONTROL | KeyModifiers::ALT);
+    if alt_gr
+        && let KeyCode::Char(c) = key.code
+        && !c.is_ascii_alphanumeric()
+        && !c.is_control()
+    {
+        key.modifiers = KeyModifiers::NONE;
+        return Chord::Text(key);
+    }
+    Chord::Many(key)
+}
+
 /// Whether the typed `c` is the hot key `hot`, in either layout.
 pub fn same(c: char, hot: char) -> bool {
     let lower = |c: char| c.to_lowercase().next().unwrap_or(c);
@@ -85,6 +114,19 @@ fn function_key(n: u8) -> Option<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn keys_with_two_modifiers_are_not_farshs() {
+        let k = |c, m| KeyEvent::new(c, m);
+        let (ctrl, alt, shift) = (KeyModifiers::CONTROL, KeyModifiers::ALT, KeyModifiers::SHIFT);
+        assert!(matches!(chord(k(KeyCode::F(5), ctrl)), Chord::Single(_)));
+        assert!(matches!(chord(k(KeyCode::Char('A'), shift)), Chord::Single(_)));
+        assert!(matches!(chord(k(KeyCode::Char('+'), alt | shift)), Chord::Many(_)), "Alt++ typed with Shift");
+        assert!(matches!(chord(k(KeyCode::Char('1'), ctrl | alt)), Chord::Many(_)));
+        assert!(matches!(chord(k(KeyCode::Enter, ctrl | shift)), Chord::Many(_)));
+        assert_eq!(chord(k(KeyCode::Char('@'), ctrl | alt)), Chord::Text(k(KeyCode::Char('@'), KeyModifiers::NONE)), "AltGr");
+        assert_eq!(chord(k(KeyCode::Char('ą'), ctrl | alt)), Chord::Text(k(KeyCode::Char('ą'), KeyModifiers::NONE)));
+    }
 
     #[test]
     fn russian_layout_is_the_latin_keys() {
