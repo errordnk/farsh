@@ -301,11 +301,15 @@ impl Panel {
     }
 
     /// Opens the folder under the cursor (`..` goes up and lands on the
-    /// folder it came from); a file does nothing.
-    pub fn enter(&mut self) {
-        let Some(entry) = self.entries.get(self.cursor).cloned() else { return };
+    /// folder it came from); a file does nothing. A link whose own path
+    /// cannot be listed (Windows' compatibility junctions, `My Documents`,
+    /// `Application Data`..., deny listing themselves) is followed to its
+    /// target. A folder that cannot be read at all is an error, and the
+    /// panel stays where it was.
+    pub fn enter(&mut self) -> Result<(), String> {
+        let Some(entry) = self.entries.get(self.cursor).cloned() else { return Ok(()) };
         if !entry.is_dir {
-            return;
+            return Ok(());
         }
         if entry.is_up() {
             let from = self.dir.file_name().map(|n| n.to_string_lossy().into_owned());
@@ -314,9 +318,17 @@ impl Panel {
             }
             self.reload(from.as_deref());
         } else {
-            self.dir.push(&entry.name);
+            let path = self.dir.join(&entry.name);
+            self.dir = match std::fs::read_dir(&path) {
+                Ok(_) => path,
+                Err(error) => match entry.reparse.and_then(|_| link_target(&path)).filter(|target| std::fs::read_dir(target).is_ok()) {
+                    Some(target) => target,
+                    None => return Err(format!("{}: {error}", path.display())),
+                },
+            };
             self.reload(None);
         }
+        Ok(())
     }
 
     /// Far's `GetShowColor`: the colors of the entry at `pos` (panel text past the end).
@@ -521,6 +533,20 @@ pub enum Request {
     ChangeDrive { right: bool },
     /// Ctrl+F12: the "Sort by" menu for the active panel.
     SortMenu,
+    /// Something went wrong (a folder that cannot be read): tell the user.
+    Error(String),
+}
+
+/// Where the link at `path` points, as an ordinary path: a relative target
+/// is taken from the link's folder, Windows' verbatim prefix is dropped.
+fn link_target(path: &Path) -> Option<PathBuf> {
+    let target = std::fs::read_link(path).ok()?;
+    let text = target.to_string_lossy();
+    let target = match text.strip_prefix(r"\\?\") {
+        Some(rest) if !rest.starts_with("UNC") => PathBuf::from(rest),
+        _ => target.clone(),
+    };
+    Some(if target.is_relative() { path.parent()?.join(target) } else { target })
 }
 
 /// What the panels made of a key.
@@ -731,7 +757,11 @@ impl Panels {
             }
             KeyCode::Home if line_is_empty => self.active().move_cursor(isize::MIN / 2),
             KeyCode::End if line_is_empty => self.active().move_cursor(isize::MAX / 2),
-            KeyCode::Enter if line_is_empty => self.active().enter(),
+            KeyCode::Enter if line_is_empty => {
+                if let Err(error) = self.active().enter() {
+                    return Key::Ask(Request::Error(error));
+                }
+            }
             KeyCode::Insert => self.active().toggle_mark(),
             // Far's Ctrl+R and Ctrl+U, while nothing is typed (else they are the shell's)
             KeyCode::Char('r') if !plain && line_is_empty => self.refresh(None),
@@ -773,8 +803,11 @@ impl Panels {
                 self.right_active = right;
                 if let Some(index) = self.active().entry_at(col, row) {
                     self.active().cursor = index;
-                    if double && self.active().entries[index].is_dir {
-                        self.active().enter();
+                    if double
+                        && self.active().entries[index].is_dir
+                        && let Err(error) = self.active().enter()
+                    {
+                        return Key::Ask(Request::Error(error));
                     }
                 }
             }
@@ -941,12 +974,52 @@ mod tests {
         let dir = scratch("enter");
         let mut panel = Panel::new(dir.clone());
         panel.move_cursor(2); // beta
-        panel.enter();
+        panel.enter().unwrap();
         assert_eq!(panel.dir, dir.join("beta"));
         assert_eq!(names(&panel), [".."]);
-        panel.enter(); // ".." from inside beta
+        panel.enter().unwrap(); // ".." from inside beta
         assert_eq!(panel.dir, dir);
         assert_eq!(panel.entries[panel.cursor].name, "beta");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// `My Documents` in every Windows profile is a junction that denies
+    /// listing itself; Enter goes where it points, as Far does.
+    #[cfg(windows)]
+    #[test]
+    fn enter_follows_a_link_that_cannot_be_listed_to_its_target() {
+        let profile = PathBuf::from(std::env::var("USERPROFILE").unwrap());
+        let link = profile.join("My Documents");
+        if std::fs::read_dir(&link).is_ok() || !link.exists() {
+            return; // a profile without the compatibility junction
+        }
+        let mut panel = Panel::new(profile.clone());
+        panel.cursor = panel.entries.iter().position(|e| e.name == "My Documents").unwrap();
+        panel.enter().unwrap();
+        assert_eq!(panel.dir, profile.join("Documents"));
+        assert!(names(&panel).len() > 1 || std::fs::read_dir(&panel.dir).unwrap().next().is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn enter_goes_through_a_symlink_to_a_folder() {
+        let dir = scratch("symlink");
+        std::os::unix::fs::symlink(dir.join("beta"), dir.join("link")).unwrap();
+        let mut panel = Panel::new(dir.clone());
+        panel.cursor = panel.entries.iter().position(|e| e.name == "link").unwrap();
+        panel.enter().unwrap();
+        assert_eq!(panel.dir, dir.join("link"));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_folder_that_cannot_be_read_is_an_error_and_the_panel_stays() {
+        let dir = scratch("gone");
+        let mut panel = Panel::new(dir.clone());
+        panel.cursor = panel.entries.iter().position(|e| e.name == "beta").unwrap();
+        std::fs::remove_dir(dir.join("beta")).unwrap();
+        assert!(panel.enter().is_err());
+        assert_eq!(panel.dir, dir);
         std::fs::remove_dir_all(dir).unwrap();
     }
 

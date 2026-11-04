@@ -48,6 +48,10 @@ over the shell screen.
   (`Shell::clear_line`: Esc for PSReadLine/cmd on Windows, Ctrl+E Ctrl+U for
   readline, zle and PSReadLine's Emacs mode). Every OSC 7 re-learns the bare
   prompt, since keys typed into a running program stop `write` waiting for it.
+- Enter on a link: a junction or symlink is entered by its own path; one
+  that denies listing itself (Windows' compatibility junctions `My Documents`,
+  `Application Data`, `Start Menu`...) is followed to its target, as Far does.
+  A folder that cannot be read is an error dialog; the panel stays.
 - Tests: `cargo test` (the shell test starts cmd.exe on Windows, /bin/sh elsewhere).
 - Code, comments and logs in English; talk to the user in Russian.
 

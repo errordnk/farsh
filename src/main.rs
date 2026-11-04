@@ -438,6 +438,7 @@ impl App {
                 self.overlay = Overlay::Drives(list);
             }
             Request::SortMenu => self.overlay = Overlay::Sort(self.panels.sort_menu()),
+            Request::Error(text) => self.overlay = Overlay::Dialog(Dialog::error(&text)),
             Request::Menu => {
                 let side = if self.panels.right_active() { 4 } else { 0 };
                 self.overlay = Overlay::Menu(Menu::new(self.last_menu.unwrap_or(side), self.panels.view_modes()));
