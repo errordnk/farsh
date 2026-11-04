@@ -180,12 +180,15 @@ impl Layout {
 pub struct ExtractSetup {
     pub pick: crate::panels::ArchivePick,
     move_files: usize,
+    delete_archive: usize,
+    updatable: bool,
 }
 
 /// arclite's ExtractDialog (c_client_xs 60): F5/F6 from an archive's panel.
-/// The archive is not updatable here, so "Delete files from archive" is
-/// [?] and off; "Go to target directory" is for Shift+F2 only (off).
-pub fn extract(pick: crate::panels::ArchivePick, dest: &Path) -> Dialog {
+/// "Delete files from archive" is [?] and off for an archive that cannot be
+/// changed, else on for F6; "Go to target directory" is for Shift+F2 only (off).
+pub fn extract(pick: crate::panels::ArchivePick, dest: &Path, moving: bool) -> Dialog {
+    let updatable = archive::updatable(&pick.view.listing);
     let mut l = Layout::new("Extract files", 60);
     l.label("&Extract files to:");
     l.new_line();
@@ -213,9 +216,10 @@ pub fn extract(pick: crate::panels::ArchivePick, dest: &Path) -> Dialog {
     l.spacer(2);
     l.radio("overwrite", 4, "&Append", false);
     l.new_line();
-    let move_files = l.check_box("movefiles", "&Delete files from archive after extraction", 2, true);
+    let move_state = if updatable { u8::from(moving) } else { 2 };
+    let move_files = l.check_box("movefiles", "&Delete files from archive after extraction", move_state, !updatable);
     l.new_line();
-    l.check_box("deletearchive", "De&lete archive after extraction", 0, false);
+    let delete_archive = l.check_box("deletearchive", "De&lete archive after extraction", 0, false);
     l.new_line();
     l.check_box("separatedir", "Ex&tract archive into separate directory", 2, true);
     l.new_line();
@@ -232,22 +236,22 @@ pub fn extract(pick: crate::panels::ArchivePick, dest: &Path) -> Dialog {
         Button { label: "Sa&ve settings", id: "saveparams", default: false, enabled: false, stay: true },
     ]);
     l.new_line();
-    let setup = ExtractSetup { pick, move_files };
+    let setup = ExtractSetup { pick, move_files, delete_archive, updatable };
     let mut dialog = l.finish("Extract files", dst_id, Some(extract_hook), Action::Extract(Box::new(setup)));
-    // triUndef: the archive cannot lose files here; the folder to go to is Shift+F2's
-    dialog.enable(move_files, false);
+    // triUndef: an archive farsh cannot change keeps its files; the folder to go to is Shift+F2's
+    dialog.enable(move_files, updatable);
     dialog.enable(open_dir, false);
     dialog
 }
 
-/// ExtractDialog's dialog_proc: "Delete files from archive" is on only for
-/// an updatable archive whose file stays (`move_files != triUndef &&
-/// !delete_archive`); farsh's archives are never updatable, so it stays off.
+/// ExtractDialog's dialog_proc: "Delete files from archive" only for an
+/// archive that can be changed and stays (`move_files != triUndef && !delete_archive`).
 fn extract_hook(dialog: &mut Dialog, event: Event) {
     let Action::Extract(setup) = dialog.action_mut() else { return };
-    let move_files = setup.move_files;
+    let (move_files, delete_archive, updatable) = (setup.move_files, setup.delete_archive, setup.updatable);
     if event == Event::Toggled("deletearchive") {
-        dialog.enable(move_files, false);
+        let deleting = dialog.check_state(delete_archive) == 1;
+        dialog.enable(move_files, updatable && !deleting);
     }
 }
 
@@ -256,7 +260,7 @@ fn extract_hook(dialog: &mut Dialog, event: Event) {
 /// arclite's OverwriteDialog (c_client_xs 60, FDLG_WARNING) for extracting:
 /// the file, the question, source and destination with size and time (the
 /// newer one marked), Remember choice, Overwrite/Skip/Rename/Append/Cancel.
-pub fn overwrite(path: &Path, src: (u64, Option<std::time::SystemTime>), dst: (u64, Option<std::time::SystemTime>)) -> Dialog {
+pub fn overwrite(path: &Path, src: (u64, Option<std::time::SystemTime>), dst: (u64, Option<std::time::SystemTime>), update: bool) -> Dialog {
     let mut l = Layout::new("Overwrite file", 60);
     let shown = fit_str(&path.display().to_string(), 60);
     l.text_box(&shown, 60);
@@ -290,13 +294,13 @@ pub fn overwrite(path: &Path, src: (u64, Option<std::time::SystemTime>), dst: (u
     l.separator();
     l.new_line();
     let button = |label, id, default| Button { label, id, default, enabled: true, stay: false };
-    let buttons = vec![
-        button("&Overwrite", "overwrite", true),
-        button("&Skip", "skip", false),
-        button("R&ename", "rename", false),
-        button("A&ppend", "append", false),
-        button("&Cancel", "cancel", false),
-    ];
+    // odkExtract has Rename and Append; odkUpdate (adding to an archive) has not
+    let mut buttons = vec![button("&Overwrite", "overwrite", true), button("&Skip", "skip", false)];
+    if !update {
+        buttons.push(button("R&ename", "rename", false));
+        buttons.push(button("A&ppend", "append", false));
+    }
+    buttons.push(button("&Cancel", "cancel", false));
     // the spacer(1) arclite puts between them is in the group's own spacing
     let focus = l.center_buttons(buttons);
     l.new_line();
@@ -353,10 +357,14 @@ pub struct CreateSetup {
     ids: CreateIds,
     /// What OK asked for, once its checks passed.
     pub options: Option<archive::Options>,
+    /// Add files to archive: the archive (shown in the other panel) and
+    /// the folder inside it; `None` creates a new one.
+    pub target: Option<crate::panels::ArchiveView>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
 struct CreateIds {
+    overwrite: usize,
     profile: usize,
     delete_profile: usize,
     arc_path: usize,
@@ -383,18 +391,31 @@ struct CreateIds {
 
 /// Shift+F1: UpdateDialog::show with new_arc (c_client_xs 68).
 pub fn create_archive(sources: Vec<PathBuf>, base: &Path) -> Dialog {
+    update_dialog(sources, base, None, false)
+}
+
+/// F5/F6 into an archive's panel: UpdateDialog without new_arc ("Add files
+/// to archive": the archive's own format, "When destination file exists").
+pub fn add_to_archive(sources: Vec<PathBuf>, base: &Path, target: crate::panels::ArchiveView, moving: bool) -> Dialog {
+    update_dialog(sources, base, Some(target), moving)
+}
+
+fn update_dialog(sources: Vec<PathBuf>, base: &Path, target: Option<crate::panels::ArchiveView>, moving: bool) -> Dialog {
+    let new_arc = target.is_none();
     let multifile = sources.len() > 1 || sources.first().is_some_and(|s| s.is_dir());
     let default_name = match sources.as_slice() {
         [one] => one.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
         _ => base.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "archive".into()),
     };
-    let format = Format::SevenZ;
+    let format = if new_arc { Format::SevenZ } else { Format::Zip };
     let old_ext = format.extension().to_string();
     // the other updatable formats: one file may also go into a single-file format
     let other: Vec<Format> = [Format::Gzip, Format::Tar].into_iter().filter(|f| !multifile || !f.single_file()).collect();
-    let mut l = Layout::new("Create archive", 68);
+    let title = if new_arc { "Create archive" } else { "Add files to archive" };
+    let mut l = Layout::new(title, 68);
     let mut ids = CreateIds::default();
 
+    if new_arc {
     l.label("&Profile:");
     ids.profile = l.combo("profile", vec![""], 0, Some(30));
     l.spacer(1);
@@ -429,12 +450,14 @@ pub fn create_archive(sources: Vec<PathBuf>, base: &Path) -> Dialog {
         l.combo("otherformat", other.iter().map(|f| f.name()).collect(), 0, None);
     }
     l.new_line();
+    }
 
     l.label("Compression &level:");
     ids.level = l.combo("level", LEVELS.iter().map(|(name, _)| *name).collect(), 3, None);
     l.spacer(2);
     l.label("&Method:");
-    ids.method = l.combo("method", METHODS.to_vec(), 0, None);
+    // an archive keeps its method (a zip's is Deflate); a new 7z starts with LZMA
+    ids.method = l.combo("method", METHODS.to_vec(), if new_arc { 0 } else { 3 }, None);
     l.spacer(2);
     ids.solid = l.check_box("solid", "S&olid", 1, false);
     l.new_line();
@@ -463,6 +486,7 @@ pub fn create_archive(sources: Vec<PathBuf>, base: &Path) -> Dialog {
     l.separator();
     l.new_line();
 
+    if new_arc {
     ids.create_sfx = l.check_box("sfx", "Create self-e&xtracting archive", 0, false);
     l.spacer(2);
     ids.sfx_options = l.button("SFX options", "sfxoptions", true);
@@ -477,8 +501,21 @@ pub fn create_archive(sources: Vec<PathBuf>, base: &Path) -> Dialog {
     l.new_line();
     l.separator();
     l.new_line();
+    } else {
+    l.label("When destination file exists:");
+    l.new_line();
+    l.spacer(2);
+    ids.overwrite = l.radio("oa", 0, "As&k", true);
+    l.spacer(2);
+    l.radio("oa", 1, "O&verwrite", false);
+    l.spacer(2);
+    l.radio("oa", 2, "Ski&p", false);
+    l.new_line();
+    l.separator();
+    l.new_line();
+    }
 
-    ids.move_files = l.check_box("movefiles", "&Delete files after archiving", 0, false);
+    ids.move_files = l.check_box("movefiles", "&Delete files after archiving", u8::from(moving), false);
     l.spacer(2);
     l.check_box("ignoreerrors", "&Ignore errors", 0, false);
     l.new_line();
@@ -496,9 +533,10 @@ pub fn create_archive(sources: Vec<PathBuf>, base: &Path) -> Dialog {
     ]);
     l.new_line();
 
-    let focus = ids.arc_path;
-    let setup = CreateSetup { sources, base: base.to_path_buf(), default_name, multifile, other, format, old_ext, ids, options: None };
-    let mut dialog = l.finish("Create archive", focus, Some(create_hook), Action::CreateArchive(Box::new(setup)));
+    // arclite's DN_INITDIALOG focuses the path; with no path, the first control
+    let focus = if new_arc { ids.arc_path } else { ids.level };
+    let setup = CreateSetup { sources, base: base.to_path_buf(), default_name, multifile, other, format, old_ext, ids, options: None, target };
+    let mut dialog = l.finish(title, focus, Some(create_hook), Action::CreateArchive(Box::new(setup)));
     set_control_state(&mut dialog);
     dialog
 }
@@ -591,6 +629,10 @@ fn set_control_state(dialog: &mut Dialog) {
     for i in ids.visible - 1..=ids.visible {
         dialog.show(i, show_password);
     }
+    if setup.target.is_some() {
+        dialog.enable(ids.move_files, dialog.check_state(ids.enable_filter) != 1);
+        return;
+    }
     change_extension(dialog);
     // self-extracting archives need 7-Zip's SFX modules, which farsh has not got
     dialog.enable(ids.create_sfx, false);
@@ -645,7 +687,7 @@ fn create_hook(dialog: &mut Dialog, event: Event) {
                     return;
                 }
             };
-            let exists = options.path.exists();
+            let exists = setup.target.is_none() && options.path.exists();
             if let Some(s) = setup_of(dialog) {
                 s.options = Some(options);
             }
@@ -661,6 +703,9 @@ fn create_hook(dialog: &mut Dialog, event: Event) {
 /// arclite's eval_arc_path: the typed path, the default name for a folder,
 /// the extension appended if asked, made absolute against the panel's folder.
 pub fn eval_arc_path(dialog: &Dialog, setup: &CreateSetup) -> PathBuf {
+    if let Some(target) = &setup.target {
+        return target.file.clone();
+    }
     let typed = dialog.text_of(setup.ids.arc_path);
     let mut path = typed.trim().replace('"', "");
     if path.is_empty() || path.ends_with(['\\', '/']) {
@@ -697,7 +742,7 @@ pub fn archive_options(dialog: &Dialog, setup: &CreateSetup) -> Result<archive::
             return Err("Password is empty".into());
         }
     }
-    let volume_size = if dialog.check_state(ids.enable_volumes) == 1 {
+    let volume_size = if setup.target.is_none() && dialog.check_state(ids.enable_volumes) == 1 {
         let size = archive::parse_size(&dialog.text_of(ids.volume_size)).filter(|&s| s >= archive::MIN_VOLUME_SIZE);
         Some(size.ok_or_else(|| "Invalid volume size".to_string())?)
     } else {
@@ -714,6 +759,11 @@ pub fn archive_options(dialog: &Dialog, setup: &CreateSetup) -> Result<archive::
         volume_size,
         move_files: dialog.check_state(ids.enable_filter) != 1 && dialog.check_state(ids.move_files) == 1,
         ignore_errors: dialog.check_state(ids.move_files + 1) == 1,
+        overwrite: match (setup.target.is_some(), dialog.check_state(ids.overwrite + 1), dialog.check_state(ids.overwrite + 2)) {
+            (true, 1, _) => archive::Overwrite::Overwrite,
+            (true, _, 1) => archive::Overwrite::Skip,
+            _ => archive::Overwrite::Ask,
+        },
     })
 }
 
@@ -808,7 +858,7 @@ mod tests {
         let view = crate::panels::ArchiveView { file: PathBuf::from("a.zip"), listing, dir: String::new(), password: None };
         let pick = crate::panels::ArchivePick { view, items: vec!["x".into()] };
         let dest = std::env::temp_dir();
-        let dialog = extract(pick, &dest);
+        let dialog = extract(pick, &dest, false);
         // 70 by 18 (client 60 by 14)
         let rows = screen(&dialog, 70, 18);
         let row = |y: usize| rows[y].clone();
@@ -822,7 +872,7 @@ mod tests {
         assert_eq!(at(&row(7), 31, 8), "( ) Skip");
         assert_eq!(at(&row(8), 7, 10), "( ) Rename");
         assert_eq!(at(&row(8), 19, 10), "( ) Append");
-        assert_eq!(at(&row(9), 5, 46), "[?] Delete files from archive after extraction");
+        assert_eq!(at(&row(9), 5, 46), "[ ] Delete files from archive after extraction", "a zip can lose files: F5 leaves it off");
         assert_eq!(at(&row(10), 5, 35), "[ ] Delete archive after extraction");
         assert_eq!(at(&row(11), 5, 43), "[?] Extract archive into separate directory");
         assert_eq!(at(&row(12), 5, 43), "[?] Go to target directory after extraction");
@@ -832,7 +882,7 @@ mod tests {
 
         let when = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_800_000_000);
         let older = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
-        let dialog = overwrite(Path::new("C:/x/a.txt"), (17, Some(when)), (3, Some(older)));
+        let dialog = overwrite(Path::new("C:/x/a.txt"), (17, Some(when)), (3, Some(older)), false);
         let rows = screen(&dialog, 70, 14);
         assert_eq!(at(&rows[1], 27, 16), " Overwrite file ");
         assert_eq!(at(&rows[2], 5, 10), "C:/x/a.txt");
@@ -844,5 +894,26 @@ mod tests {
         assert_eq!(at(&rows[6], 18, 1), "3");
         assert_eq!(at(&rows[8], 5, 19), "[ ] Remember choice");
         assert!(rows[10].contains("{ Overwrite } [ Skip ] [ Rename ] [ Append ] [ Cancel ]"), "{:?}", rows[10]);
+    }
+
+    #[test]
+    fn add_files_to_archive_is_update_dialog_without_the_new_archive_part() {
+        let listing = crate::archive::Listing { chain: vec![Format::Zip], items: vec![] };
+        let view = crate::panels::ArchiveView { file: PathBuf::from("a.zip"), listing, dir: String::new(), password: None };
+        let dialog = add_to_archive(vec![PathBuf::from("x.txt")], Path::new("."), view, true);
+        // 78 wide; rows: level, advanced, sep, encrypt, password, sep, oa (3), sep, move/ignore, shared/filter, sep, buttons
+        let rows = screen(&dialog, 78, 25);
+        let top = rows.iter().position(|r| r.contains(" Add files to archive ")).unwrap();
+        let row = |y: usize| rows[top + y - 1].clone();
+        assert_eq!(at(&row(2), 5, 18), "Compression level:");
+        assert_eq!(at(&row(2), 44, 7), "Deflate", "a zip's method");
+        assert_eq!(at(&row(3), 5, 20), "Advanced parameters:");
+        assert_eq!(at(&row(5), 5, 19), "[ ] Encrypt archive");
+        assert_eq!(at(&row(8), 5, 29), "When destination file exists:");
+        assert_eq!(at(&row(9), 7, 7), "(\u{2022}) Ask");
+        assert_eq!(at(&row(9), 16, 13), "( ) Overwrite");
+        assert_eq!(at(&row(9), 31, 8), "( ) Skip");
+        assert_eq!(at(&row(11), 5, 32), "[x] Delete files after archiving", "F6 moves");
+        assert!(!rows.iter().any(|r| r.contains("Profile") || r.contains("Select archiver") || r.contains("volumes")));
     }
 }

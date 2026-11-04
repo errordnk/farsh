@@ -21,6 +21,8 @@ pub enum Kind {
     Pack,
     /// F5 from an archive: files come out of it.
     Unpack,
+    /// F5/F6 into a zip, F8 in it: the archive is written again.
+    Update,
 }
 
 impl Kind {
@@ -33,6 +35,7 @@ impl Kind {
             Kind::Wipe => "Wipe",
             Kind::Pack => "Creating archive...",
             Kind::Unpack => "Extracting files...",
+            Kind::Update => "Updating archive...",
         }
     }
 }
@@ -106,7 +109,8 @@ pub enum Question {
     /// Wipe: "Several hard links link to this file."
     HardLinks(PathBuf),
     /// Extracting: arclite's "Overwrite file" (the new and the old: size, time).
-    Exists { path: PathBuf, new: (u64, Option<SystemTime>), old: (u64, Option<SystemTime>) },
+    /// `update`: adding to an archive (Overwrite or Skip only).
+    Exists { path: PathBuf, new: (u64, Option<SystemTime>), old: (u64, Option<SystemTime>), update: bool },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -356,7 +360,7 @@ impl Worker {
                 self.copy_all(&plan)
             }
             Kind::Move => self.move_all(items),
-            Kind::Pack | Kind::Unpack => Ok(()),
+            Kind::Pack | Kind::Unpack | Kind::Update => Ok(()),
             Kind::Delete | Kind::Wipe => {
                 for (src, _) in items {
                     self.remove(src)?;

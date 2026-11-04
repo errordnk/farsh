@@ -81,8 +81,15 @@ over the shell screen.
   top, leaving it lands on the archive); F5/F6 there and Shift+F2 on an
   archive open Extract files, a file in the way asks arclite's Overwrite
   file (Overwrite/Skip/Rename/Append, Remember choice), F3 views a file
-  from inside. Known differences: archives are read-only (no adding,
-  deleting or F7 inside: a message says so), no SFX (7-Zip's modules), no
+  from inside. A zip can be changed (arclite's updatable): F5/F6 into a zip
+  the other panel shows open Add files to archive (UpdateDialog without the
+  new-archive part, with "When destination file exists"), F8 in it asks
+  "Do you want to delete selected files?", F6 out of it also deletes from
+  it; the zip is written again into a temporary file, the old entries
+  copied as they are (not recompressed), which then takes its place. Any
+  other archive says arclite's "Archive modification not supported".
+  Known differences: no F7 inside a zip, new files in an encrypted zip are
+  not encrypted unless a password is typed, no SFX (7-Zip's modules), no
   profiles or saved settings (those buttons are disabled), zip cannot be
   written with LZMA or Deflate64 nor 7z with Deflate64 (an error says so),
   Shift+F2 cannot "Go to target directory".

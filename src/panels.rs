@@ -638,8 +638,13 @@ pub enum Request {
     Attributes(Vec<PathBuf>),
     /// Shift+F1: put these into a new archive.
     CreateArchive(Vec<PathBuf>),
-    /// F5/F6 in an archive (to the other panel's folder), Shift+F2 on archives.
-    Extract(ArchivePick, PathBuf),
+    /// F5/F6 in an archive (to the other panel's folder; F6 also takes the
+    /// files out of it), Shift+F2 on archives.
+    Extract(ArchivePick, PathBuf, bool),
+    /// F5/F6 into a zip the other panel shows (F6: the files go).
+    AddToArchive(Vec<PathBuf>, ArchiveView, bool),
+    /// F8 in a zip.
+    DeleteInArchive(ArchivePick),
     /// F3 on a file in an archive.
     ViewInArchive(ArchivePick),
 }
@@ -735,7 +740,7 @@ impl Panels {
             Ok(listing) => {
                 let items = listing.children("").iter().map(|i| i.path.clone()).collect();
                 let view = ArchiveView { file: path, listing, dir: String::new(), password: None };
-                Key::Ask(Request::Extract(ArchivePick { view, items }, other))
+                Key::Ask(Request::Extract(ArchivePick { view, items }, other, false))
             }
             Err(error) => Key::Ask(Request::Error(format!("{}: {error}", path.display()))),
         }
@@ -837,10 +842,12 @@ impl Panels {
     /// Reads both panels again (after a copy, a delete...); the active
     /// panel's cursor goes to `select` if given.
     pub fn refresh(&mut self, select: Option<&str>) {
-        // an archive that is gone (deleted after extraction) is left
+        // an archive is read again (it may have changed); one that is gone is left
         for panel in [&mut self.left, &mut self.right] {
-            if panel.archive.as_ref().is_some_and(|view| !view.file.exists()) {
-                panel.archive = None;
+            let Some(view) = &mut panel.archive else { continue };
+            match crate::archive::list(&view.file, view.password.as_deref()) {
+                Ok(listing) => view.listing = listing,
+                Err(_) => panel.archive = None,
             }
         }
         let keep = self.active_ref().current().map(|e| e.name.clone());
@@ -853,6 +860,10 @@ impl Panels {
             let wanted = if is_right == right_active { select.map(String::from).or(keep.clone()) } else { other_keep.clone() };
             panel.reload(wanted.as_deref());
         }
+    }
+
+    fn passive_ref(&self) -> &Panel {
+        if self.right_active { &self.left } else { &self.right }
     }
 
     fn active_ref(&self) -> &Panel {
@@ -1012,10 +1023,14 @@ impl Panels {
             // farsh does not write into archives), F3 views a file
             let other = self.other_dir().to_path_buf();
             let file_picked = pick.items.len() == 1 && pick.view.listing.items.iter().any(|i| i.path == pick.items[0] && !i.is_dir);
+            let updatable = crate::archive::updatable(&pick.view.listing);
             let request = match n {
                 3 => file_picked.then(|| Request::ViewInArchive(pick)),
-                5 | 6 => (!pick.items.is_empty()).then(|| Request::Extract(pick, other)),
-                7 | 8 => Some(Request::Error("farsh does not change archives: only extracting from them".into())),
+                // F6: extract, and out of the archive if it can be changed
+                5 | 6 => (!pick.items.is_empty()).then(|| Request::Extract(pick, other, n == 6)),
+                8 if !updatable => Some(Request::Error(crate::archive::NOT_UPDATABLE.into())),
+                8 => (!pick.items.is_empty()).then(|| Request::DeleteInArchive(pick)),
+                7 => Some(Request::Error("farsh does not create folders in archives".into())),
                 9 => Some(Request::Menu),
                 10 => Some(Request::Quit),
                 _ => None,
@@ -1023,6 +1038,16 @@ impl Panels {
             return request.map_or(Key::Taken, Key::Ask);
         }
         let sources = self.active_ref().sources();
+        // F5/F6 into an archive the other panel shows: arclite's PutFiles
+        if let (5 | 6, Some(view)) = (n, self.passive_ref().archive.clone()) {
+            if sources.is_empty() {
+                return Key::Taken;
+            }
+            if !crate::archive::updatable(&view.listing) {
+                return Key::Ask(Request::Error(crate::archive::NOT_UPDATABLE.into()));
+            }
+            return Key::Ask(Request::AddToArchive(sources, view, n == 6));
+        }
         let file = sources.first().filter(|path| path.is_file()).cloned();
         let other = self.other_dir().to_path_buf();
         let request = match n {
@@ -1395,6 +1420,7 @@ mod tests {
             volume_size: None,
             move_files: false,
             ignore_errors: false,
+            overwrite: crate::archive::Overwrite::Ask,
         };
         struct Quiet;
         impl crate::archive::Progress for Quiet {
@@ -1441,12 +1467,63 @@ mod tests {
         panels.key(key(KeyCode::Enter), true);
         panels.key(key(KeyCode::Down), true);
         panels.key(key(KeyCode::Down), true); // zeta.txt
-        let Key::Ask(Request::Extract(pick, dest)) = panels.key(key(KeyCode::F(5)), true) else { panic!("F5 extracts") };
+        let Key::Ask(Request::Extract(pick, dest, false)) = panels.key(key(KeyCode::F(5)), true) else { panic!("F5 extracts") };
         assert_eq!(pick.items, ["zeta.txt"]);
         assert_eq!(dest, dir);
-        assert!(matches!(panels.key(key(KeyCode::F(8)), true), Key::Ask(Request::Error(_))));
+        assert!(matches!(panels.key(key(KeyCode::F(8)), true), Key::Ask(Request::DeleteInArchive(_))), "a zip can lose files");
         assert!(matches!(panels.key(key(KeyCode::F(3)), true), Key::Ask(Request::ViewInArchive(_))));
         assert_eq!(panels.key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL), true), Key::Taken, "no Ctrl+A in an archive");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn f5_into_a_zip_adds_and_into_another_archive_or_f8_there_is_not_supported() {
+        let dir = zip_of_scratch("arcput");
+        // a tar beside the zip
+        let tar = crate::archive::Options {
+            path: dir.join("t.tar"),
+            format: crate::archive::Format::Tar,
+            level: 0,
+            method: "Copy".into(),
+            solid: false,
+            password: None,
+            encrypt_header: false,
+            volume_size: None,
+            move_files: false,
+            ignore_errors: false,
+            overwrite: crate::archive::Overwrite::Ask,
+        };
+        struct Quiet;
+        impl crate::archive::Progress for Quiet {
+            fn file(&mut self, _: &crate::archive::Entry) -> std::io::Result<()> {
+                Ok(())
+            }
+            fn bytes(&mut self, _: u64) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        crate::archive::create(&tar, &[dir.join("zeta.txt")], &mut Quiet).unwrap();
+        let mut panels = Panels::new(dir.clone());
+        panels.right.reload(None);
+        // the right panel opens the zip, the left stays on the folder
+        panels.right.cursor = panels.right.entries.iter().position(|e| e.name == "out.zip").unwrap();
+        panels.right.enter().unwrap();
+        panels.left.cursor = panels.left.entries.iter().position(|e| e.name == "apple.txt").unwrap();
+        let Key::Ask(Request::AddToArchive(sources, view, false)) = panels.key(key(KeyCode::F(5)), true) else { panic!("F5 adds") };
+        assert_eq!(sources, [dir.join("apple.txt")]);
+        assert_eq!(view.file, dir.join("out.zip"));
+        assert!(matches!(panels.key(key(KeyCode::F(6)), true), Key::Ask(Request::AddToArchive(_, _, true))));
+        // a tar cannot be changed: F5 into it, F8 in it
+        panels.right.archive = None;
+        panels.right.reload(None);
+        panels.right.cursor = panels.right.entries.iter().position(|e| e.name == "t.tar").unwrap();
+        panels.right.enter().unwrap();
+        let Key::Ask(Request::Error(message)) = panels.key(key(KeyCode::F(5)), true) else { panic!("into a tar") };
+        assert_eq!(message, "Archive modification not supported");
+        panels.key(key(KeyCode::Tab), true);
+        panels.key(key(KeyCode::Down), true);
+        let Key::Ask(Request::Error(message)) = panels.key(key(KeyCode::F(8)), true) else { panic!("F8 in a tar") };
+        assert_eq!(message, "Archive modification not supported");
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

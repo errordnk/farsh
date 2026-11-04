@@ -74,6 +74,8 @@ pub struct Options {
     /// "Delete files after archiving".
     pub move_files: bool,
     pub ignore_errors: bool,
+    /// Adding to an archive: "When destination file exists".
+    pub overwrite: Overwrite,
 }
 
 /// One thing that goes into the archive: the file on disk and its name inside.
@@ -235,8 +237,26 @@ fn create_7z(options: &Options, target: &Path, entries: &[Entry], progress: &mut
 }
 
 fn create_zip(options: &Options, target: &Path, entries: &[Entry], progress: &mut dyn Progress) -> io::Result<()> {
+    let file_options = zip_file_options(options)?;
+    let mut writer = zip::ZipWriter::new(File::create(target)?);
+    for entry in entries {
+        progress.file(entry)?;
+        if entry.is_dir {
+            writer.add_directory(entry.name.as_str(), file_options).map_err(io::Error::other)?;
+        } else {
+            writer.start_file(entry.name.as_str(), file_options).map_err(io::Error::other)?;
+            let mut reader = Counting { inner: File::open(&entry.path)?, progress: &mut *progress };
+            io::copy(&mut reader, &mut writer)?;
+        }
+    }
+    writer.finish().map_err(io::Error::other)?;
+    Ok(())
+}
+
+/// The zip entry options for what Create archive / Add files asked.
+fn zip_file_options(options: &Options) -> io::Result<zip::write::FileOptions<'_, '_, ()>> {
     use zip::write::SimpleFileOptions;
-    use zip::{AesMode, CompressionMethod, ZipWriter};
+    use zip::{AesMode, CompressionMethod};
     let method = match options.method.as_str() {
         "Copy" => CompressionMethod::Stored,
         "Deflate" => CompressionMethod::Deflated,
@@ -250,19 +270,7 @@ fn create_zip(options: &Options, target: &Path, entries: &[Entry], progress: &mu
     if let Some(password) = &options.password {
         file_options = file_options.with_aes_encryption(AesMode::Aes256, password);
     }
-    let mut writer = ZipWriter::new(File::create(target)?);
-    for entry in entries {
-        progress.file(entry)?;
-        if entry.is_dir {
-            writer.add_directory(entry.name.as_str(), file_options).map_err(io::Error::other)?;
-        } else {
-            writer.start_file(entry.name.as_str(), file_options).map_err(io::Error::other)?;
-            let mut reader = Counting { inner: File::open(&entry.path)?, progress: &mut *progress };
-            io::copy(&mut reader, &mut writer)?;
-        }
-    }
-    writer.finish().map_err(io::Error::other)?;
-    Ok(())
+    Ok(file_options)
 }
 
 fn create_tar(target: &Path, entries: &[Entry], progress: &mut dyn Progress) -> io::Result<()> {
@@ -476,9 +484,15 @@ pub enum Overwrite {
     Append,
 }
 
-/// What extracting a file that is there already asks.
+/// What a file that is there already asks: extracting (`old` is `None`:
+/// the file on the disk) or adding (`old` is the archive's).
 pub trait Extracting: Progress {
-    fn exists(&mut self, target: &Path, item: &Item) -> io::Result<Overwrite>;
+    fn exists(&mut self, target: &Path, item: &Item, old: Option<&Item>) -> io::Result<Overwrite>;
+
+    /// Whether the last answer was "Remember choice".
+    fn remembers(&self) -> bool {
+        false
+    }
 }
 
 /// arclite's auto_rename.
@@ -510,7 +524,7 @@ pub fn extract(path: &Path, listing: &Listing, wanted: &[String], base: &str, de
         }
         let mut append = false;
         if target.exists() {
-            let choice = if *policy == Overwrite::Ask { progress.exists(&target, item)? } else { *policy };
+            let choice = if *policy == Overwrite::Ask { progress.exists(&target, item, None)? } else { *policy };
             match choice {
                 Overwrite::Skip => return io::copy(reader, &mut io::sink()).map(|_| ()),
                 Overwrite::Rename => target = auto_rename(&target),
@@ -595,6 +609,113 @@ pub fn extract(path: &Path, listing: &Listing, wanted: &[String], base: &str, de
     Ok(())
 }
 
+// ---------------------------------------------------------------- changing a zip
+
+/// Whether farsh can change the archive (arclite's updatable()): a zip.
+/// Anything else is "Archive modification not supported".
+pub fn updatable(listing: &Listing) -> bool {
+    listing.chain == [Format::Zip]
+}
+
+/// arclite's message for an archive farsh cannot change.
+pub const NOT_UPDATABLE: &str = "Archive modification not supported";
+
+fn picked(wanted: &[String], name: &str) -> bool {
+    wanted.iter().any(|w| name == w || name.starts_with(&format!("{w}/")))
+}
+
+/// Writes the zip again (as 7-Zip does, into a new file that then takes
+/// its place): the entries `keep` says stay are copied as they are, not
+/// recompressed (encrypted ones too); `add` writes the new ones.
+fn rewrite_zip(path: &Path, mut keep: impl FnMut(&str) -> bool, add: impl FnOnce(&mut zip::ZipWriter<File>) -> io::Result<()>) -> io::Result<()> {
+    let temp = auto_rename(&PathBuf::from(format!("{}.farsh-tmp", path.display())));
+    let result = (|| {
+        let mut reader = zip::ZipArchive::new(File::open(path)?).map_err(to_io)?;
+        let mut writer = zip::ZipWriter::new(File::create(&temp)?);
+        for i in 0..reader.len() {
+            let entry = reader.by_index_raw(i).map_err(to_io)?;
+            let name = entry.name().map_err(to_io)?.trim_end_matches('/').to_string();
+            if keep(&name) {
+                writer.raw_copy_file(entry).map_err(to_io)?;
+            }
+        }
+        add(&mut writer)?;
+        writer.finish().map_err(to_io)?.sync_all()
+    })();
+    match result {
+        Ok(()) => fs::rename(&temp, path),
+        Err(error) => {
+            fs::remove_file(&temp).ok();
+            Err(error)
+        }
+    }
+}
+
+/// F8 in a zip: the items (a folder with what is in it) are gone.
+pub fn zip_delete(path: &Path, items: &[String]) -> io::Result<()> {
+    rewrite_zip(path, |name| !picked(items, name), |_| Ok(()))
+}
+
+/// F5/F6 into a zip's panel: `sources` go into the folder `inside` of the
+/// archive with the method, level and password `options` say; a file
+/// that is there already is asked about (Overwrite or Skip, arclite's
+/// odkUpdate) unless `options.overwrite` decided.
+pub fn zip_add(path: &Path, listing: &Listing, sources: &[PathBuf], inside: &str, options: &Options, progress: &mut dyn Extracting) -> io::Result<()> {
+    let mut new = entries(sources)?;
+    for entry in &mut new {
+        if !inside.is_empty() {
+            entry.name = format!("{inside}/{}", entry.name);
+        }
+    }
+    let mut replaced = Vec::new();
+    let mut skipped = Vec::new();
+    let mut policy = options.overwrite;
+    for entry in new.iter().filter(|e| !e.is_dir) {
+        let Some(old) = listing.items.iter().find(|i| i.path == entry.name && !i.is_dir) else { continue };
+        let modified = fs::metadata(&entry.path).and_then(|m| m.modified()).ok();
+        let item = Item { path: entry.name.clone(), is_dir: false, size: entry.size, modified };
+        let choice = if policy == Overwrite::Ask { progress.exists(Path::new(&entry.name), &item, Some(old))? } else { policy };
+        if choice == Overwrite::Skip {
+            skipped.push(entry.name.clone());
+        } else {
+            replaced.push(entry.name.clone());
+        }
+        if policy == Overwrite::Ask && progress.remembers() {
+            policy = choice;
+        }
+    }
+    let file_options = zip_file_options(options)?;
+    let had_dirs: Vec<String> = listing.items.iter().filter(|i| i.is_dir).map(|i| i.path.clone()).collect();
+    rewrite_zip(path, |name| !replaced.iter().any(|r| r == name), |writer| {
+        for entry in &new {
+            if skipped.contains(&entry.name) {
+                continue;
+            }
+            progress.file(entry)?;
+            if entry.is_dir {
+                if !had_dirs.contains(&entry.name) {
+                    writer.add_directory(entry.name.as_str(), file_options).map_err(to_io)?;
+                }
+            } else {
+                writer.start_file(entry.name.as_str(), file_options).map_err(to_io)?;
+                let mut reader = Counting { inner: File::open(&entry.path)?, progress: &mut *progress };
+                io::copy(&mut reader, writer)?;
+            }
+        }
+        Ok(())
+    })?;
+    // Delete files after archiving: what went in (not what was skipped)
+    if options.move_files {
+        for entry in new.iter().rev() {
+            if skipped.iter().any(|s| s == &entry.name || s.starts_with(&format!("{}/", entry.name))) {
+                continue;
+            }
+            if entry.is_dir { fs::remove_dir(&entry.path).ok() } else { fs::remove_file(&entry.path).ok() };
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -631,6 +752,7 @@ mod tests {
             volume_size: None,
             move_files: false,
             ignore_errors: false,
+            overwrite: Overwrite::Ask,
         }
     }
 
@@ -736,7 +858,7 @@ mod tests {
     }
 
     impl Extracting for Answering {
-        fn exists(&mut self, _: &Path, _: &Item) -> io::Result<Overwrite> {
+        fn exists(&mut self, _: &Path, _: &Item, _: Option<&Item>) -> io::Result<Overwrite> {
             Ok(self.0)
         }
     }
@@ -818,5 +940,75 @@ mod tests {
             assert_eq!(fs::read_to_string(out.join("a.txt")).unwrap(), "hello hello hello", "{format:?}");
         }
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    fn zip_names(path: &Path) -> Vec<String> {
+        let zip = zip::ZipArchive::new(File::open(path).unwrap()).unwrap();
+        let mut names: Vec<String> = zip.file_names().map(|n| n.unwrap().trim_end_matches('/').to_string()).collect();
+        names.sort();
+        names
+    }
+
+    fn zip_bytes(path: &Path, name: &str) -> Vec<u8> {
+        let mut zip = zip::ZipArchive::new(File::open(path).unwrap()).unwrap();
+        let mut entry = zip.by_name(name).unwrap();
+        let mut bytes = Vec::new();
+        entry.read_to_end(&mut bytes).unwrap();
+        bytes
+    }
+
+    #[test]
+    fn deleting_from_a_zip_keeps_the_rest_as_it_was_and_takes_a_folder_whole() {
+        let dir = scratch("zipdel");
+        let o = options(&dir, Format::Zip, "Deflate");
+        create(&o, &[dir.join("src")], &mut Quiet).unwrap();
+        let raw = |path: &Path| {
+            let mut zip = zip::ZipArchive::new(File::open(path).unwrap()).unwrap();
+            let entry = zip.by_name("src/a.txt").unwrap();
+            (entry.compressed_size(), entry.crc32())
+        };
+        let before = raw(&o.path);
+        zip_delete(&o.path, &["src/sub".into()]).unwrap();
+        assert_eq!(zip_names(&o.path), ["src", "src/a.txt"]);
+        assert_eq!(raw(&o.path), before, "copied, not recompressed");
+        assert_eq!(zip_bytes(&o.path, "src/a.txt"), b"hello hello hello");
+        let left: Vec<_> = fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        assert!(!left.iter().any(|n| n.contains("farsh-tmp")), "{left:?}");
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn adding_to_a_zip_goes_into_the_panel_folder_and_asks_about_what_is_there() {
+        let dir = scratch("zipadd");
+        let o = options(&dir, Format::Zip, "Deflate");
+        create(&o, &[dir.join("src")], &mut Quiet).unwrap();
+        fs::create_dir_all(dir.join("new")).unwrap();
+        fs::write(dir.join("new").join("a.txt"), "replaced").unwrap();
+        fs::write(dir.join("new").join("c.txt"), "added").unwrap();
+        let listing = list(&o.path, None).unwrap();
+        let sources = vec![dir.join("new").join("a.txt"), dir.join("new").join("c.txt")];
+        // Skip: the old a.txt stays
+        zip_add(&o.path, &listing, &sources, "src", &o, &mut Answering(Overwrite::Skip)).unwrap();
+        assert_eq!(zip_bytes(&o.path, "src/a.txt"), b"hello hello hello");
+        assert_eq!(zip_bytes(&o.path, "src/c.txt"), b"added");
+        // Overwrite, and the files go after archiving
+        let listing = list(&o.path, None).unwrap();
+        let mut moving = o.clone();
+        moving.move_files = true;
+        zip_add(&o.path, &listing, &sources, "src", &moving, &mut Answering(Overwrite::Overwrite)).unwrap();
+        assert_eq!(zip_bytes(&o.path, "src/a.txt"), b"replaced");
+        assert_eq!(zip_names(&o.path).iter().filter(|n| *n == "src/a.txt").count(), 1, "replaced, not twice");
+        assert!(!dir.join("new").join("a.txt").exists() && !dir.join("new").join("c.txt").exists());
+        assert_eq!(zip_bytes(&o.path, "src/sub/b.bin").len(), 200_000, "the rest is there");
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn only_a_zip_can_be_changed() {
+        let zip = Listing { chain: vec![Format::Zip], items: vec![] };
+        assert!(updatable(&zip));
+        for chain in [vec![Format::SevenZ], vec![Format::Tar], vec![Format::Gzip], vec![Format::Gzip, Format::Tar]] {
+            assert!(!updatable(&Listing { chain, items: vec![] }));
+        }
     }
 }

@@ -36,6 +36,8 @@ pub enum Action {
     CreateArchive(Box<crate::arcdialog::CreateSetup>),
     /// F5/F6 in an archive: Extract files.
     Extract(Box<crate::arcdialog::ExtractSetup>),
+    /// F8 in a zip: arclite's "Do you want to delete selected files?".
+    DeleteInArchive(Box<crate::panels::ArchivePick>),
     Quit,
     /// The answer to a file that already exists.
     Conflict,
@@ -401,6 +403,12 @@ impl Dialog {
         items.push(Item::Buttons(buttons));
         let focus = items.len() - 1;
         Self { title: title.into(), style: Style::Warning, layout: Layout::Message, items, focus, button: 0, places: vec![], disabled: vec![], hidden: vec![], hook: None, sub: None, closing: None, action: Action::Conflict }
+    }
+
+    /// Far::message(... FMSG_MB_OKCANCEL) as arclite asks it: the first line is the title.
+    pub fn ok_cancel(title: &str, line: &str, action: Action) -> Self {
+        let items = vec![centered(line), Item::Separator(None), Item::Buttons(vec![button("OK", "ok", true), button("Cancel", "cancel", false)])];
+        Self { title: title.into(), style: Style::Normal, layout: Layout::Message, items, focus: 2, button: 0, places: vec![], disabled: vec![], hidden: vec![], hook: None, sub: None, closing: None, action }
     }
 
     /// A question with Yes and No (Far's Message with no hot keys).
@@ -1823,7 +1831,7 @@ pub fn paint_progress(job: &Job, grid: &mut Grid) {
     if matches!(job.kind, Kind::Delete | Kind::Wipe) {
         return paint_delete_progress(job, grid);
     }
-    if matches!(job.kind, Kind::Pack | Kind::Unpack) {
+    if matches!(job.kind, Kind::Pack | Kind::Unpack | Kind::Update) {
         return paint_pack_progress(job, grid);
     }
     let p = Style::Normal.palette();
@@ -1850,7 +1858,7 @@ pub fn paint_progress(job: &Job, grid: &mut Grid) {
         Kind::Copy => "Copying the file",
         Kind::Move => "Moving the file",
         Kind::Delete | Kind::Wipe => "Deleting the file",
-        Kind::Pack | Kind::Unpack => "Adding the file",
+        Kind::Pack | Kind::Unpack | Kind::Update => "Adding the file",
     };
     line(grid, verb);
     line(grid, &fit(&progress.from));

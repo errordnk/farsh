@@ -234,7 +234,7 @@ impl App {
                     fileops::Question::FolderNotEmpty(path) => Dialog::folder_not_empty(path, wipe),
                     fileops::Question::ReadOnly(path) => Dialog::read_only(path, wipe),
                     fileops::Question::HardLinks(path) => Dialog::hard_links(path),
-                    fileops::Question::Exists { path, new, old } => arcdialog::overwrite(path, *new, *old),
+                    fileops::Question::Exists { path, new, old, update } => arcdialog::overwrite(path, *new, *old, *update),
                 });
                 return true;
             }
@@ -455,7 +455,15 @@ impl App {
             Request::SortMenu => self.overlay = Overlay::Sort(self.panels.sort_menu()),
             Request::Error(text) => self.overlay = Overlay::Dialog(Dialog::error(&text)),
             Request::Attributes(sources) => self.open_attributes(sources),
-            Request::Extract(pick, dest) => self.overlay = Overlay::Dialog(arcdialog::extract(pick, &dest)),
+            Request::Extract(pick, dest, moving) => self.overlay = Overlay::Dialog(arcdialog::extract(pick, &dest, moving)),
+            Request::AddToArchive(sources, view, moving) => {
+                let base = self.panels.active_dir().to_path_buf();
+                self.overlay = Overlay::Dialog(arcdialog::add_to_archive(sources, &base, view, moving));
+            }
+            Request::DeleteInArchive(pick) => {
+                let action = Action::DeleteInArchive(Box::new(pick));
+                self.overlay = Overlay::Dialog(Dialog::ok_cancel("ArcLite", "Do you want to delete selected files?", action));
+            }
             Request::ViewInArchive(pick) => {
                 let dir = std::env::temp_dir().join(format!("farsh-view-{}", std::process::id()));
                 let mut quiet = Unattended;
@@ -547,6 +555,27 @@ impl App {
                 let base = self.panels.active_dir().to_path_buf();
                 let work: fileops::Work = Box::new(move |reporter| unpack(&pick, &values, &base, reporter));
                 self.overlay = Overlay::Job(fileops::spawn(Kind::Unpack, work), None);
+            }
+            Action::DeleteInArchive(pick) => {
+                let (file, items) = (pick.view.file.clone(), pick.items.clone());
+                let work: fileops::Work = Box::new(move |reporter| {
+                    reporter.progress().to = file.display().to_string();
+                    archive::zip_delete(&file, &items)
+                });
+                self.overlay = Overlay::Job(fileops::spawn(Kind::Update, work), None);
+            }
+            Action::CreateArchive(setup) if setup.target.is_some() => {
+                let (Some(options), Some(view)) = (setup.options.clone(), setup.target.clone()) else { return };
+                let sources = setup.sources.clone();
+                let work: fileops::Work = Box::new(move |reporter| {
+                    let entries = archive::entries(&sources)?;
+                    let progress = reporter.progress();
+                    progress.to = view.file.display().to_string();
+                    progress.bytes_total = entries.iter().map(|e| e.size).sum();
+                    progress.files_total = entries.iter().filter(|e| !e.is_dir).count();
+                    archive::zip_add(&view.file, &view.listing, &sources, &view.dir, &options, &mut ArcReport { reporter, remembered: None })
+                });
+                self.overlay = Overlay::Job(fileops::spawn(Kind::Update, work), None);
             }
             Action::CreateArchive(setup) => {
                 let Some(options) = setup.options.clone() else { return };
@@ -742,7 +771,7 @@ impl archive::Progress for Unattended {
 }
 
 impl archive::Extracting for Unattended {
-    fn exists(&mut self, _: &Path, _: &archive::Item) -> std::io::Result<archive::Overwrite> {
+    fn exists(&mut self, _: &Path, _: &archive::Item, _: Option<&archive::Item>) -> std::io::Result<archive::Overwrite> {
         Ok(archive::Overwrite::Overwrite)
     }
 }
@@ -750,12 +779,14 @@ impl archive::Extracting for Unattended {
 /// What Extract files asked (arclite's ExtractOptions and plugin.cpp's
 /// extract): where to, into a folder of the archive's name if asked, what
 /// to do with a file that is there, then deleting the archive if asked.
-fn unpack(pick: &panels::ArchivePick, values: &dialog::Values, base: &Path, reporter: &mut fileops::Reporter) -> std::io::Result<()> {
-    struct Report<'a, 'b> {
-        reporter: &'a mut fileops::Reporter<'b>,
-        remembered: Option<archive::Overwrite>,
-    }
-    impl archive::Progress for Report<'_, '_> {
+/// What extracting or adding tells the progress box, and how it asks about
+/// a file that is there (arclite's Overwrite file).
+struct ArcReport<'a, 'b> {
+    reporter: &'a mut fileops::Reporter<'b>,
+    remembered: Option<archive::Overwrite>,
+}
+
+impl archive::Progress for ArcReport<'_, '_> {
         fn file(&mut self, entry: &archive::Entry) -> std::io::Result<()> {
             let progress = self.reporter.progress();
             progress.from = entry.name.clone();
@@ -770,18 +801,21 @@ fn unpack(pick: &panels::ArchivePick, values: &dialog::Values, base: &Path, repo
             progress.bytes_done += count;
             self.reporter.tick()
         }
-    }
-    impl archive::Extracting for Report<'_, '_> {
-        fn exists(&mut self, target: &Path, item: &archive::Item) -> std::io::Result<archive::Overwrite> {
+}
+
+impl archive::Extracting for ArcReport<'_, '_> {
+        fn exists(&mut self, target: &Path, item: &archive::Item, in_archive: Option<&archive::Item>) -> std::io::Result<archive::Overwrite> {
             if let Some(choice) = self.remembered {
                 return Ok(choice);
             }
-            let old = std::fs::metadata(target).ok();
-            let question = fileops::Question::Exists {
-                path: target.to_path_buf(),
-                new: (item.size, item.modified),
-                old: (old.as_ref().map_or(0, |m| m.len()), old.and_then(|m| m.modified().ok())),
+            let old = match in_archive {
+                Some(old) => (old.size, old.modified),
+                None => {
+                    let meta = std::fs::metadata(target).ok();
+                    (meta.as_ref().map_or(0, |m| m.len()), meta.and_then(|m| m.modified().ok()))
+                }
             };
+            let question = fileops::Question::Exists { path: target.to_path_buf(), new: (item.size, item.modified), old, update: in_archive.is_some() };
             let (choice, remember) = match self.reporter.ask(question)? {
                 Answer::Overwrite { remember } => (archive::Overwrite::Overwrite, remember),
                 Answer::Skip { remember } => (archive::Overwrite::Skip, remember),
@@ -794,7 +828,13 @@ fn unpack(pick: &panels::ArchivePick, values: &dialog::Values, base: &Path, repo
             }
             Ok(choice)
         }
-    }
+
+        fn remembers(&self) -> bool {
+            self.remembered.is_some()
+        }
+}
+
+fn unpack(pick: &panels::ArchivePick, values: &dialog::Values, base: &Path, reporter: &mut fileops::Reporter) -> std::io::Result<()> {
     let typed = values.text("dest").trim().replace('"', "");
     let mut dest = base.join(if typed.is_empty() { "." } else { &typed });
     // Ex&tract archive into separate directory: on (F5 is not OPM_TOPLEVEL, so [?] is off)
@@ -817,8 +857,12 @@ fn unpack(pick: &panels::ArchivePick, values: &dialog::Values, base: &Path, repo
     progress.to = view.file.display().to_string();
     progress.bytes_total = wanted.iter().map(|i| i.size).sum();
     progress.files_total = wanted.iter().filter(|i| !i.is_dir).count();
-    let mut report = Report { reporter, remembered: None };
+    let mut report = ArcReport { reporter, remembered: None };
     archive::extract(&view.file, &view.listing, &pick.items, &view.dir, &dest, password.as_deref(), policy, &mut report)?;
+    // Delete files from archive after extraction (F6 from a zip)
+    if values.choice("movefiles") == 1 && archive::updatable(&view.listing) {
+        archive::zip_delete(&view.file, &pick.items)?;
+    }
     if values.checked("deletearchive") || values.choice("deletearchive") == 1 {
         std::fs::remove_file(&view.file)?;
     }
@@ -932,12 +976,13 @@ mod tests {
             volume_size: None,
             move_files: false,
             ignore_errors: false,
+            overwrite: archive::Overwrite::Ask,
         };
         archive::create(&options, &[dir.join("a.txt")], &mut Unattended).unwrap();
         let listing = archive::list(&options.path, None).unwrap();
         let view = panels::ArchiveView { file: options.path.clone(), listing, dir: String::new(), password: None };
         let pick = panels::ArchivePick { view, items: vec!["a.txt".into()] };
-        let mut dialog = arcdialog::extract(pick.clone(), &dir.join("out"));
+        let mut dialog = arcdialog::extract(pick.clone(), &dir.join("out"), false);
         let dialog::Outcome::Pressed(_, "ok", values) = dialog.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)) else { panic!("OK") };
         let base = dir.clone();
         let mut job = fileops::spawn(Kind::Unpack, Box::new(move |reporter| unpack(&pick, &values, &base, reporter)));
@@ -946,7 +991,7 @@ mod tests {
         while job.result.is_none() && std::time::Instant::now() < deadline {
             std::thread::sleep(std::time::Duration::from_millis(5));
             job.poll();
-            if let Some(fileops::Question::Exists { path, new, old }) = job.question.clone() {
+            if let Some(fileops::Question::Exists { path, new, old, update: false }) = job.question.clone() {
                 assert_eq!(path, dir.join("out").join("a.txt"));
                 assert_eq!((new.0, old.0), (3, 3));
                 asked += 1;
