@@ -2693,6 +2693,7 @@ mod tests {
         let mut panels = Panels::new(dir.clone());
         let alt = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::ALT);
         assert_eq!(panels.key(alt('+'), false), Key::Ask(Request::SelectGroup(true)));
+        assert_eq!(panels.key(alt('='), false), Key::Ask(Request::SelectGroup(true)), "the + key without Shift");
         assert_eq!(panels.key(alt('-'), false), Key::Ask(Request::SelectGroup(false)));
         panels.select_group(true, &crate::masks::Masks::new("*.*").unwrap());
         let mut marked: Vec<&String> = panels.left.marked.iter().collect();
