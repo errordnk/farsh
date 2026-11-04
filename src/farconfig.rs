@@ -5,7 +5,7 @@
 //! and Cancel), Shift+F4 edits a number in hex, Alt+F4 in binary, Del brings
 //! the default back, Ctrl+H shows only the changed ones. The settings farsh
 //! does not use yet (the editor, plugins...) are shown with Far's defaults,
-//! disabled. Shift+F1 (help) is left out: farsh has no help.
+//! disabled. Shift+F1 is the setting's help (or its group's).
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
@@ -45,7 +45,7 @@ pub enum Mode {
 }
 
 const TITLE: &str = "Configuration editor";
-const BOTTOM: &str = "F4 Shift+F4 Alt+F4 Del Ctrl+H";
+const BOTTOM: &str = "Shift+F1 F4 Shift+F4 Alt+F4 Del Ctrl+H";
 
 /// Whether farsh uses setting `index` of the list.
 fn ours(index: usize) -> bool {
@@ -124,6 +124,9 @@ pub enum Outcome {
     Changed,
     /// A value's dialog, to show over the list.
     Edit(Dialog),
+    /// Shift+F1: the help topics to try, in turn (the setting's own, then
+    /// its group's `…Settings`).
+    Help(Vec<String>),
 }
 
 pub struct FarConfig {
@@ -203,6 +206,13 @@ impl FarConfig {
             // VMenu's PgUp/PgDn: a whole box of rows
             KeyCode::PageUp if m.is_empty() => self.go(self.selected.saturating_sub(self.rows), -1),
             KeyCode::PageDown if m.is_empty() => self.go(self.selected + self.rows, 1),
+            KeyCode::F(1) if m == KeyModifiers::SHIFT => {
+                if let Some(&index) = self.shown.get(self.selected) {
+                    let key = FAR[index].0;
+                    let group = key.rsplit_once('.').map_or(key, |(group, _)| group);
+                    return Outcome::Help(vec![key.to_string(), format!("{group}Settings")]);
+                }
+            }
             KeyCode::Enter | KeyCode::F(4) if m.is_empty() => return self.edit(Mode::Normal),
             KeyCode::F(4) if m == KeyModifiers::SHIFT => return self.edit(Mode::Hex),
             KeyCode::F(4) if m == KeyModifiers::ALT => return self.edit(Mode::Bin),

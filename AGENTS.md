@@ -27,7 +27,10 @@ over the shell screen.
   the key bar (its labels change while one of Shift/Ctrl/Alt is held, Far's
   MShiftF1.. sets; two or more held leave the plain labels, the user's call: `src/modkeys.rs` takes the modifier-only key events off the
   console queue before crossterm, which drops them; the terminal must send
-  them in win32-input-mode, as Windows Terminal and Som do). Colors are `src/palette.rs`: Far's console attributes as
+  them in win32-input-mode, as Windows Terminal and Som do; the layout is
+  6446's keybar.cpp: keys (ScrX-1)/12 wide, at least 8, `panels::paint_labels`,
+  shared with the help). The reference is Far 3.0.6446, the user's Far:
+  fetch its sources at the `builds/3.0.6446` tag, not master. Colors are `src/palette.rs`: Far's console attributes as
   they reach a terminal through ConPTY — the classic console table in RGB
   (blue 0,0,128...), with light gray text and a black background as the
   terminal's own defaults. Not the terminal's 16-color palette: Som's theme
@@ -191,6 +194,13 @@ over the shell screen.
   config.cpp's DialogBuilder ones: `src/builder.rs` ports its layout
   (TextBefore/After, Indent, two columns, LinkFlags) and binds each item to
   a setting; `src/options.rs` is the dialogs, `src/optmenu.rs` the rest.
+  - F1 (`src/help.rs`) is 6446's help.cpp over Far's own help files
+    (`assets/help/FarEng.hlf`, `FarRus.hlf`, Far's BSD license beside
+    them), in Language.Help's language: ReadHelp's layout, OutString's
+    markup and colors, MoveToReference, the keys and the mouse, F7's search
+    (fuzzy and regex grey: not there yet), Shift+F2's plugins list (empty:
+    no plugin has help yet). Checked against Far's console dump: the same
+    cells. `<!Macro:…>` lists are skipped (farsh has no macros).
   - `far:config` (typed, Enter; `src/farconfig.rs`) is Far 3.0.6446's
     AdvancedConfig cell for cell (checked against Far's console dump): all
     297 settings from `src/farconfig_data.rs`, generated from the real Far's
@@ -200,7 +210,7 @@ over the shell screen.
     macros'...); a farsh setting must have Far's name, type and default (a
     test checks the types). 3-state settings are `Def::Three` (0/1/2), and
     VMenu clicks are Far's VMENUCLICK values (0 nothing, 1 cancel, 2 apply).
-    Shift+F1 is left out of the bottom title: farsh has no help. Masked
+    Shift+F1 opens the setting's help topic, else its group's `…Settings`. Masked
     fields take a value as Far does (`dialog::fit_mask`): a character equal
     to the mask's fixed one there is used up by it, so the hex field shows
     `0x` and 15 digits, as Far's does.

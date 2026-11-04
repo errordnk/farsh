@@ -20,6 +20,7 @@ mod fileops;
 mod filter;
 mod findfile;
 mod grid;
+mod help;
 mod highlight;
 mod history;
 mod hotplug;
@@ -118,6 +119,8 @@ enum Overlay {
     ColorPick(Box<colorpick::Picker>),
     /// far:config, typed on the command line.
     FarConfig(Box<farconfig::FarConfig>),
+    /// F1: Far's help.
+    Help(Box<help::Help>),
 }
 
 struct App {
@@ -309,8 +312,11 @@ impl App {
         };
         // far:config stays in sight under a value's dialog, as in Far
         for under in &mut self.under {
-            if let Overlay::FarConfig(config) = under {
-                config.paint(frame);
+            match under {
+                Overlay::FarConfig(config) => config.paint(frame),
+                // the help stays in sight under its search dialog and messages
+                Overlay::Help(help) => help.paint(frame),
+                _ => {}
             }
         }
         match &mut self.overlay {
@@ -350,6 +356,10 @@ impl App {
             }
             Overlay::FarConfig(config) => {
                 config.paint(frame);
+                cursor = None;
+            }
+            Overlay::Help(help) => {
+                help.paint(frame);
                 cursor = None;
             }
             Overlay::Job(job, question) => {
@@ -420,6 +430,10 @@ impl App {
                 let outcome = picker.key(key);
                 self.color_pick_outcome(picker, outcome);
             }
+            Overlay::Help(mut help) => {
+                let outcome = help.key(key);
+                self.help_outcome(help, outcome);
+            }
             Overlay::FarConfig(mut config) => match config.key(key) {
                 farconfig::Outcome::Open => self.overlay = Overlay::FarConfig(config),
                 farconfig::Outcome::Closed => {}
@@ -430,6 +444,14 @@ impl App {
                 farconfig::Outcome::Edit(dialog) => {
                     self.under.push(Overlay::FarConfig(config));
                     self.overlay = Overlay::Dialog(dialog);
+                }
+                farconfig::Outcome::Help(topics) => {
+                    let (cols, rows) = self.size;
+                    let help = topics.iter().find_map(|topic| help::Help::found(topic, cols, rows));
+                    self.overlay = Overlay::FarConfig(config);
+                    if let Some(help) = help {
+                        self.under.push(std::mem::replace(&mut self.overlay, Overlay::Help(Box::new(help))));
+                    }
                 }
             },
             Overlay::Find(mut results) => {
@@ -496,6 +518,10 @@ impl App {
                 let outcome = picker.click(event);
                 self.color_pick_outcome(picker, outcome);
             }
+            Overlay::Help(mut help) => {
+                let outcome = help.mouse(event);
+                self.help_outcome(help, outcome);
+            }
             Overlay::FarConfig(mut config) => match config.click(event) {
                 farconfig::Outcome::Closed => {}
                 farconfig::Outcome::Edit(dialog) => {
@@ -506,7 +532,7 @@ impl App {
                     self.far_config_changed();
                     self.overlay = Overlay::FarConfig(config);
                 }
-                farconfig::Outcome::Open => self.overlay = Overlay::FarConfig(config),
+                farconfig::Outcome::Open | farconfig::Outcome::Help(_) => self.overlay = Overlay::FarConfig(config),
             },
             Overlay::Find(mut results) => {
                 let outcome = results.click(event);
@@ -611,6 +637,28 @@ impl App {
             }
         }
         self.send_to_shell(key);
+    }
+
+    /// F1: Far's help at 	opic.
+    fn open_help(&mut self, topic: &str) {
+        let (cols, rows) = self.size;
+        self.overlay = Overlay::Help(Box::new(help::Help::new(topic, cols, rows)));
+    }
+
+    /// What the help asked for after a key or the mouse.
+    fn help_outcome(&mut self, help: Box<help::Help>, outcome: help::Outcome) {
+        match outcome {
+            help::Outcome::Open => self.overlay = Overlay::Help(help),
+            help::Outcome::Closed => {}
+            help::Outcome::Dialog(dialog) => {
+                self.under.push(Overlay::Help(help));
+                self.overlay = Overlay::Dialog(dialog);
+            }
+            help::Outcome::Video => {
+                self.run_command(menu::Cmd::VideoMode);
+                self.overlay = Overlay::Help(help);
+            }
+        }
     }
 
     /// What depends on the settings, after far:config changed one.
@@ -767,6 +815,7 @@ impl App {
                 self.overlay = Overlay::ArcMenu(vmenu::VMenu::new("ArcLite", vec!["Test archive files".into()]), picks);
             }
             Request::Command(cmd) => self.run_command(cmd),
+            Request::Help => self.open_help("Contents"),
             Request::Menu => {
                 let side = if self.panels.right_active() { 4 } else { 0 };
                 self.overlay = Overlay::Menu(Menu::new(self.last_menu.unwrap_or(side), self.panels.view_modes(), self.panels.states()));

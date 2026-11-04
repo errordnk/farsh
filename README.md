@@ -22,6 +22,7 @@ shell screen; the command line under the panels is the shell's own prompt line.
 | `Ctrl+E` `Ctrl+X` | shell history up / down (Far's keys; the arrows belong to the panel) |
 | anything else | the shell's command line |
 | `Enter` over a typed command | runs it; the panels hide so its output shows |
+| `F1` | Far's help (in the help language of Options > Languages): `Tab` links, `Enter` follow, `BS`/`Alt+F1` back, `Shift+F1` contents, `F7` search, `F5` zoom |
 | `far:config` + `Enter` | Far's configuration editor: every Far setting (the ones farsh does not use yet are grey); `Enter`/`F4` change, `Shift+F4` hex, `Alt+F4` binary, `Del` default, `Ctrl+H` only the changed |
 | `Ctrl+O` | show / hide the panels |
 

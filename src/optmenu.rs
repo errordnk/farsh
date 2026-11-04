@@ -229,6 +229,14 @@ impl App {
                 self.settings_changed();
             }
             Action::SaveSetup => self.save_setup(),
+            Action::HelpSearch => {
+                if id == "ok"
+                    && let Some(Overlay::Help(help)) = self.under.last_mut()
+                    && let crate::help::Outcome::Dialog(dialog) = help.search_for(values)
+                {
+                    self.overlay = Overlay::Dialog(dialog);
+                }
+            }
             Action::FarConfig { key, mode } => {
                 crate::farconfig::accept(key, mode, id, &values.text("value"));
                 if let Some(Overlay::FarConfig(config)) = self.under.last_mut() {

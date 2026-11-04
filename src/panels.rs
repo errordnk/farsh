@@ -1166,6 +1166,8 @@ impl Panel {
 /// What a key asks the app to do.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Request {
+    /// F1: Far's help.
+    Help,
     View(PathBuf),
     Edit(PathBuf),
     /// Sources and the other panel's folder (the default destination).
@@ -2002,6 +2004,7 @@ impl Panels {
             6 => (!sources.is_empty()).then(|| Request::Move(sources, other)),
             7 => Some(Request::MkDir),
             8 => (!sources.is_empty()).then(|| Request::Delete(sources)),
+            1 => Some(Request::Help),
             9 => Some(Request::Menu),
             10 => Some(Request::Quit),
             2 => Some(Request::Command(crate::menu::Cmd::UserMenu)),
@@ -2134,56 +2137,47 @@ impl Panels {
         Key::Taken
     }
 
-    /// Far's `KeyBar::DisplayObject`: twelve keys of at least 8 cells (10-12
-    /// one more), the room left spread over them.
+    /// Far's `KeyBar::DisplayObject` with the panels' labels.
     fn paint_key_bar(&mut self, grid: &mut Grid) {
-        const MIN_LABEL: usize = 6;
-        let y = grid.rows - 1;
-        let cols = grid.cols as usize;
-        let count = 12;
-        let min_full = (1 + MIN_LABEL + 1) * count + (count - 9) - 1;
-        let mut extra = cols.saturating_sub(min_full);
-        use crate::colors::{bg, fg};
-        let (number, text, gap) = ((fg("Keybar.Num"), bg("Keybar.Num")), (fg("Keybar.Text"), bg("Keybar.Text")), (fg("Keybar.Background"), bg("Keybar.Background")));
-        let mut x = 0usize;
-        let mut prev = 0usize;
-        self.key_ends.clear();
-        for (i, label) in key_bar_labels(crate::modkeys::held()).enumerate() {
-            let two_digits = usize::from(i + 1 > 9);
-            let mut end = prev + 1 + two_digits + MIN_LABEL + 1;
-            if extra > 0 {
-                let even = (i + 1) * cols / count;
-                if even > end {
-                    extra = extra.saturating_sub(even - end);
-                    end = even;
-                }
-            }
-            let width = end - prev - 2 - two_digits;
-            // Far 3 leaves out a key that does not fit whole
-            if x + 1 + two_digits + width > cols {
-                break;
-            }
-            self.key_ends.push(end as u16);
-            grid.put(x as u16, y, &(i + 1).to_string(), number.0, number.1);
-            x += 1 + two_digits;
-            grid.put(x as u16, y, &format!("{:<width$}", label.chars().take(width).collect::<String>()), text.0, text.1);
-            x += width;
-            if x >= cols {
-                break;
-            }
-            if i < count - 1 {
-                grid.put(x as u16, y, " ", gap.0, gap.1);
-                x += 1;
-                if x >= cols {
-                    break;
-                }
-            }
-            prev = end;
-        }
-        if x < cols {
-            grid.put(x as u16, y, &" ".repeat(cols - x), text.0, text.1);
-        }
+        let labels: Vec<&'static str> = key_bar_labels(crate::modkeys::held()).collect();
+        self.key_ends = paint_labels(grid, &labels);
     }
+}
+
+/// Far 3.0.6446's `KeyBar::DisplayObject`: keys (ScrX-1)/12 wide (at least
+/// 8): the number, the label fitted to the width less 2, a space; a key
+/// stops the row when its label would reach the last column. Returns where
+/// each key shown ends (for the mouse).
+pub fn paint_labels(grid: &mut Grid, labels: &[&str]) -> Vec<u16> {
+    let y = grid.rows - 1;
+    let cols = grid.cols as usize;
+    let right = cols.saturating_sub(1);
+    let key_width = (cols.saturating_sub(2) / 12).max(8);
+    let label_width = key_width - 2;
+    use crate::colors::{bg, fg};
+    let (number, text, gap) = ((fg("Keybar.Num"), bg("Keybar.Num")), (fg("Keybar.Text"), bg("Keybar.Text")), (fg("Keybar.Background"), bg("Keybar.Background")));
+    let mut x = 0usize;
+    let mut ends = Vec::new();
+    for i in 0..12 {
+        if x + label_width >= right {
+            break;
+        }
+        let digits = (i + 1).to_string();
+        grid.put(x as u16, y, &digits, number.0, number.1);
+        x += digits.len();
+        let label = labels.get(i).copied().unwrap_or("");
+        grid.put(x as u16, y, &format!("{:<label_width$}", label.chars().take(label_width).collect::<String>()), text.0, text.1);
+        x += label_width;
+        if i < 11 {
+            grid.put(x as u16, y, " ", gap.0, gap.1);
+            x += 1;
+        }
+        ends.push(x as u16);
+    }
+    if x < cols {
+        grid.put(x as u16, y, &" ".repeat(cols - x), text.0, text.1);
+    }
+    ends
 }
 
 /// Ctrl+Enter: put the highlighted name on the command line. Terminals send

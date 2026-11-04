@@ -93,6 +93,8 @@ pub enum Action {
     /// Files highlighting: delete group N; Ctrl+R's defaults.
     DeleteHighlight(usize),
     RestoreHighlight,
+    /// F7 in the help: what to search for.
+    HelpSearch,
     /// far:config: a number's or a text's value.
     FarConfig { key: &'static str, mode: crate::farconfig::Mode },
     Quit,
@@ -223,6 +225,8 @@ pub enum Event {
     /// A button that closes the dialog was pressed (Far's DN_CLOSE): the
     /// hook may keep it open by opening a message over it.
     Closing(&'static str),
+    /// A key changed an edit field (Far's DN_EDITCHANGE).
+    Edited(&'static str),
 }
 
 /// How the box is sized and placed.
@@ -1808,6 +1812,11 @@ impl Dialog {
         }
         if !matches!(key.code, KeyCode::Tab | KeyCode::BackTab | KeyCode::Up | KeyCode::Down | KeyCode::Enter) {
             self.edit_key(key.code, ctrl, alt);
+            // DN_EDITCHANGE
+            if let Some(Item::Edit { id, .. }) = self.items.get(self.focus) {
+                let id = *id;
+                self.notify(Event::Edited(id));
+            }
         }
         match key.code {
             KeyCode::Tab | KeyCode::Down => self.move_focus(true),
