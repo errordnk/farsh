@@ -63,7 +63,7 @@ fn digit_of(c: char) -> Option<usize> {
     if let Some(d) = c.to_digit(10) {
         return Some(d as usize);
     }
-    ")!@#$%^&*(".find(c)
+    ")!@#$%^&*(".find(c).or_else(|| ")!\"№;%:?*(".chars().position(|r| r == c))
 }
 
 impl App {

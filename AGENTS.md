@@ -169,6 +169,10 @@ over the shell screen.
   that denies listing itself (Windows' compatibility junctions `My Documents`,
   `Application Data`, `Start Menu`...) is followed to its target, as Far does.
   A folder that cannot be read is an error dialog; the panel stays.
+- Every shortcut works in the Russian layout too (Far's Xlat): Ctrl/Alt
+  with a Russian letter is the Latin letter of its key (`keys::normalize`,
+  in `App::on_key`), and the hot keys of menus and dialogs match either
+  layout (`keys::same`, `keys::latin`). Plain letters stay as typed.
 - Tests: `cargo test` (the shell test starts cmd.exe on Windows, /bin/sh elsewhere).
 - Code, comments and logs in English; talk to the user in Russian.
 

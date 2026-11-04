@@ -334,6 +334,7 @@ impl App {
     }
 
     fn on_key(&mut self, key: KeyEvent) {
+        let key = keys::normalize(key);
         match std::mem::replace(&mut self.overlay, Overlay::None) {
             Overlay::Dialog(mut dialog) => match dialog.key(key) {
                 dialog::Outcome::Open => self.overlay = Overlay::Dialog(dialog),

@@ -571,7 +571,7 @@ impl FiltersMenu {
         let shift = key.modifiers.contains(KeyModifiers::SHIFT);
         // the marks first: the items' hot keys do nothing here (DN_LISTHOTKEY)
         let mark = match key.code {
-            KeyCode::Char(c) if !ctrl && !key.modifiers.contains(KeyModifiers::ALT) => match c.to_ascii_uppercase() {
+            KeyCode::Char(c) if !ctrl && !key.modifiers.contains(KeyModifiers::ALT) => match crate::keys::latin(c).unwrap_or(c).to_ascii_uppercase() {
                 '+' | '=' => Some(Some('+')),
                 '-' => Some(Some('-')),
                 'I' => Some(Some('I')),

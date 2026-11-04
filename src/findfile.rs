@@ -480,9 +480,8 @@ impl Results {
                 }
             }
             KeyCode::Char(c) if key.modifiers.contains(KeyModifiers::ALT) || !key.modifiers.contains(KeyModifiers::CONTROL) => {
-                let c = c.to_ascii_lowercase();
                 let stop_label = if self.done { 'c' } else { 's' };
-                let hit = BUTTONS.iter().find(|(label, id)| if *id == "stop" { c == stop_label } else { hot(label) == Some(c) });
+                let hit = BUTTONS.iter().find(|(label, id)| if *id == "stop" { crate::keys::same(c, stop_label) } else { hot(label).is_some_and(|h| crate::keys::same(c, h)) });
                 if let Some((_, id)) = hit {
                     return self.press(id);
                 }

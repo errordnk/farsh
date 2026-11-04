@@ -264,7 +264,7 @@ impl DriveMenu {
             KeyCode::Enter => return self.choose(self.selected),
             // a drive letter goes straight there
             KeyCode::Char(c) => {
-                let wanted = format!("{}:", c.to_ascii_uppercase());
+                let wanted = format!("{}:", crate::keys::latin(c).unwrap_or(c).to_ascii_uppercase());
                 if let Some(index) = self.drives.iter().position(|d| d.name == wanted) {
                     return self.choose(index);
                 }

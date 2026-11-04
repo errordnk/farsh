@@ -153,7 +153,7 @@ impl SortMenu {
                 let c = c.to_lowercase().next().unwrap_or(c);
                 let hit = self.lines.iter().position(|l| {
                     let (text, hot) = plain(l.label);
-                    hot.and_then(|h| text.chars().nth(h)).is_some_and(|h| h.to_lowercase().next() == Some(c))
+                    hot.and_then(|h| text.chars().nth(h)).is_some_and(|h| crate::keys::same(c, h))
                 });
                 if let Some(index) = hit {
                     self.selected = index;

@@ -235,8 +235,7 @@ impl VMenu {
                 };
             }
             KeyCode::Char(c) if plain && c != ' ' => {
-                let lower = |c: char| c.to_lowercase().next().unwrap_or(c);
-                if let Some(index) = self.hot_keys().iter().position(|hot| hot.is_some_and(|(h, _)| lower(h) == lower(c)))
+                if let Some(index) = self.hot_keys().iter().position(|hot| hot.is_some_and(|(h, _)| crate::keys::same(c, h)))
                     && !self.entries[index].disabled
                 {
                     self.selected = index;

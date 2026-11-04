@@ -1687,7 +1687,7 @@ impl Dialog {
         if let KeyCode::Char(c) = key.code {
             // Alt+letter always, a bare letter where nothing is being typed.
             if (alt || (!on_edit && !ctrl)) && c != ' ' {
-                if let Some(outcome) = self.hot(c) {
+                if let Some(outcome) = self.hot(c).or_else(|| crate::keys::latin(c).and_then(|l| self.hot(l))) {
                     return outcome;
                 }
             }

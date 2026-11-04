@@ -32,6 +32,38 @@ pub fn encode(key: KeyEvent) -> Option<Vec<u8>> {
     Some(bytes)
 }
 
+/// The Russian (ЙЦУКЕН) letters in the order of the QWERTY keys they share.
+const RUSSIAN: &str = "йцукенгшщзхъфывапролджэячсмитьбюё";
+const QWERTY: &str = "qwertyuiop[]asdfghjkl;'zxcvbnm,.`";
+
+/// The character of the same key on a QWERTY keyboard, for a Russian
+/// letter (the case kept): Far's Xlat / KeyToKeyLayout, so that a hot key
+/// or shortcut works whatever the layout.
+pub fn latin(c: char) -> Option<char> {
+    let lower = c.to_lowercase().next().unwrap_or(c);
+    let at = RUSSIAN.chars().position(|r| r == lower)?;
+    let l = QWERTY.chars().nth(at)?;
+    Some(if c != lower { l.to_ascii_uppercase() } else { l })
+}
+
+/// With Ctrl or Alt held, a Russian letter is the Latin one of its key
+/// (Ctrl+Ц is Ctrl+W), as a terminal sends it in any layout.
+pub fn normalize(mut key: KeyEvent) -> KeyEvent {
+    if key.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+        && let KeyCode::Char(c) = key.code
+        && let Some(l) = latin(c)
+    {
+        key.code = KeyCode::Char(l);
+    }
+    key
+}
+
+/// Whether the typed `c` is the hot key `hot`, in either layout.
+pub fn same(c: char, hot: char) -> bool {
+    let lower = |c: char| c.to_lowercase().next().unwrap_or(c);
+    lower(c) == lower(hot) || latin(c).is_some_and(|l| lower(l) == lower(hot))
+}
+
 fn function_key(n: u8) -> Option<Vec<u8>> {
     Some(match n {
         1 => b"\x1bOP".to_vec(),
@@ -48,4 +80,29 @@ fn function_key(n: u8) -> Option<Vec<u8>> {
         12 => b"\x1b[24~".to_vec(),
         _ => return None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn russian_layout_is_the_latin_keys() {
+        assert_eq!(latin('ц'), Some('w'));
+        assert_eq!(latin('Ш'), Some('I'));
+        assert_eq!(latin('w'), None);
+        let ctrl_w = normalize(KeyEvent::new(KeyCode::Char('ц'), KeyModifiers::CONTROL));
+        assert_eq!(ctrl_w.code, KeyCode::Char('w'));
+        let typed = normalize(KeyEvent::new(KeyCode::Char('ц'), KeyModifiers::NONE));
+        assert_eq!(typed.code, KeyCode::Char('ц'), "plain letters stay what they are");
+        assert!(same('а', 'f') && same('F', 'f') && !same('а', 'a'));
+        // the F9 menu and a dialog's hot keys
+        let mut menu = crate::menu::Menu::new(0, [2, 2], [(crate::panels::Kind::Files, true, true); 2]);
+        menu.key(KeyEvent::new(KeyCode::Char('с'), KeyModifiers::NONE));
+        assert_eq!(menu.current(), 2, "с is the C of Commands");
+        let mut dialog = crate::dialog::Dialog::select_group(true, "*.*");
+        let mut vmenu = crate::vmenu::VMenu::new("ArcLite", vec!["&Test archive files".into()]);
+        assert_eq!(vmenu.key(KeyEvent::new(KeyCode::Char('е'), KeyModifiers::NONE)), crate::vmenu::Outcome::Chosen(0));
+        assert!(matches!(dialog.key(KeyEvent::new(KeyCode::Char('ф'), KeyModifiers::ALT)), crate::dialog::Outcome::Open));
+    }
 }

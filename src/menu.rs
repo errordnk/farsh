@@ -352,11 +352,11 @@ impl Menu {
                 let c = c.to_lowercase().next().unwrap_or(c);
                 // Alt+letter opens a title, a letter picks an item
                 if key.modifiers.contains(KeyModifiers::ALT) {
-                    if let Some(index) = self.titles.iter().position(|t| hot_letter(t.label) == Some(c)) {
+                    if let Some(index) = self.titles.iter().position(|t| hot_letter(t.label).is_some_and(|h| crate::keys::same(c, h))) {
                         self.open(index);
                     }
                 } else if let Some(index) =
-                    self.items().iter().position(|i| i.command.is_some() && hot_letter(i.label) == Some(c))
+                    self.items().iter().position(|i| i.command.is_some() && hot_letter(i.label).is_some_and(|h| crate::keys::same(c, h)))
                 {
                     self.item = index;
                     return self.choose(index);
@@ -379,7 +379,7 @@ impl Menu {
             KeyCode::Enter | KeyCode::Down | KeyCode::Up => self.dropped = true,
             KeyCode::Char(c) => {
                 let c = c.to_lowercase().next().unwrap_or(c);
-                if let Some(index) = self.titles.iter().position(|t| hot_letter(t.label) == Some(c)) {
+                if let Some(index) = self.titles.iter().position(|t| hot_letter(t.label).is_some_and(|h| crate::keys::same(c, h))) {
                     self.open(index);
                     self.dropped = true;
                 }
