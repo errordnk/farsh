@@ -17,6 +17,8 @@ pub enum Kind {
     Delete,
     /// Alt+Del: each file is overwritten, cut to nothing, renamed, then removed.
     Wipe,
+    /// Shift+F1: an archive is made (`crate::archive`).
+    Pack,
 }
 
 impl Kind {
@@ -27,6 +29,7 @@ impl Kind {
             Kind::Move => "Move",
             Kind::Delete => "Delete",
             Kind::Wipe => "Wipe",
+            Kind::Pack => "Creating archive...",
         }
     }
 }
@@ -172,6 +175,39 @@ pub fn start(kind: Kind, items: Vec<(PathBuf, PathBuf)>, options: Options) -> Jo
     Job { kind, progress: Progress::default(), started: Instant::now(), result: None, question: None, events, answers, cancel }
 }
 
+/// Work of another kind (an archive being made) run as a job: it reports
+/// through the [`Reporter`], Esc cancels it.
+pub type Work = Box<dyn FnOnce(&mut Reporter) -> std::io::Result<()> + Send>;
+
+pub fn spawn(kind: Kind, work: Work) -> Job {
+    let (sender, events) = mpsc::channel();
+    let (answers, answer_receiver) = mpsc::channel();
+    let cancel = Arc::new(AtomicBool::new(false));
+    let worker_cancel = cancel.clone();
+    std::thread::spawn(move || {
+        let mut worker = Worker::new(kind, Options::default(), sender.clone(), answer_receiver, worker_cancel);
+        let result = work(&mut Reporter(&mut worker));
+        worker.send(true);
+        let _ = sender.send(Event::Done(result.map_err(|e| e.to_string())));
+    });
+    Job { kind, progress: Progress::default(), started: Instant::now(), result: None, question: None, events, answers, cancel }
+}
+
+/// What a [`Work`] tells the progress box, and where it learns it was cancelled.
+pub struct Reporter<'a>(&'a mut Worker);
+
+impl Reporter<'_> {
+    pub fn progress(&mut self) -> &mut Progress {
+        &mut self.0.progress
+    }
+
+    /// Sends the progress (at most every 50 ms); `Err` when the user cancelled.
+    pub fn tick(&mut self) -> std::io::Result<()> {
+        self.0.send(false);
+        self.0.check_cancel()
+    }
+}
+
 /// Where each of `sources` goes when the user typed `typed` in the Copy/Move
 /// box with the active panel in `base`: into the folder `typed` names, or, for
 /// a single source, to the new name `typed` gives it. With `multiple`, `typed`
@@ -305,6 +341,7 @@ impl Worker {
                 self.copy_all(&plan)
             }
             Kind::Move => self.move_all(items),
+            Kind::Pack => Ok(()),
             Kind::Delete | Kind::Wipe => {
                 for (src, _) in items {
                     self.remove(src)?;

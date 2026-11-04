@@ -32,6 +32,8 @@ pub enum Action {
     Wipe(Vec<PathBuf>),
     /// Ctrl+A: what it opened with and what the user did since.
     Attributes(Box<crate::attributes::Setup>),
+    /// Shift+F1: Create archive.
+    CreateArchive(Box<crate::arcdialog::CreateSetup>),
     Quit,
     /// The answer to a file that already exists.
     Conflict,
@@ -116,7 +118,7 @@ pub enum Item {
     /// An input line from column `x` of the box to `W - 6`, its label (if
     /// any) at column 5; `history` puts Far's `↓` after it. Until the first
     /// key the text is "unchanged": a typed character replaces all of it.
-    Edit { id: &'static str, label: Option<&'static str>, x: u16, text: Vec<char>, cursor: usize, unchanged: bool, enabled: bool, history: bool },
+    Edit { id: &'static str, label: Option<&'static str>, x: u16, text: Vec<char>, cursor: usize, unchanged: bool, enabled: bool, history: bool, secret: bool },
     Radio { id: &'static str, label: &'static str, options: Vec<&'static str>, selected: usize },
     Check { id: &'static str, label: &'static str, checked: bool, enabled: bool },
     /// A drop-down list from column `x` of the box, its label at column 5.
@@ -132,6 +134,9 @@ pub enum Item {
     /// A user separator (DIF_SEPARATORUSER): first, middle and last
     /// character, vertical when its place spans rows.
     Line([char; 3]),
+    /// One radio button of the group `id` (Far's DI_RADIOBUTTON): the
+    /// group's value is the `index` of the one that is on.
+    Option { id: &'static str, index: usize, label: &'static str, on: bool },
 }
 
 /// Where an item of a dialog laid out by hand sits, in Far's dialog
@@ -159,8 +164,12 @@ const fn span(x: i16, y: u16, x2: u16) -> Place {
 pub enum Event {
     Toggled(&'static str),
     Button(&'static str),
-    /// The dialog opened over this one closed: with OK (its values) or not.
-    SubClosed(Option<Values>),
+    /// The dialog opened over this one closed: with the button pressed and
+    /// its values, or not (Esc, Cancel).
+    SubClosed(Option<(&'static str, Values)>),
+    /// A button that closes the dialog was pressed (Far's DN_CLOSE): the
+    /// hook may keep it open by opening a message over it.
+    Closing(&'static str),
 }
 
 /// How the box is sized and placed.
@@ -208,11 +217,17 @@ pub struct Dialog {
     button: usize,
     /// For [`Layout::Placed`]: where each item is.
     places: Vec<Place>,
+    /// DIF_DISABLE and DIF_HIDDEN of each item (indices past the end are neither).
+    disabled: Vec<bool>,
+    hidden: Vec<bool>,
     /// What the dialog does itself on an [`Event`] (Far's dialog procedure).
     hook: Option<fn(&mut Dialog, Event)>,
     /// A dialog opened over this one (Attributes' "More"): it has the keys
     /// until it closes, and the hook hears how it closed.
     sub: Option<Box<Dialog>>,
+    /// The hook decided to close the dialog with this button (after a
+    /// question over it was answered).
+    closing: Option<&'static str>,
     action: Action,
 }
 
@@ -237,7 +252,7 @@ fn edit(id: &'static str, value: &str) -> Item {
     let text: Vec<char> = value.chars().collect();
     let cursor = text.len();
     let unchanged = !text.is_empty();
-    Item::Edit { id, label: None, x: 5, text, cursor, unchanged, enabled: true, history: true }
+    Item::Edit { id, label: None, x: 5, text, cursor, unchanged, enabled: true, history: true, secret: false }
 }
 
 fn button(label: &'static str, id: &'static str, default: bool) -> Button {
@@ -282,7 +297,7 @@ impl Dialog {
                 button("Ca&ncel", "cancel", false),
             ]),
         ];
-        Self { title: if moving { "Rename/Move" } else { "Copy" }.into(), style: Style::Normal, layout: Layout::Fixed(76), items, focus: 1, button: 0, places: vec![], hook: None, sub: None, action }
+        Self { title: if moving { "Rename/Move" } else { "Copy" }.into(), style: Style::Normal, layout: Layout::Fixed(76), items, focus: 1, button: 0, places: vec![], disabled: vec![], hidden: vec![], hook: None, sub: None, closing: None, action }
     }
 
     /// F7 (mkdir.cpp: 76 wide). Links are not made yet: the link type is
@@ -297,7 +312,7 @@ impl Dialog {
                 edit("name", ""),
                 Item::Separator(None),
                 Item::Combo { id: "link", label: "&Link type:", x: 20, options: vec!["none"], selected: 0, unchanged: true },
-                Item::Edit { id: "target", label: Some("&Target:"), x: 20, text: vec![], cursor: 0, unchanged: false, enabled: false, history: true },
+                Item::Edit { id: "target", label: Some("&Target:"), x: 20, text: vec![], cursor: 0, unchanged: false, enabled: false, history: true, secret: false },
                 Item::Check { id: "multiple", label: "Process &multiple names", checked: false, enabled: true },
                 Item::Separator(None),
                 Item::Buttons(vec![button("OK", "ok", true), button("Cancel", "cancel", false)]),
@@ -305,8 +320,11 @@ impl Dialog {
             focus: 1,
             button: 0,
             places: vec![],
+            disabled: vec![],
+            hidden: vec![],
             hook: None,
             sub: None,
+            closing: None,
             action: Action::MkDir,
         }
     }
@@ -328,7 +346,7 @@ impl Dialog {
         let verb = if matches!(action, Action::Wipe(_)) { "Wipe" } else { "Delete" };
         items.push(Item::Buttons(vec![button(verb, "ok", true), button("Cancel", "cancel", false)]));
         let focus = items.len() - 1;
-        Self { title: verb.into(), style: Style::Warning, layout: Layout::Builder, items, focus, button: 0, places: vec![], hook: None, sub: None, action }
+        Self { title: verb.into(), style: Style::Warning, layout: Layout::Builder, items, focus, button: 0, places: vec![], disabled: vec![], hidden: vec![], hook: None, sub: None, closing: None, action }
     }
 
     /// Delete/Wipe meets a folder with something in it (delete.cpp's
@@ -380,13 +398,13 @@ impl Dialog {
         items.push(Item::Separator(None));
         items.push(Item::Buttons(buttons));
         let focus = items.len() - 1;
-        Self { title: title.into(), style: Style::Warning, layout: Layout::Message, items, focus, button: 0, places: vec![], hook: None, sub: None, action: Action::Conflict }
+        Self { title: title.into(), style: Style::Warning, layout: Layout::Message, items, focus, button: 0, places: vec![], disabled: vec![], hidden: vec![], hook: None, sub: None, closing: None, action: Action::Conflict }
     }
 
     /// A question with Yes and No (Far's Message with no hot keys).
     pub fn confirm(title: &str, line: &str, action: Action) -> Self {
         let items = vec![centered(line), Item::Separator(None), Item::Buttons(vec![button("Yes", "ok", true), button("No", "cancel", false)])];
-        Self { title: title.into(), style: Style::Normal, layout: Layout::Message, items, focus: 2, button: 0, places: vec![], hook: None, sub: None, action }
+        Self { title: title.into(), style: Style::Normal, layout: Layout::Message, items, focus: 2, button: 0, places: vec![], disabled: vec![], hidden: vec![], hook: None, sub: None, closing: None, action }
     }
 
     /// An error to read.
@@ -395,7 +413,7 @@ impl Dialog {
         items.push(Item::Separator(None));
         items.push(Item::Buttons(vec![button("OK", "ok", true)]));
         let focus = items.len() - 1;
-        Self { title: "Error".into(), style: Style::Warning, layout: Layout::Message, items, focus, button: 0, places: vec![], hook: None, sub: None, action: Action::Info }
+        Self { title: "Error".into(), style: Style::Warning, layout: Layout::Message, items, focus, button: 0, places: vec![], disabled: vec![], hidden: vec![], hook: None, sub: None, closing: None, action: Action::Info }
     }
 
     /// A file is in the way of a copy.
@@ -412,7 +430,7 @@ impl Dialog {
             Item::Separator(None),
             Item::Buttons(vec![button("&Overwrite", "overwrite", true), button("&Skip", "skip", false), button("&Cancel", "cancel", false)]),
         ];
-        Self { title: "Warning".into(), style: Style::Warning, layout: Layout::Fixed(76), items, focus: 8, button: 0, places: vec![], hook: None, sub: None, action: Action::Conflict }
+        Self { title: "Warning".into(), style: Style::Warning, layout: Layout::Fixed(76), items, focus: 8, button: 0, places: vec![], disabled: vec![], hidden: vec![], hook: None, sub: None, closing: None, action: Action::Conflict }
     }
 
     /// Ctrl+A, laid out as setattr.cpp lays it out: 80 by 21 (DlgX, DlgY),
@@ -439,7 +457,7 @@ impl Dialog {
             add(Item::Label(label.clone()), span(5, 4, 17));
             let text: Vec<char> = target.chars().collect();
             let cursor = text.len();
-            add(Item::Edit { id: "link", label: None, x: 18, text, cursor, unchanged: true, enabled: false, history: false }, span(18, 4, dlg_x - 6));
+            add(Item::Edit { id: "link", label: None, x: 18, text, cursor, unchanged: true, enabled: false, history: false, secret: false }, span(18, 4, dlg_x - 6));
         }
         add(Item::Separator(None), at(-1, below(4)));
         for (i, (attribute, id, label)) in attr::MAIN.iter().enumerate() {
@@ -466,7 +484,7 @@ impl Dialog {
         add(Item::Label("Owner&:".into()), at(32, below(15)));
         let owner: Vec<char> = setup.owner.chars().collect();
         let cursor = owner.len();
-        add(Item::Edit { id: "owner", label: None, x: 32, text: owner, cursor, unchanged: true, enabled: true, history: false }, span(32, below(16), dlg_x - 6));
+        add(Item::Edit { id: "owner", label: None, x: 32, text: owner, cursor, unchanged: true, enabled: true, history: false, secret: false }, span(32, below(16), dlg_x - 6));
         if setup.folders {
             add(Item::Separator(None), at(-1, below(17)));
             add(Item::Check3 { id: "subfolders", label: "Process sub&folders", state: 0, three: false, enabled: true }, at(5, below(18)));
@@ -485,8 +503,11 @@ impl Dialog {
             focus,
             button: 0,
             places,
+            disabled: vec![],
+            hidden: vec![],
             hook: Some(attributes_hook),
             sub: None,
+            closing: None,
             action: Action::Attributes(Box::new(setup)),
         }
     }
@@ -509,8 +530,11 @@ impl Dialog {
             focus,
             button: 0,
             places: vec![],
+            disabled: vec![],
+            hidden: vec![],
             hook: Some(more_attributes_hook),
             sub: None,
+            closing: None,
             action: Action::Info,
         }
     }
@@ -524,6 +548,7 @@ impl Dialog {
                 Item::Radio { id, selected, .. } | Item::Combo { id, selected, .. } => values.choices.push((id, *selected)),
                 Item::Check3 { id, state, .. } => values.choices.push((id, *state as usize)),
                 Item::Masked { id, text, .. } => values.texts.push((id, text.iter().collect())),
+                Item::Option { id, index, on: true, .. } => values.choices.push((id, *index)),
                 _ => {}
             }
         }
@@ -539,9 +564,97 @@ impl Dialog {
             | Item::Combo { id: i, .. }
             | Item::Check3 { id: i, .. }
             | Item::Masked { id: i, .. } => *i == id,
+            Item::Option { id: i, on: true, .. } => *i == id,
             Item::Buttons(buttons) => buttons.iter().any(|b| b.id == id),
             _ => false,
         })
+    }
+
+    /// A dialog laid out by hand (Far's own coordinates, or arclite's
+    /// layout, see `crate::arcdialog`).
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn placed(title: String, size: (u16, u16), items: Vec<Item>, places: Vec<Place>, focus: usize, hook: Option<fn(&mut Dialog, Event)>, action: Action) -> Self {
+        let count = items.len();
+        Self {
+            title,
+            style: Style::Normal,
+            layout: Layout::Placed(size.0, size.1),
+            items,
+            focus,
+            button: 0,
+            places,
+            disabled: vec![false; count],
+            hidden: vec![false; count],
+            hook,
+            sub: None,
+            closing: None,
+            action,
+        }
+    }
+
+    /// From the hook: close the dialog as if `id` was pressed.
+    pub(crate) fn close_with(&mut self, id: &'static str) {
+        self.closing = Some(id);
+    }
+
+    pub(crate) fn is_disabled(&self, index: usize) -> bool {
+        self.disabled.get(index).copied().unwrap_or(false) || self.hidden.get(index).copied().unwrap_or(false)
+    }
+
+    /// Far's DM_ENABLE.
+    pub(crate) fn enable(&mut self, index: usize, on: bool) {
+        if let Some(flag) = self.disabled.get_mut(index) {
+            *flag = !on;
+        }
+    }
+
+    /// Far's DM_SHOWITEM.
+    pub(crate) fn show(&mut self, index: usize, on: bool) {
+        if let Some(flag) = self.hidden.get_mut(index) {
+            *flag = !on;
+        }
+    }
+
+    pub(crate) fn action_mut(&mut self) -> &mut Action {
+        &mut self.action
+    }
+
+    /// The state of a check box: 0, 1 or 2.
+    pub(crate) fn check_state(&self, index: usize) -> u8 {
+        match self.items.get(index) {
+            Some(Item::Check { checked, .. }) => u8::from(*checked),
+            Some(Item::Check3 { state, .. }) => *state,
+            Some(Item::Option { on, .. }) => u8::from(*on),
+            _ => 0,
+        }
+    }
+
+    pub(crate) fn text_of(&self, index: usize) -> String {
+        match self.items.get(index) {
+            Some(Item::Edit { text, .. } | Item::Masked { text, .. }) => text.iter().collect(),
+            _ => String::new(),
+        }
+    }
+
+    pub(crate) fn set_text_at(&mut self, index: usize, value: &str) {
+        if let Some(Item::Edit { text, cursor, unchanged, .. }) = self.items.get_mut(index) {
+            *text = value.chars().collect();
+            *cursor = text.len();
+            *unchanged = false;
+        }
+    }
+
+    /// Turns on the radio button `index` and off the others of its group.
+    pub(crate) fn select_option(&mut self, index: usize) {
+        let Some(Item::Option { id: group, .. }) = self.items.get(index) else { return };
+        let group = *group;
+        for (i, item) in self.items.iter_mut().enumerate() {
+            if let Item::Option { id, on, .. } = item
+                && *id == group
+            {
+                *on = i == index;
+            }
+        }
     }
 
     /// Sets the text of the input line or masked field `id` (fitted to its mask).
@@ -687,7 +800,7 @@ fn attributes_hook(dialog: &mut Dialog, event: Event) {
             dialog.focus_on("wdate");
         }
         Event::Button("more") => dialog.sub = Some(Box::new(Dialog::more_attributes(&setup))),
-        Event::SubClosed(Some(values)) => {
+        Event::SubClosed(Some((_, values))) => {
             for (i, (_, id, _)) in attr::ADVANCED.iter().enumerate() {
                 let state = values.choice(id) as u8;
                 if state != setup.current[10 + i] {
@@ -708,6 +821,13 @@ fn more_attributes_hook(dialog: &mut Dialog, event: Event) {
         if let Item::Check3 { state, three, .. } = &mut dialog.items[index] {
             *state = if *three { 2 } else { 0 };
         }
+    }
+}
+
+fn option_id(item: &Item) -> &'static str {
+    match item {
+        Item::Option { id, .. } => id,
+        _ => "",
     }
 }
 
@@ -858,7 +978,7 @@ fn spans_at(item: &Item, frame: &Frame, place: Option<&Place>) -> Vec<Span> {
             vec![(0, start, width)]
         }
         Item::Masked { mask, .. } => vec![(0, x, mask.len() as u16)],
-        Item::Check { label, .. } | Item::Check3 { label, .. } => vec![(0, x, 4 + label_len(label))],
+        Item::Check { label, .. } | Item::Check3 { label, .. } | Item::Option { label, .. } => vec![(0, x, 4 + label_len(label))],
         Item::Radio { label, options, .. } => {
             let mut at = x + label_len(label) + 1;
             options
@@ -900,7 +1020,7 @@ fn natural_width(item: &Item) -> u16 {
         Item::Label(label) => label_len(label),
         Item::Edit { .. } | Item::Separator(_) | Item::Line(_) => 0,
         Item::Masked { mask, .. } => mask.len() as u16,
-        Item::Check { label, .. } | Item::Check3 { label, .. } => 4 + label_len(label),
+        Item::Check { label, .. } | Item::Check3 { label, .. } | Item::Option { label, .. } => 4 + label_len(label),
         Item::Radio { label, options, .. } => label_len(label) + 1 + options.iter().map(|o| 5 + label_len(o)).sum::<u16>(),
         Item::Combo { label, options, .. } => label_len(label) + 3 + options.iter().map(|o| o.chars().count() as u16).max().unwrap_or(0),
         Item::Buttons(buttons) => buttons_len(buttons),
@@ -995,7 +1115,13 @@ impl Dialog {
         frame.draw(grid, &self.title, &p);
         let mut cursor = None;
         let text_w = frame.text_w() as usize;
+        let base = p;
+        let dim = Palette { fg: base.dim, hot: base.dim, edit_fg: base.dim, unchanged_fg: base.dim, ..self.style.palette() };
         for (i, item) in self.items.iter().enumerate() {
+            if self.hidden.get(i).copied().unwrap_or(false) {
+                continue;
+            }
+            let p = if self.disabled.get(i).copied().unwrap_or(false) { &dim } else { &base };
             let y = self.item_y(&frame, i);
             let place = self.places.get(i);
             let x = place.map_or(frame.text_x(), |p| frame.x + p.x.max(0) as u16);
@@ -1042,6 +1168,13 @@ impl Dialog {
                         cursor = Some((spans[0].1 + 1, y));
                     }
                 }
+                Item::Option { label, on, .. } => {
+                    grid.put(x, y, &format!("({}) ", if *on { '\u{2022}' } else { ' ' }), p.fg, p.bg);
+                    put_label(grid, x + 4, y, label, p.fg, p.bg, p.hot);
+                    if focused {
+                        cursor = Some((x + 1, y));
+                    }
+                }
                 Item::Masked { text, cursor: at, unchanged, .. } => {
                     let (fx, w) = (spans[0].1, spans[0].2);
                     let fg = if *unchanged { p.unchanged_fg } else { p.edit_fg };
@@ -1053,14 +1186,14 @@ impl Dialog {
                 }
                 Item::Label(label) => put_label(grid, x, y, label, p.fg, p.bg, p.hot),
                 Item::Separator(title) => frame.separator(grid, y, *title, &p),
-                Item::Edit { label, text, cursor: at, unchanged, enabled, history, .. } => {
+                Item::Edit { label, text, cursor: at, unchanged, enabled, history, secret, .. } => {
                     if let Some(label) = label {
                         // Far keeps the label's colors when the line is disabled
                         put_label(grid, x, y, label, p.fg, p.bg, p.hot);
                     }
                     let (fx, w) = (spans[0].1, spans[0].2);
                     let start = (*at + 1).saturating_sub(w as usize);
-                    let visible: String = text.iter().skip(start).take(w as usize).collect();
+                    let visible: String = text.iter().skip(start).take(w as usize).map(|&c| if *secret { '*' } else { c }).collect();
                     let fg = if *enabled { p.edit_fg } else { p.dim };
                     grid.fill_with(fx, y, w, 1, fg, p.edit_bg);
                     grid.put(fx, y, &visible, fg, p.edit_bg);
@@ -1140,8 +1273,13 @@ impl Dialog {
 
 impl Dialog {
     fn focusable(&self, index: usize) -> bool {
+        if self.is_disabled(index) {
+            return false;
+        }
         match &self.items[index] {
             Item::Radio { .. } | Item::Combo { .. } | Item::Masked { .. } => true,
+            // a group is entered at the one that is on
+            Item::Option { on, .. } => *on,
             Item::Edit { enabled, .. } | Item::Check { enabled, .. } | Item::Check3 { enabled, .. } => *enabled,
             Item::Buttons(buttons) => buttons.iter().any(|b| b.enabled),
             Item::Text { .. } | Item::Label(_) | Item::Separator(_) | Item::Line(_) => false,
@@ -1232,6 +1370,11 @@ impl Dialog {
         } else if id == "cancel" {
             Outcome::Closed
         } else {
+            self.notify(Event::Closing(id));
+            if self.sub.is_some() {
+                // the hook asks or tells something first (Far's DN_CLOSE refused)
+                return Outcome::Open;
+            }
             Outcome::Pressed(self.action.clone(), id, self.values())
         }
     }
@@ -1241,12 +1384,38 @@ impl Dialog {
             Item::Radio { options, selected, .. } => {
                 *selected = (*selected as isize + step).rem_euclid(options.len() as isize) as usize;
             }
-            Item::Combo { options, selected, unchanged, .. } => {
+            Item::Combo { id, options, selected, unchanged, .. } => {
                 *selected = (*selected as isize + step).rem_euclid(options.len() as isize) as usize;
                 *unchanged = false;
+                // Far's DN_EDITCHANGE of a drop-down list
+                let id = *id;
+                self.notify(Event::Toggled(id));
             }
             _ => {}
         }
+    }
+
+    /// Sets the drop-down list `index` to `selected` (Far's DM_LISTSETCURPOS).
+    pub(crate) fn set_list_pos(&mut self, index: usize, pos: usize) {
+        if let Some(Item::Combo { options, selected, .. }) = self.items.get_mut(index) {
+            *selected = pos.min(options.len().saturating_sub(1));
+        }
+    }
+
+    pub(crate) fn list_pos(&self, index: usize) -> usize {
+        match self.items.get(index) {
+            Some(Item::Combo { selected, .. }) => *selected,
+            _ => 0,
+        }
+    }
+
+    /// A message over the dialog (Far's Message from a dialog procedure):
+    /// the lines, an OK, in the warning colors.
+    pub(crate) fn message_over(&mut self, title: &str, lines: &[&str], buttons: &[(&'static str, &'static str)]) {
+        let buttons = buttons.iter().enumerate().map(|(i, (label, id))| button(label, id, i == 0)).collect();
+        let mut message = Dialog::warning(title, lines.iter().map(|l| l.to_string()).collect(), buttons);
+        message.action = Action::Info;
+        self.sub = Some(Box::new(message));
     }
 
     /// A hot key: focuses the control, toggles a check box, picks a radio
@@ -1254,6 +1423,17 @@ impl Dialog {
     fn hot(&mut self, c: char) -> Option<Outcome> {
         let c = c.to_lowercase().next().unwrap_or(c);
         for index in 0..self.items.len() {
+            if self.is_disabled(index) {
+                continue;
+            }
+            if let Item::Option { label, .. } = &self.items[index]
+                && hot_key(label) == Some(c)
+            {
+                self.select_option(index);
+                self.focus = index;
+                self.notify(Event::Toggled(option_id(&self.items[index])));
+                return Some(Outcome::Open);
+            }
             match &mut self.items[index] {
                 Item::Label(label) if hot_key(label) == Some(c) => {
                     self.focus_after(index);
@@ -1304,12 +1484,15 @@ impl Dialog {
                 self.sub = None;
                 self.notify(Event::SubClosed(None));
             }
-            Outcome::Pressed(_, _, values) => {
+            Outcome::Pressed(_, id, values) => {
                 self.sub = None;
-                self.notify(Event::SubClosed(Some(values)));
+                self.notify(Event::SubClosed(Some((id, values))));
             }
         }
-        Outcome::Open
+        match self.closing.take() {
+            Some(id) => Outcome::Pressed(self.action.clone(), id, self.values()),
+            None => Outcome::Open,
+        }
     }
 
     pub fn key(&mut self, key: KeyEvent) -> Outcome {
@@ -1359,11 +1542,29 @@ impl Dialog {
                         }
                     }
                     Item::Radio { .. } | Item::Combo { .. } => self.cycle(step),
+                    Item::Option { id, .. } => {
+                        // to the group's next (or previous) button, which turns on
+                        let group = *id;
+                        let members: Vec<usize> = (0..self.items.len())
+                            .filter(|&i| matches!(&self.items[i], Item::Option { id, .. } if *id == group) && !self.is_disabled(i))
+                            .collect();
+                        if let Some(at) = members.iter().position(|&i| i == self.focus) {
+                            let next = members[(at as isize + step).rem_euclid(members.len() as isize) as usize];
+                            self.select_option(next);
+                            self.focus = next;
+                            self.notify(Event::Toggled(group));
+                        }
+                    }
                     _ => {}
                 }
             }
             KeyCode::Char(' ') => match &self.items[self.focus] {
                 Item::Check { .. } | Item::Check3 { .. } => self.toggle(self.focus),
+                Item::Option { .. } => {
+                    let focus = self.focus;
+                    self.select_option(focus);
+                    self.notify(Event::Toggled(option_id(&self.items[focus])));
+                }
                 Item::Radio { .. } | Item::Combo { .. } => self.cycle(1),
                 Item::Buttons(buttons) => {
                     let id = buttons.get(self.button).filter(|b| b.enabled).map(|b| b.id);
@@ -1437,6 +1638,12 @@ impl Dialog {
             for (sub, x, w) in self.item_spans(&frame, index) {
                 if col < x || col >= x + w {
                     continue;
+                }
+                if matches!(self.items[index], Item::Option { .. }) && !self.is_disabled(index) {
+                    self.select_option(index);
+                    self.focus = index;
+                    self.notify(Event::Toggled(option_id(&self.items[index])));
+                    return Outcome::Open;
                 }
                 if !self.focusable(index) {
                     return Outcome::Open;
@@ -1561,10 +1768,56 @@ fn counter(label: &str, other: &str, value: u64, max_width: usize) -> String {
     format!("{label:<padded$}{value:>width$}", width = max_width.saturating_sub(padded))
 }
 
-/// The progress box of a running copy, move, delete or wipe.
+/// arclite's ArchiveUpdateProgress (update.cpp, c_width 60): the archive,
+/// the file with its bytes and bar, the total with the speed and what is
+/// left, the total bar.
+fn paint_pack_progress(job: &Job, grid: &mut Grid) {
+    const WIDTH: usize = 60;
+    let p = Style::Normal.palette();
+    let progress = &job.progress;
+    let frame = Frame::new((grid.cols, grid.rows), WIDTH as u16 + 10, 12, true);
+    let percent = |done: u64, total: u64| if total == 0 { 0 } else { (done * 100 / total) as usize };
+    frame.draw(grid, &format!("{{{}%}} {}", percent(progress.bytes_done, progress.bytes_total), job.kind.title()), &p);
+    let x = frame.x + 5;
+    let fit = |text: &str| -> String {
+        let count = text.chars().count();
+        if count <= WIDTH { text.to_string() } else { format!("\u{2026}{}", text.chars().skip(count - WIDTH + 1).collect::<String>()) }
+    };
+    let seconds = job.elapsed().as_secs_f64().max(0.001);
+    let speed = progress.bytes_done as f64 / seconds;
+    let left = if speed > 1.0 { (progress.bytes_total.saturating_sub(progress.bytes_done) as f64 / speed) as u64 } else { 0 };
+    let y = frame.y;
+    let line = |grid: &mut Grid, row: u16, text: &str| grid.put(x, y + row, text, p.fg, p.bg);
+    line(grid, 2, &fit(&progress.to));
+    frame.separator(grid, y + 3, None, &p);
+    line(grid, 4, &fit(&progress.from));
+    line(grid, 5, &format!("{:>7} / {}", data_size(progress.file_done), data_size(progress.file_size)));
+    line(grid, 6, &progressbar(WIDTH, percent(progress.file_done, progress.file_size)));
+    frame.separator(grid, y + 7, None, &p);
+    let speed_text = format!("{}/s", data_size(speed as u64));
+    line(grid, 8, &format!("{:>7} / {} @ {speed_text:>9} -{}", data_size(progress.bytes_done), data_size(progress.bytes_total), clock(left)));
+    line(grid, 9, &progressbar(WIDTH, percent(progress.bytes_done, progress.bytes_total)));
+}
+
+/// arclite's format_data_size: at most four digits and a unit.
+fn data_size(bytes: u64) -> String {
+    let units = ["B", "KB", "MB", "GB", "TB"];
+    let mut value = bytes as f64;
+    let mut unit = 0;
+    while value >= 1024.0 * 10.0 && unit + 1 < units.len() {
+        value /= 1024.0;
+        unit += 1;
+    }
+    format!("{} {}", value.round() as u64, units[unit])
+}
+
+/// The progress box of a running copy, move, delete, wipe or archive.
 pub fn paint_progress(job: &Job, grid: &mut Grid) {
     if matches!(job.kind, Kind::Delete | Kind::Wipe) {
         return paint_delete_progress(job, grid);
+    }
+    if job.kind == Kind::Pack {
+        return paint_pack_progress(job, grid);
     }
     let p = Style::Normal.palette();
     let progress = &job.progress;
@@ -1590,6 +1843,7 @@ pub fn paint_progress(job: &Job, grid: &mut Grid) {
         Kind::Copy => "Copying the file",
         Kind::Move => "Moving the file",
         Kind::Delete | Kind::Wipe => "Deleting the file",
+        Kind::Pack => "Adding the file",
     };
     line(grid, verb);
     line(grid, &fit(&progress.from));

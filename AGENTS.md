@@ -69,6 +69,16 @@ over the shell screen.
   to nothing, renamed to `F3T*.tmp` and removed; a folder is renamed, then
   removed. The progress box is Far's delete_progress (76 wide, the wipe
   bar, "Files:", no total bar: DelShowTotal is off by default).
+- Archives are arclite's (Far's archive plugin, plugins/arclite of Far
+  3.0.6446), for 7z, zip, tar and gzip only (`src/archive.rs`: sevenz-rust2,
+  zip, tar, flate2, all pure Rust). arclite's dialogs are laid out by its
+  own Far::Dialog (items left to right, `new_line`, the box grows to fit):
+  `src/arcdialog.rs` ports it (`Layout`) and the dialogs line by line, with
+  their dialog procedures as hooks (set_control_state, change_extension,
+  the checks on OK as a message over the dialog). Shift+F1 is Create
+  archive. Known differences: no SFX (7-Zip's modules), no profiles or
+  saved settings, zip cannot be written with LZMA or Deflate64 nor 7z with
+  Deflate64 (an error says so).
 - Enter on a link: a junction or symlink is entered by its own path; one
   that denies listing itself (Windows' compatibility junctions `My Documents`,
   `Application Data`, `Start Menu`...) is followed to its target, as Far does.

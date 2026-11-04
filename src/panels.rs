@@ -539,6 +539,8 @@ pub enum Request {
     Error(String),
     /// Ctrl+A: the attributes of these.
     Attributes(Vec<PathBuf>),
+    /// Shift+F1: put these into a new archive.
+    CreateArchive(Vec<PathBuf>),
 }
 
 /// Where the link at `path` points, as an ordinary path: a relative target
@@ -746,6 +748,11 @@ impl Panels {
                 self.set_view(right, c as u8 - b'0');
             }
             KeyCode::F(12) if ctrl_only => return Key::Ask(Request::SortMenu),
+            // Shift+F1: arclite's "Add to archive"
+            KeyCode::F(1) if key.modifiers == KeyModifiers::SHIFT => {
+                let sources = self.active_ref().sources();
+                return if sources.is_empty() { Key::Taken } else { Key::Ask(Request::CreateArchive(sources)) };
+            }
             // Far's Alt+Del: Wipe
             KeyCode::Delete if key.modifiers == KeyModifiers::ALT => return self.wipe_request(),
             // Far's Ctrl+A, whatever is typed

@@ -1,6 +1,8 @@
 //! farsh: the user's own shell (bash / zsh / PowerShell) in a PTY, with Far
 //! Manager style panels that Ctrl+O shows and hides.
 
+mod arcdialog;
+mod archive;
 mod attributes;
 mod cwd;
 mod dialog;
@@ -452,6 +454,10 @@ impl App {
             Request::SortMenu => self.overlay = Overlay::Sort(self.panels.sort_menu()),
             Request::Error(text) => self.overlay = Overlay::Dialog(Dialog::error(&text)),
             Request::Attributes(sources) => self.open_attributes(sources),
+            Request::CreateArchive(sources) => {
+                let base = self.panels.active_dir().to_path_buf();
+                self.overlay = Overlay::Dialog(arcdialog::create_archive(sources, &base));
+            }
             Request::Menu => {
                 let side = if self.panels.right_active() { 4 } else { 0 };
                 self.overlay = Overlay::Menu(Menu::new(self.last_menu.unwrap_or(side), self.panels.view_modes()));
@@ -521,6 +527,12 @@ impl App {
     /// A button was pressed in a dialog.
     fn accept(&mut self, action: Action, id: &str, values: &dialog::Values) {
         match action {
+            Action::CreateArchive(setup) => {
+                let Some(options) = setup.options.clone() else { return };
+                let sources = setup.sources.clone();
+                let work: fileops::Work = Box::new(move |reporter| pack(&options, &sources, reporter));
+                self.overlay = Overlay::Job(fileops::spawn(Kind::Pack, work), None);
+            }
             Action::Attributes(setup) if id == "system" => {
                 if let Err(error) = attributes::system_properties(&setup.paths[0]) {
                     self.overlay = Overlay::Dialog(Dialog::error(&error));
@@ -692,6 +704,35 @@ fn delete_question(sources: &[PathBuf], verb: &str) -> (String, Vec<String>) {
             (format!("Do you wish to {verb} the objects?"), names)
         }
     }
+}
+
+/// Makes the archive, telling the progress box (arclite's ArchiveUpdateProgress) as it goes.
+fn pack(options: &archive::Options, sources: &[PathBuf], reporter: &mut fileops::Reporter) -> std::io::Result<()> {
+    struct Report<'a, 'b>(&'a mut fileops::Reporter<'b>);
+    impl archive::Progress for Report<'_, '_> {
+        fn file(&mut self, entry: &archive::Entry) -> std::io::Result<()> {
+            let progress = self.0.progress();
+            progress.from = entry.path.display().to_string();
+            progress.file_size = entry.size;
+            progress.file_done = 0;
+            if !entry.is_dir {
+                progress.files_done += 1;
+            }
+            self.0.tick()
+        }
+        fn bytes(&mut self, count: u64) -> std::io::Result<()> {
+            let progress = self.0.progress();
+            progress.file_done += count;
+            progress.bytes_done += count;
+            self.0.tick()
+        }
+    }
+    let entries = archive::entries(sources)?;
+    let progress = reporter.progress();
+    progress.to = options.path.display().to_string();
+    progress.bytes_total = entries.iter().map(|e| e.size).sum();
+    progress.files_total = entries.iter().filter(|e| !e.is_dir).count();
+    archive::create(options, sources, &mut Report(reporter))
 }
 
 /// What Set in the Attributes dialog asks for (setattr.cpp): a check box on

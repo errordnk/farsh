@@ -7,8 +7,12 @@ edition = "2024"
 anyhow = "1.0.104"
 chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
 crossterm = "0.29.0"
+flate2 = "1.1.10"
 portable-pty = "0.9.0"
+sevenz-rust2 = { version = "0.24.2", features = ["deflate"] }
+tar = "0.4.46"
 vt100 = "0.18.1"
+zip = { version = "9.3.0", default-features = false, features = ["aes-crypto", "deflate", "deflate64", "lzma", "ppmd", "bzip2"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Globalization", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_System_Ioctl", "Win32_System_LibraryLoader", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
