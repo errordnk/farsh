@@ -287,14 +287,6 @@ impl Dialog {
         Self { title: "Error".into(), style: Style::Warning, layout: Layout::Message, items, focus, button: 0, action: Action::Info }
     }
 
-    /// Something to read, in the normal colors.
-    pub fn message(title: &str, text: &str) -> Self {
-        let mut dialog = Self::error(text);
-        dialog.title = title.into();
-        dialog.style = Style::Normal;
-        dialog
-    }
-
     /// A file is in the way of a copy.
     pub fn conflict(conflict: &Conflict) -> Self {
         let info = |label: &str, size: u64, modified: Option<SystemTime>| format!("{label:<9}{:>16} bytes  {}", group(size), date(modified));

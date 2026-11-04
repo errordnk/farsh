@@ -89,6 +89,10 @@ impl Shell {
             if let Some(dir) = self.osc7.feed(&bytes) {
                 self.cwd = Some(dir);
                 self.prompts += 1;
+                // The hook runs before the prompt is drawn: what follows is
+                // the bare prompt, even if keys went to the command meanwhile
+                // (an editor's) and `write` stopped waiting for it.
+                self.awaiting_prompt = true;
             }
             any = true;
         }
@@ -120,6 +124,18 @@ impl Shell {
     /// hook counts (PowerShell, bash, zsh); for any other it stays at 0.
     pub fn prompts(&self) -> u64 {
         self.prompts
+    }
+
+    /// Empties the shell's command line, the way its own line editor does:
+    /// Escape for PSReadLine's Windows mode and cmd, Ctrl+E Ctrl+U (to the
+    /// end, then everything before) for readline, zle and PSReadLine's
+    /// Emacs mode, the default outside Windows.
+    pub fn clear_line(&mut self) {
+        let keys: &[u8] = match self.kind {
+            Kind::PowerShell | Kind::Other if cfg!(windows) => b"\x1b",
+            _ => b"\x05\x15",
+        };
+        self.write(keys, false);
     }
 
     /// Makes the shell go to `dir`, as if `cd` were typed at an empty prompt.
@@ -317,6 +333,44 @@ mod tests {
         wait_for_prompt(&mut shell, before);
         assert_eq!(shell.prompts(), before + 1);
         shell.write(b"exit\r", true);
+    }
+
+    #[test]
+    fn after_a_program_that_read_keys_the_command_line_is_empty_again() {
+        let Some(program) = windows_powershell_or_skip() else { return };
+        let mut shell = Shell::spawn_program(&program, 100, 30).unwrap();
+        settle(&mut shell);
+        let before = shell.prompts();
+        // an editor: it takes keys, and quits on one
+        shell.run("$null = [Console]::ReadKey($true)");
+        settle(&mut shell);
+        shell.write(b"q", false);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while shell.prompts() <= before && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(60));
+            shell.pump();
+        }
+        settle(&mut shell);
+        assert!(shell.command_line_is_empty(), "after the program: {:?} vs {:?}", shell.cursor_line(), shell.prompt_line);
+        shell.write(b"exit\r", true);
+    }
+
+    #[test]
+    fn clear_line_empties_what_is_typed() {
+        let mut programs = vec![if cfg!(windows) { "cmd.exe".to_string() } else { "/bin/bash".to_string() }];
+        programs.extend(windows_powershell_or_skip());
+        for program in programs {
+            let mut shell = Shell::spawn_program(&program, 100, 30).unwrap();
+            settle(&mut shell);
+            assert!(shell.command_line_is_empty(), "{program}: bare prompt: {:?}", shell.cursor_line());
+            shell.write(b"echo hi there", false);
+            settle(&mut shell);
+            assert!(!shell.command_line_is_empty(), "{program}: typed: {:?}", shell.cursor_line());
+            shell.clear_line();
+            settle(&mut shell);
+            assert!(shell.command_line_is_empty(), "{program}: cleared: {:?} vs {:?}", shell.cursor_line(), shell.prompt_line);
+            shell.write(b"exit\r", true);
+        }
     }
 
     fn windows_powershell_or_skip() -> Option<String> {

@@ -402,10 +402,8 @@ impl App {
                 };
             }
             Request::Edit(path) => {
-                if !self.shell.command_line_is_empty() {
-                    self.overlay = Overlay::Dialog(Dialog::message("Edit", "Clear the command line first"));
-                    return;
-                }
+                // Whatever was typed gives way to the editor, as with any F-key.
+                self.shell.clear_line();
                 let line = editor::command_line(&editor::editor(), self.shell.kind(), &path);
                 // The panels come back when the editor ends, if the shell
                 // reports its prompts (see `Shell::prompts`); else Ctrl+O does.

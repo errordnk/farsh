@@ -44,6 +44,10 @@ over the shell screen.
   the shell shows its next prompt (`Shell::prompts`, counted from the OSC 7
   hook) the panels come back, re-read, with the cursor on the edited file,
   as in Far. A shell without the hook (cmd) gives no signal: Ctrl+O there.
+  F-keys work whatever is typed: F4 empties the command line first
+  (`Shell::clear_line`: Esc for PSReadLine/cmd on Windows, Ctrl+E Ctrl+U for
+  readline, zle and PSReadLine's Emacs mode). Every OSC 7 re-learns the bare
+  prompt, since keys typed into a running program stop `write` waiting for it.
 - Tests: `cargo test` (the shell test starts cmd.exe on Windows, /bin/sh elsewhere).
 - Code, comments and logs in English; talk to the user in Russian.
 
