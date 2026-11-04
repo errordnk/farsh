@@ -30,6 +30,7 @@ mod links;
 mod listing;
 mod masks;
 mod menu;
+mod modkeys;
 mod optmenu;
 mod options;
 mod mouse;
@@ -258,7 +259,12 @@ impl App {
                 || matches!(&self.overlay, Overlay::Find(results) if results.busy())
                 || (self.panels_visible && self.panels.busy());
             let wait = if busy { 50 } else { 10 };
-            if !event::poll(Duration::from_millis(wait))? {
+            // Shift/Ctrl/Alt on their own change the key bar
+            let (input, held_changed) = modkeys::wait(Duration::from_millis(wait))?;
+            if held_changed && self.panels_visible {
+                dirty = true;
+            }
+            if !input || !event::poll(Duration::ZERO)? {
                 dirty |= busy;
                 continue;
             }

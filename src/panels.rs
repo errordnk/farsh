@@ -36,8 +36,86 @@ fn BLACK() -> Color {
     crate::colors::fg("Panel.Cursor")
 }
 
-const KEY_BAR: [&str; 12] =
-    ["Help", "UserMn", "View", "Edit", "Copy", "RenMov", "MkFold", "Delete", "ConfMn", "Quit", "Plugin", "Screen"];
+/// Far's panel key bar for each set of modifiers held (farlang.templ.m4's
+/// MF1.., MShiftF1.., MCtrlF1..), indexed by `modkeys::held()`: English, Russian.
+type KeyBarLabels = [(&'static str, &'static str); 12];
+const KEY_BARS: [KeyBarLabels; 8] = {
+    const E: (&str, &str) = ("", "");
+    [
+        [
+            ("Help", "Помощь"),
+            ("UserMn", "ПользМ"),
+            ("View", "Просм"),
+            ("Edit", "Редакт"),
+            ("Copy", "Копир"),
+            ("RenMov", "Перен"),
+            ("MkFold", "Папка"),
+            ("Delete", "Удален"),
+            ("ConfMn", "КонфМн"),
+            ("Quit", "Выход"),
+            ("Plugin", "Плагины"),
+            ("Screen", "Экраны"),
+        ],
+        // Shift
+        [
+            ("Add", "Добавл"),
+            ("Extrct", "Распак"),
+            ("ArcCmd", "АрхКом"),
+            ("Edit…", "Редак…"),
+            ("Copy", "Копир"),
+            ("Rename", "Переим"),
+            E,
+            ("Delete", "Удален"),
+            ("Save", "Сохран"),
+            ("Last", "Послдн"),
+            ("Group", "Группы"),
+            ("SelUp", "Выбран"),
+        ],
+        // Ctrl
+        [
+            ("Left", "Левая"),
+            ("Right", "Правая"),
+            ("Name", "Имя"),
+            ("Extens", "Расшир"),
+            ("Write", "Запись"),
+            ("Size", "Размер"),
+            ("Unsort", "Несорт"),
+            ("Creatn", "Создан"),
+            ("Access", "Доступ"),
+            ("Descr", "Описан"),
+            ("Owner", "Владел"),
+            ("Sort", "Сорт"),
+        ],
+        // Ctrl+Shift
+        [E, E, ("View", "Просм"), ("Edit", "Редакт"), E, E, E, E, E, E, E, E],
+        // Alt
+        [
+            ("Left", "Левая"),
+            ("Right", "Правая"),
+            ("View…", "Смотр…"),
+            ("Edit…", "Редак…"),
+            ("Print", "Печать"),
+            ("MkLink", "Ссылка"),
+            ("Find", "Искать"),
+            ("Histry", "Истор"),
+            ("Video", "Видео"),
+            ("Tree", "Дерево"),
+            ("ViewHs", "ИстПр"),
+            ("FoldHs", "ИстПап"),
+        ],
+        // Alt+Shift
+        [E, E, E, E, E, E, E, E, ("ConfPl", "КонфПл"), E, E, E],
+        // Ctrl+Alt, Ctrl+Alt+Shift
+        [E; 12],
+        [E; 12],
+    ]
+};
+
+/// The key bar's labels for the modifiers held.
+fn key_bar_labels(held: u8) -> impl Iterator<Item = &'static str> {
+    let russian = crate::lang::russian();
+    KEY_BARS[usize::from(held & 7)].iter().map(move |&(en, ru)| if russian { ru } else { en })
+}
 
 /// Far's ten view modes (config.cpp's InitialModes): Ctrl+1..Ctrl+9, Ctrl+0.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -2068,7 +2146,7 @@ impl Panels {
         const MIN_LABEL: usize = 6;
         let y = grid.rows - 1;
         let cols = grid.cols as usize;
-        let count = KEY_BAR.len();
+        let count = 12;
         let min_full = (1 + MIN_LABEL + 1) * count + (count - 9) - 1;
         let mut extra = cols.saturating_sub(min_full);
         use crate::colors::{bg, fg};
@@ -2076,7 +2154,7 @@ impl Panels {
         let mut x = 0usize;
         let mut prev = 0usize;
         self.key_ends.clear();
-        for (i, label) in KEY_BAR.iter().enumerate() {
+        for (i, label) in key_bar_labels(crate::modkeys::held()).enumerate() {
             let two_digits = usize::from(i + 1 > 9);
             let mut end = prev + 1 + two_digits + MIN_LABEL + 1;
             if extra > 0 {
@@ -2094,7 +2172,6 @@ impl Panels {
             self.key_ends.push(end as u16);
             grid.put(x as u16, y, &(i + 1).to_string(), number.0, number.1);
             x += 1 + two_digits;
-            let label = crate::lang::tr(label);
             grid.put(x as u16, y, &format!("{:<width$}", label.chars().take(width).collect::<String>()), text.0, text.1);
             x += width;
             if x >= cols {

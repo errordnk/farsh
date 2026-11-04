@@ -24,7 +24,10 @@ over the shell screen.
   strmix.cpp, keybar.cpp and the default modes/highlighting in config.cpp and
   hilight.cpp): view modes and column widths, `Folder`/`Up`/`Juncti`, sizes in
   K/M/G, extension alignment, `}` over the divider, the status line, totals,
-  the key bar. Colors are `src/palette.rs`: Far's console attributes as
+  the key bar (its labels change while Shift/Ctrl/Alt are held, Far's
+  MShiftF1.. sets: `src/modkeys.rs` takes the modifier-only key events off the
+  console queue before crossterm, which drops them; the terminal must send
+  them in win32-input-mode, as Windows Terminal and Som do). Colors are `src/palette.rs`: Far's console attributes as
   they reach a terminal through ConPTY — the classic console table in RGB
   (blue 0,0,128...), with light gray text and a black background as the
   terminal's own defaults. Not the terminal's 16-color palette: Som's theme
