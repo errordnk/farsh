@@ -535,6 +535,8 @@ pub enum Request {
     SortMenu,
     /// Something went wrong (a folder that cannot be read): tell the user.
     Error(String),
+    /// Ctrl+A: the attributes of these.
+    Attributes(Vec<PathBuf>),
 }
 
 /// Where the link at `path` points, as an ordinary path: a relative target
@@ -742,6 +744,8 @@ impl Panels {
                 self.set_view(right, c as u8 - b'0');
             }
             KeyCode::F(12) if ctrl_only => return Key::Ask(Request::SortMenu),
+            // Far's Ctrl+A, whatever is typed
+            KeyCode::Char('a') if ctrl_only => return self.attributes_request(),
             KeyCode::F(n) if ctrl_only && SortMode::by_key(n).is_some() => {
                 self.active().set_sort(SortMode::by_key(n).unwrap_or(SortMode::Name));
             }
@@ -822,6 +826,12 @@ impl Panels {
             _ => return Key::Pass,
         }
         Key::Taken
+    }
+
+    /// Ctrl+A: the selection's attributes, or the entry's under the cursor (not `..`).
+    pub fn attributes_request(&mut self) -> Key {
+        let sources = self.active_ref().sources();
+        if sources.is_empty() { Key::Taken } else { Key::Ask(Request::Attributes(sources)) }
     }
 
     pub fn function_key(&mut self, n: u8) -> Key {

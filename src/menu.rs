@@ -34,6 +34,8 @@ pub enum Command {
     View { right: bool, mode: u8 },
     /// Ctrl+F12 for the left or right panel.
     SortModes { right: bool },
+    /// Ctrl+A over the active panel.
+    Attributes,
 }
 
 struct Item {
@@ -113,7 +115,7 @@ fn titles(modes: [u8; 2]) -> Vec<Title> {
                 item("E&xtract files", "Shift+F2", None),
                 item("Arc&hive commands", "Shift+F3", None),
                 SEPARATOR,
-                item("File &attributes", "Ctrl+A", None),
+                item("File &attributes", "Ctrl+A", Some(Command::Attributes)),
                 item("A&pply command", "Ctrl+G", None),
                 item("Descri&be files", "Ctrl+Z", None),
                 SEPARATOR,

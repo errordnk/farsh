@@ -15,6 +15,7 @@ use std::time::SystemTime;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use crossterm::style::Color;
 
+use crate::attributes as attr;
 use crate::fileops::{Conflict, Job, Kind};
 use crate::grid::Grid;
 use crate::palette;
@@ -27,6 +28,8 @@ pub enum Action {
     Move(Vec<PathBuf>),
     MkDir,
     Delete(Vec<PathBuf>),
+    /// Ctrl+A: what it opened with and what the user did since.
+    Attributes(Box<crate::attributes::Setup>),
     Quit,
     /// The answer to a file that already exists.
     Conflict,
@@ -92,6 +95,8 @@ pub struct Button {
     pub id: &'static str,
     pub default: bool,
     pub enabled: bool,
+    /// DIF_BTNNOCLOSE: the dialog's hook handles it, the dialog stays.
+    pub stay: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -116,6 +121,44 @@ pub enum Item {
     Combo { id: &'static str, label: &'static str, x: u16, options: Vec<&'static str>, selected: usize, unchanged: bool },
     Separator(Option<&'static str>),
     Buttons(Vec<Button>),
+    /// A check box with a third state (DIF_3STATE when `three`): 0 off,
+    /// 1 on, 2 "leave as it is", shown `[?]`.
+    Check3 { id: &'static str, label: &'static str, state: u8, three: bool, enabled: bool },
+    /// DI_FIXEDIT with a mask (DIF_MASKEDIT): `9` takes a digit, `N` a digit
+    /// or a space, anything else is fixed; the text is always as long as the mask.
+    Masked { id: &'static str, mask: Vec<char>, text: Vec<char>, cursor: usize, unchanged: bool },
+    /// A user separator (DIF_SEPARATORUSER): first, middle and last
+    /// character, vertical when its place spans rows.
+    Line([char; 3]),
+}
+
+/// Where an item of a dialog laid out by hand sits, in Far's dialog
+/// coordinates (from the box's top left): `x` -1 centers it (a separator:
+/// from frame to frame); `x2`/`y2` are inclusive ends, 0 when it has none.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Place {
+    pub x: i16,
+    pub y: u16,
+    pub x2: u16,
+    pub y2: u16,
+}
+
+const fn at(x: i16, y: u16) -> Place {
+    Place { x, y, x2: 0, y2: 0 }
+}
+
+const fn span(x: i16, y: u16, x2: u16) -> Place {
+    Place { x, y, x2, y2: 0 }
+}
+
+/// What the dialog's hook hears about (a check box toggled, a button
+/// that does not close the dialog pressed).
+#[derive(Clone, Debug, PartialEq)]
+pub enum Event {
+    Toggled(&'static str),
+    Button(&'static str),
+    /// The dialog opened over this one closed: with OK (its values) or not.
+    SubClosed(Option<Values>),
 }
 
 /// How the box is sized and placed.
@@ -127,6 +170,8 @@ enum Layout {
     Builder,
     /// A dialog with its own width, centered.
     Fixed(u16),
+    /// A dialog laid out by hand (DlgX by DlgY), every item at its [`Place`].
+    Placed(u16, u16),
 }
 
 /// What the dialog's controls say.
@@ -159,6 +204,13 @@ pub struct Dialog {
     focus: usize,
     /// The focused button, when the focus is on a row of buttons.
     button: usize,
+    /// For [`Layout::Placed`]: where each item is.
+    places: Vec<Place>,
+    /// What the dialog does itself on an [`Event`] (Far's dialog procedure).
+    hook: Option<fn(&mut Dialog, Event)>,
+    /// A dialog opened over this one (Attributes' "More"): it has the keys
+    /// until it closes, and the hook hears how it closed.
+    sub: Option<Box<Dialog>>,
     action: Action,
 }
 
@@ -187,7 +239,7 @@ fn edit(id: &'static str, value: &str) -> Item {
 }
 
 fn button(label: &'static str, id: &'static str, default: bool) -> Button {
-    Button { label, id, default, enabled: true }
+    Button { label, id, default, enabled: true, stay: false }
 }
 
 /// `"name"` only when it starts or ends with a space (Far's QuoteOuterSpace).
@@ -224,11 +276,11 @@ impl Dialog {
             Item::Separator(None),
             Item::Buttons(vec![
                 button(if moving { "&Rename" } else { "&Copy" }, "ok", true),
-                Button { label: "&Filter", id: "filter", default: false, enabled: false },
+                Button { label: "&Filter", id: "filter", default: false, enabled: false, stay: false },
                 button("Ca&ncel", "cancel", false),
             ]),
         ];
-        Self { title: if moving { "Rename/Move" } else { "Copy" }.into(), style: Style::Normal, layout: Layout::Fixed(76), items, focus: 1, button: 0, action }
+        Self { title: if moving { "Rename/Move" } else { "Copy" }.into(), style: Style::Normal, layout: Layout::Fixed(76), items, focus: 1, button: 0, places: vec![], hook: None, sub: None, action }
     }
 
     /// F7 (mkdir.cpp: 76 wide). Links are not made yet: the link type is
@@ -250,6 +302,9 @@ impl Dialog {
             ],
             focus: 1,
             button: 0,
+            places: vec![],
+            hook: None,
+            sub: None,
             action: Action::MkDir,
         }
     }
@@ -269,13 +324,13 @@ impl Dialog {
         items.push(Item::Separator(None));
         items.push(Item::Buttons(vec![button("Delete", "ok", true), button("Cancel", "cancel", false)]));
         let focus = items.len() - 1;
-        Self { title: "Delete".into(), style: Style::Warning, layout: Layout::Builder, items, focus, button: 0, action }
+        Self { title: "Delete".into(), style: Style::Warning, layout: Layout::Builder, items, focus, button: 0, places: vec![], hook: None, sub: None, action }
     }
 
     /// A question with Yes and No (Far's Message with no hot keys).
     pub fn confirm(title: &str, line: &str, action: Action) -> Self {
         let items = vec![centered(line), Item::Separator(None), Item::Buttons(vec![button("Yes", "ok", true), button("No", "cancel", false)])];
-        Self { title: title.into(), style: Style::Normal, layout: Layout::Message, items, focus: 2, button: 0, action }
+        Self { title: title.into(), style: Style::Normal, layout: Layout::Message, items, focus: 2, button: 0, places: vec![], hook: None, sub: None, action }
     }
 
     /// An error to read.
@@ -284,7 +339,7 @@ impl Dialog {
         items.push(Item::Separator(None));
         items.push(Item::Buttons(vec![button("OK", "ok", true)]));
         let focus = items.len() - 1;
-        Self { title: "Error".into(), style: Style::Warning, layout: Layout::Message, items, focus, button: 0, action: Action::Info }
+        Self { title: "Error".into(), style: Style::Warning, layout: Layout::Message, items, focus, button: 0, places: vec![], hook: None, sub: None, action: Action::Info }
     }
 
     /// A file is in the way of a copy.
@@ -301,7 +356,107 @@ impl Dialog {
             Item::Separator(None),
             Item::Buttons(vec![button("&Overwrite", "overwrite", true), button("&Skip", "skip", false), button("&Cancel", "cancel", false)]),
         ];
-        Self { title: "Warning".into(), style: Style::Warning, layout: Layout::Fixed(76), items, focus: 8, button: 0, action: Action::Conflict }
+        Self { title: "Warning".into(), style: Style::Warning, layout: Layout::Fixed(76), items, focus: 8, button: 0, places: vec![], hook: None, sub: None, action: Action::Conflict }
+    }
+
+    /// Ctrl+A, laid out as setattr.cpp lays it out: 80 by 21 (DlgX, DlgY),
+    /// the check boxes at C1 = 5, the times and the owner at C2 = 32 right of
+    /// a vertical line, a row more for a link, two for "Process subfolders".
+    pub fn attributes(setup: attr::Setup) -> Self {
+        let link_row = u16::from(setup.link.is_some());
+        let folder_rows = if setup.folders { 2 } else { 0 };
+        let (dlg_x, dlg_y) = (80u16, 21 + link_row + folder_rows);
+        let below = |y: u16| y + link_row;
+        let mut items = Vec::new();
+        let mut places = Vec::new();
+        let mut add = |item: Item, place: Place| {
+            items.push(item);
+            places.push(place);
+        };
+        add(centered("Change file attributes for"), at(-1, 2));
+        let name = match setup.mode {
+            attr::Mode::Multiple => "selected objects".to_string(),
+            _ => quote_outer_space(&setup.paths[0].file_name().map_or_else(|| setup.paths[0].display().to_string(), |n| n.to_string_lossy().into_owned())),
+        };
+        add(Item::Text { text: name, align: Align::Center, highlight: false }, span(5, 3, dlg_x - 6));
+        if let Some((label, target)) = &setup.link {
+            add(Item::Label(label.clone()), span(5, 4, 17));
+            let text: Vec<char> = target.chars().collect();
+            let cursor = text.len();
+            add(Item::Edit { id: "link", label: None, x: 18, text, cursor, unchanged: true, enabled: false, history: false }, span(18, 4, dlg_x - 6));
+        }
+        add(Item::Separator(None), at(-1, below(4)));
+        for (i, (attribute, id, label)) in attr::MAIN.iter().enumerate() {
+            let check = Item::Check3 { id, label, state: setup.current[i], three: setup.three[i], enabled: attr::settable(*attribute) };
+            add(check, at(5, below(5 + i as u16)));
+        }
+        add(Item::Buttons(vec![stay_button("&More", "more", true)]), span(5, below(16), 12));
+        let (date_mask, date_title) = setup.format.date_mask();
+        let (time_mask, time_title) = setup.format.time_mask();
+        add(text("Date/Time:"), at(32, below(6)));
+        add(text(date_title), at(dlg_x as i16 - 33, below(6)));
+        add(text(time_title), at(dlg_x as i16 - 21, below(6)));
+        for (k, (label, (date_id, time_id))) in TIME_LABELS.iter().zip(TIME_IDS).enumerate() {
+            let y = below(7 + k as u16);
+            add(Item::Label((*label).into()), at(32, y));
+            add(masked(date_id, &date_mask, &setup.dates[k].0), at(dlg_x as i16 - 33, y));
+            add(masked(time_id, &time_mask, &setup.dates[k].1), at(dlg_x as i16 - 21, y));
+        }
+        let single = setup.mode != attr::Mode::Multiple;
+        add(
+            Item::Buttons(vec![stay_button("&Original", "original", single), stay_button("Curre&nt", "current", true), stay_button("&Blank", "blank", true)]),
+            span(32, below(12), dlg_x - 6),
+        );
+        add(Item::Label("Owner&:".into()), at(32, below(15)));
+        let owner: Vec<char> = setup.owner.chars().collect();
+        let cursor = owner.len();
+        add(Item::Edit { id: "owner", label: None, x: 32, text: owner, cursor, unchanged: true, enabled: true, history: false }, span(32, below(16), dlg_x - 6));
+        if setup.folders {
+            add(Item::Separator(None), at(-1, below(17)));
+            add(Item::Check3 { id: "subfolders", label: "Process sub&folders", state: 0, three: false, enabled: true }, at(5, below(18)));
+        }
+        add(Item::Separator(None), at(-1, dlg_y - 4));
+        let system = Button { label: "System &properties", id: "system", default: false, enabled: single && attr::system_properties_available(), stay: false };
+        add(Item::Buttons(vec![button("Set", "ok", true), system, button("Cancel", "cancel", false)]), at(-1, dlg_y - 3));
+        add(Item::Line(['\u{252C}', '\u{2502}', '\u{2534}']), Place { x: 30, y: below(4), x2: 0, y2: below(17) });
+        add(Item::Line(['\u{251C}', '\u{2500}', '\u{2562}']), span(30, below(14), dlg_x - 4));
+        let focus = items.iter().position(|item| matches!(item, Item::Check3 { enabled: true, .. })).unwrap_or(0);
+        Self {
+            title: "Attributes".into(),
+            style: Style::Normal,
+            layout: Layout::Placed(dlg_x, dlg_y),
+            items,
+            focus,
+            button: 0,
+            places,
+            hook: Some(attributes_hook),
+            sub: None,
+            action: Action::Attributes(Box::new(setup)),
+        }
+    }
+
+    /// Attributes' "More" (a DialogBuilder dialog): the rest of the attributes.
+    fn more_attributes(setup: &attr::Setup) -> Self {
+        let mut items: Vec<Item> = attr::ADVANCED
+            .iter()
+            .enumerate()
+            .map(|(i, (attribute, id, label))| Item::Check3 { id, label, state: setup.current[10 + i], three: setup.three[10 + i], enabled: attr::settable(*attribute) })
+            .collect();
+        items.push(Item::Separator(None));
+        items.push(Item::Buttons(vec![button("OK", "ok", true), button("Cancel", "cancel", false)]));
+        let focus = items.iter().position(|item| matches!(item, Item::Check3 { enabled: true, .. })).unwrap_or(items.len() - 1);
+        Self {
+            title: "Attributes".into(),
+            style: Style::Normal,
+            layout: Layout::Builder,
+            items,
+            focus,
+            button: 0,
+            places: vec![],
+            hook: Some(more_attributes_hook),
+            sub: None,
+            action: Action::Info,
+        }
     }
 
     pub fn values(&self) -> Values {
@@ -311,11 +466,214 @@ impl Dialog {
                 Item::Edit { id, text, .. } => values.texts.push((id, text.iter().collect())),
                 Item::Check { id, checked, .. } => values.checks.push((id, *checked)),
                 Item::Radio { id, selected, .. } | Item::Combo { id, selected, .. } => values.choices.push((id, *selected)),
+                Item::Check3 { id, state, .. } => values.choices.push((id, *state as usize)),
+                Item::Masked { id, text, .. } => values.texts.push((id, text.iter().collect())),
                 _ => {}
             }
         }
         values
     }
+
+    /// The index of the item with `id`.
+    fn index_of(&self, id: &str) -> Option<usize> {
+        self.items.iter().position(|item| match item {
+            Item::Edit { id: i, .. }
+            | Item::Radio { id: i, .. }
+            | Item::Check { id: i, .. }
+            | Item::Combo { id: i, .. }
+            | Item::Check3 { id: i, .. }
+            | Item::Masked { id: i, .. } => *i == id,
+            Item::Buttons(buttons) => buttons.iter().any(|b| b.id == id),
+            _ => false,
+        })
+    }
+
+    /// Sets the text of the input line or masked field `id` (fitted to its mask).
+    fn set_text(&mut self, id: &str, value: &str, make_unchanged: bool) {
+        let Some(index) = self.index_of(id) else { return };
+        match &mut self.items[index] {
+            Item::Edit { text, cursor, unchanged, .. } => {
+                *text = value.chars().collect();
+                *cursor = text.len();
+                *unchanged = make_unchanged;
+            }
+            Item::Masked { mask, text, cursor, unchanged, .. } => {
+                *text = fit_mask(mask, value);
+                *cursor = 0;
+                *unchanged = make_unchanged;
+            }
+            _ => {}
+        }
+    }
+
+    fn set_check3(&mut self, id: &str, new_state: u8, new_three: bool) {
+        if let Some(index) = self.index_of(id)
+            && let Item::Check3 { state, three, .. } = &mut self.items[index]
+        {
+            *three = new_three;
+            *state = new_state;
+        }
+    }
+
+    fn check3(&self, id: &str) -> u8 {
+        match self.index_of(id).map(|index| &self.items[index]) {
+            Some(Item::Check3 { state, .. }) => *state,
+            _ => 0,
+        }
+    }
+
+    fn focus_on(&mut self, id: &str) {
+        if let Some(index) = self.index_of(id) {
+            self.focus = index;
+        }
+    }
+
+    /// Whether the input line or masked field `id` still has the text it was given.
+    fn is_unchanged(&self, id: &str) -> bool {
+        match self.index_of(id).map(|index| &self.items[index]) {
+            Some(Item::Edit { unchanged, text, .. }) => *unchanged || text.is_empty(),
+            Some(Item::Masked { unchanged, text, .. }) => *unchanged || !text.iter().any(char::is_ascii_digit),
+            _ => false,
+        }
+    }
+}
+
+const TIME_LABELS: [&str; 4] = ["&write:", "crea&tion:", "&access:", "chan&ge:"];
+
+/// The date and time fields of the four times, in Far's TimeMap order.
+pub const TIME_IDS: [(&str, &str); 4] = [("wdate", "wtime"), ("cdate", "ctime"), ("adate", "atime"), ("xdate", "xtime")];
+
+fn stay_button(label: &'static str, id: &'static str, enabled: bool) -> Button {
+    Button { label, id, default: false, enabled, stay: true }
+}
+
+fn masked(id: &'static str, mask: &str, value: &str) -> Item {
+    let mask: Vec<char> = mask.chars().collect();
+    let text = fit_mask(&mask, value);
+    let unchanged = text.iter().any(char::is_ascii_digit);
+    Item::Masked { id, mask, text, cursor: 0, unchanged }
+}
+
+/// Far's SetAttrDlgProc: Compressed and Encrypted exclude each other,
+/// "Process subfolders" turns the check boxes to "leave as they are" and
+/// blanks a folder's times and owner, Original/Current/Blank fill the times,
+/// More opens the rest of the attributes.
+fn attributes_hook(dialog: &mut Dialog, event: Event) {
+    let Action::Attributes(mut setup) = std::mem::replace(&mut dialog.action, Action::Info) else { return };
+    match event {
+        Event::Toggled("subfolders") => {
+            let on = dialog.check3("subfolders") == 1;
+            for i in 0..20 {
+                if on {
+                    setup.three[i] = true;
+                    if !setup.manual[i] {
+                        setup.current[i] = 2;
+                    }
+                } else {
+                    if setup.mode == attr::Mode::Folder {
+                        setup.three[i] = false;
+                    }
+                    if !setup.manual[i] {
+                        setup.current[i] = setup.initial[i];
+                    }
+                }
+            }
+            for (i, (_, id, _)) in attr::MAIN.iter().enumerate() {
+                dialog.set_check3(id, setup.current[i], setup.three[i]);
+            }
+            if setup.mode == attr::Mode::Folder {
+                for (k, (date_id, time_id)) in TIME_IDS.iter().enumerate() {
+                    for (id, value) in [(date_id, &setup.dates[k].0), (time_id, &setup.dates[k].1)] {
+                        if dialog.is_unchanged(id) {
+                            dialog.set_text(id, if on { "" } else { value }, true);
+                        }
+                    }
+                }
+            }
+            if dialog.is_unchanged("owner") {
+                dialog.set_text("owner", if on { "" } else { &setup.owner }, true);
+            }
+        }
+        Event::Toggled(id) => {
+            if let Some(i) = attr::MAIN.iter().position(|(_, main, _)| *main == id) {
+                setup.current[i] = dialog.check3(id);
+                setup.manual[i] = true;
+                // Compressed / Encrypted are mutually exclusive
+                let other = match id {
+                    "compressed" => Some("encrypted"),
+                    "encrypted" => Some("compressed"),
+                    _ => None,
+                };
+                if let Some(other) = other
+                    && setup.current[i] == 1
+                    && dialog.check3(other) != 0
+                    && let Some(j) = attr::MAIN.iter().position(|(_, main, _)| *main == other)
+                {
+                    dialog.set_check3(other, 0, setup.three[j]);
+                    setup.current[j] = 0;
+                }
+            }
+        }
+        Event::Button("original") => {
+            for (k, (date_id, time_id)) in TIME_IDS.iter().enumerate() {
+                dialog.set_text(date_id, &setup.dates[k].0, true);
+                dialog.set_text(time_id, &setup.dates[k].1, true);
+            }
+            dialog.focus_on("wdate");
+        }
+        Event::Button(which @ ("current" | "blank")) => {
+            let now = (which == "current").then(|| setup.format.to_strings(SystemTime::now()));
+            for (date_id, time_id) in TIME_IDS {
+                let (date, time) = now.clone().unwrap_or_default();
+                dialog.set_text(date_id, &date, false);
+                dialog.set_text(time_id, &time, false);
+            }
+            dialog.focus_on("wdate");
+        }
+        Event::Button("more") => dialog.sub = Some(Box::new(Dialog::more_attributes(&setup))),
+        Event::SubClosed(Some(values)) => {
+            for (i, (_, id, _)) in attr::ADVANCED.iter().enumerate() {
+                let state = values.choice(id) as u8;
+                if state != setup.current[10 + i] {
+                    setup.current[10 + i] = state;
+                    setup.manual[10 + i] = true;
+                }
+            }
+        }
+        _ => {}
+    }
+    dialog.action = Action::Attributes(setup);
+}
+
+/// A reparse point can only be removed, never set (Far's AdvancedAttributesDialog).
+fn more_attributes_hook(dialog: &mut Dialog, event: Event) {
+    if event == Event::Toggled("reparse") && dialog.check3("reparse") == 1 {
+        let Some(index) = dialog.index_of("reparse") else { return };
+        if let Item::Check3 { state, three, .. } = &mut dialog.items[index] {
+            *state = if *three { 2 } else { 0 };
+        }
+    }
+}
+
+/// What a masked field with `mask` shows for `value`.
+pub fn masked_text(mask: &str, value: &str) -> String {
+    fit_mask(&mask.chars().collect::<Vec<_>>(), value).into_iter().collect()
+}
+
+/// `value` laid over `mask`: the mask's fixed characters stay, the rest
+/// comes from `value` position by position (a blank field is all spaces).
+fn fit_mask(mask: &[char], value: &str) -> Vec<char> {
+    let mut value = value.chars();
+    mask.iter()
+        .map(|&m| {
+            let given = value.next();
+            if is_mask_slot(m) { given.filter(char::is_ascii_digit).unwrap_or(' ') } else { m }
+        })
+        .collect()
+}
+
+fn is_mask_slot(m: char) -> bool {
+    matches!(m, '9' | 'N')
 }
 
 // ---------------------------------------------------------------- layout
@@ -420,20 +778,31 @@ fn buttons_len(buttons: &[Button]) -> u16 {
 }
 
 /// The parts of an item along its row.
+#[cfg(test)]
 fn spans(item: &Item, frame: &Frame) -> Vec<Span> {
-    let x = frame.text_x();
-    // input lines and drop-downs end at column W - 6
+    spans_at(item, frame, None)
+}
+
+/// The parts of an item along its row, at its `place` in a dialog laid out by hand.
+fn spans_at(item: &Item, frame: &Frame, place: Option<&Place>) -> Vec<Span> {
+    let x = place.map_or(frame.text_x(), |p| frame.x + p.x.max(0) as u16);
+    // input lines and drop-downs end at column W - 6, or where they are placed to end
     let field = |at: u16| {
-        let start = frame.x + at;
-        (start, (frame.x + frame.w).saturating_sub(5).saturating_sub(start))
+        let start = place.map_or(frame.x + at, |p| frame.x + p.x.max(0) as u16);
+        let end = match place {
+            Some(p) if p.x2 > 0 => frame.x + p.x2 + 1,
+            _ => (frame.x + frame.w).saturating_sub(5),
+        };
+        (start, end.saturating_sub(start))
     };
     match item {
-        Item::Text { .. } | Item::Label(_) | Item::Separator(_) => vec![],
+        Item::Text { .. } | Item::Label(_) | Item::Separator(_) | Item::Line(_) => vec![],
         Item::Edit { x: at, .. } | Item::Combo { x: at, .. } => {
             let (start, width) = field(*at);
             vec![(0, start, width)]
         }
-        Item::Check { label, .. } => vec![(0, x, 4 + label_len(label))],
+        Item::Masked { mask, .. } => vec![(0, x, mask.len() as u16)],
+        Item::Check { label, .. } | Item::Check3 { label, .. } => vec![(0, x, 4 + label_len(label))],
         Item::Radio { label, options, .. } => {
             let mut at = x + label_len(label) + 1;
             options
@@ -448,7 +817,12 @@ fn spans(item: &Item, frame: &Frame) -> Vec<Span> {
                 .collect()
         }
         Item::Buttons(buttons) => {
-            let mut at = frame.x + frame.w.saturating_sub(buttons_len(buttons)) / 2;
+            // DIF_CENTERGROUP: centered on the dialog, or on the stretch it is placed in
+            let (from, width) = match place {
+                Some(p) if p.x2 > 0 => (frame.x + p.x.max(0) as u16, p.x2 + 1 - p.x.max(0) as u16),
+                _ => (frame.x, frame.w),
+            };
+            let mut at = from + width.saturating_sub(buttons_len(buttons)) / 2;
             buttons
                 .iter()
                 .enumerate()
@@ -468,8 +842,9 @@ fn natural_width(item: &Item) -> u16 {
     match item {
         Item::Text { text, .. } => text.chars().count() as u16,
         Item::Label(label) => label_len(label),
-        Item::Edit { .. } | Item::Separator(_) => 0,
-        Item::Check { label, .. } => 4 + label_len(label),
+        Item::Edit { .. } | Item::Separator(_) | Item::Line(_) => 0,
+        Item::Masked { mask, .. } => mask.len() as u16,
+        Item::Check { label, .. } | Item::Check3 { label, .. } => 4 + label_len(label),
         Item::Radio { label, options, .. } => label_len(label) + 1 + options.iter().map(|o| 5 + label_len(o)).sum::<u16>(),
         Item::Combo { label, options, .. } => label_len(label) + 3 + options.iter().map(|o| o.chars().count() as u16).max().unwrap_or(0),
         Item::Buttons(buttons) => buttons_len(buttons),
@@ -544,7 +919,17 @@ impl Dialog {
             // delete.cpp truncates its lines to the screen less 12
             Layout::Builder => Frame::new(size, content(size.0.saturating_sub(12)), h, false),
             Layout::Fixed(w) => Frame::new(size, w, h, false),
+            Layout::Placed(w, h) => Frame::new(size, w, h, false),
         }
+    }
+
+    /// The row of item `i`.
+    fn item_y(&self, frame: &Frame, i: usize) -> u16 {
+        self.places.get(i).map_or(frame.row_y(i), |p| frame.y + p.y)
+    }
+
+    fn item_spans(&self, frame: &Frame, i: usize) -> Vec<Span> {
+        spans_at(&self.items[i], frame, self.places.get(i))
     }
 
     /// Draws the dialog centered on `grid`; returns where the text cursor goes.
@@ -553,20 +938,62 @@ impl Dialog {
         let frame = self.frame((grid.cols, grid.rows));
         frame.draw(grid, &self.title, &p);
         let mut cursor = None;
-        let (x, text_w) = (frame.text_x(), frame.text_w() as usize);
+        let text_w = frame.text_w() as usize;
         for (i, item) in self.items.iter().enumerate() {
-            let y = frame.row_y(i);
+            let y = self.item_y(&frame, i);
+            let place = self.places.get(i);
+            let x = place.map_or(frame.text_x(), |p| frame.x + p.x.max(0) as u16);
             let focused = i == self.focus;
-            let spans = spans(item, &frame);
+            let spans = self.item_spans(&frame, i);
             match item {
                 Item::Text { text, align, highlight } => {
                     let text = truncate_center(text, text_w);
                     let len = text.chars().count() as u16;
-                    let at = match align {
-                        Align::Left => x,
-                        Align::Center => frame.x + frame.w.saturating_sub(len) / 2,
+                    let at = match (place, align) {
+                        (Some(p), _) if p.x < 0 => frame.x + frame.w.saturating_sub(len) / 2,
+                        (Some(p), Align::Center) if p.x2 > 0 => x + (p.x2 + 1 - p.x as u16).saturating_sub(len) / 2,
+                        (Some(_), _) | (None, Align::Left) => x,
+                        (None, Align::Center) => frame.x + frame.w.saturating_sub(len) / 2,
                     };
                     grid.put(at, y, &text, if *highlight { p.hot } else { p.fg }, p.bg);
+                }
+                Item::Line([first, middle, last]) => {
+                    let Some(place) = place else { continue };
+                    if place.y2 > place.y {
+                        for row in place.y..=place.y2 {
+                            let c = if row == place.y { first } else if row == place.y2 { last } else { middle };
+                            grid.put(x, frame.y + row, &c.to_string(), p.fg, p.bg);
+                        }
+                    } else {
+                        let from = x;
+                        let to = frame.x + place.x2;
+                        for col in from..=to {
+                            let c = if col == from { first } else if col == to { last } else { middle };
+                            grid.put(col, y, &c.to_string(), p.fg, p.bg);
+                        }
+                    }
+                }
+                Item::Check3 { label, state, enabled, .. } => {
+                    let (fg, hot) = if *enabled { (p.fg, p.hot) } else { (p.dim, p.dim) };
+                    let mark = match state {
+                        1 => 'x',
+                        2 => '?',
+                        _ => ' ',
+                    };
+                    grid.put(spans[0].1, y, &format!("[{mark}] "), fg, p.bg);
+                    put_label(grid, spans[0].1 + 4, y, label, fg, p.bg, hot);
+                    if focused {
+                        cursor = Some((spans[0].1 + 1, y));
+                    }
+                }
+                Item::Masked { text, cursor: at, unchanged, .. } => {
+                    let (fx, w) = (spans[0].1, spans[0].2);
+                    let fg = if *unchanged { p.unchanged_fg } else { p.edit_fg };
+                    grid.fill_with(fx, y, w, 1, fg, p.edit_bg);
+                    grid.put(fx, y, &text.iter().collect::<String>(), fg, p.edit_bg);
+                    if focused {
+                        cursor = Some((fx + *at as u16, y));
+                    }
                 }
                 Item::Label(label) => put_label(grid, x, y, label, p.fg, p.bg, p.hot),
                 Item::Separator(title) => frame.separator(grid, y, *title, &p),
@@ -646,7 +1073,10 @@ impl Dialog {
                 }
             }
         }
-        cursor
+        match &self.sub {
+            Some(sub) => sub.paint(grid),
+            None => cursor,
+        }
     }
 }
 
@@ -655,11 +1085,35 @@ impl Dialog {
 impl Dialog {
     fn focusable(&self, index: usize) -> bool {
         match &self.items[index] {
-            Item::Radio { .. } | Item::Combo { .. } => true,
-            Item::Edit { enabled, .. } | Item::Check { enabled, .. } => *enabled,
+            Item::Radio { .. } | Item::Combo { .. } | Item::Masked { .. } => true,
+            Item::Edit { enabled, .. } | Item::Check { enabled, .. } | Item::Check3 { enabled, .. } => *enabled,
             Item::Buttons(buttons) => buttons.iter().any(|b| b.enabled),
-            Item::Text { .. } | Item::Label(_) | Item::Separator(_) => false,
+            Item::Text { .. } | Item::Label(_) | Item::Separator(_) | Item::Line(_) => false,
         }
+    }
+
+    /// Tells the hook, if the dialog has one.
+    fn notify(&mut self, event: Event) {
+        if let Some(hook) = self.hook {
+            hook(self, event);
+        }
+    }
+
+    /// Space or a hot key on a check box: the next state, and the hook hears of it.
+    fn toggle(&mut self, index: usize) {
+        let id = match &mut self.items[index] {
+            Item::Check { id, checked, .. } => {
+                *checked = !*checked;
+                *id
+            }
+            // Far's order: off, on, then (3-state) "leave as it is"
+            Item::Check3 { id, state, three, .. } => {
+                *state = (*state + 1) % if *three { 3 } else { 2 };
+                *id
+            }
+            _ => return,
+        };
+        self.notify(Event::Toggled(id));
     }
 
     fn move_focus(&mut self, forward: bool) {
@@ -706,19 +1160,20 @@ impl Dialog {
     }
 
     /// Presses the default button (Enter anywhere but on a button).
-    fn press_default(&self) -> Outcome {
-        for item in &self.items {
-            if let Item::Buttons(buttons) = item {
-                if let Some(b) = buttons.iter().find(|b| b.default && b.enabled) {
-                    return self.press(b.id);
-                }
-            }
-        }
-        Outcome::Open
+    fn press_default(&mut self) -> Outcome {
+        let id = self.items.iter().find_map(|item| match item {
+            Item::Buttons(buttons) => buttons.iter().find(|b| b.default && b.enabled).map(|b| b.id),
+            _ => None,
+        });
+        id.map_or(Outcome::Open, |id| self.press(id))
     }
 
-    fn press(&self, id: &'static str) -> Outcome {
-        if id == "cancel" {
+    fn press(&mut self, id: &'static str) -> Outcome {
+        let stays = self.items.iter().any(|item| matches!(item, Item::Buttons(buttons) if buttons.iter().any(|b| b.id == id && b.stay)));
+        if stays {
+            self.notify(Event::Button(id));
+            Outcome::Open
+        } else if id == "cancel" {
             Outcome::Closed
         } else {
             Outcome::Pressed(self.action.clone(), id, self.values())
@@ -748,9 +1203,9 @@ impl Dialog {
                     self.focus_after(index);
                     return Some(Outcome::Open);
                 }
-                Item::Check { label, checked, enabled, .. } if *enabled && hot_key(label) == Some(c) => {
-                    *checked = !*checked;
+                Item::Check { label, enabled, .. } | Item::Check3 { label, enabled, .. } if *enabled && hot_key(label) == Some(c) => {
                     self.focus = index;
+                    self.toggle(index);
                     return Some(Outcome::Open);
                 }
                 Item::Edit { label: Some(label), enabled: true, .. } if hot_key(label) == Some(c) => {
@@ -784,13 +1239,34 @@ impl Dialog {
         None
     }
 
+    /// What the dialog over this one made of a key or click: it closed, the
+    /// hook hears of it.
+    fn after_sub(&mut self, outcome: Outcome) -> Outcome {
+        match outcome {
+            Outcome::Open => {}
+            Outcome::Closed => {
+                self.sub = None;
+                self.notify(Event::SubClosed(None));
+            }
+            Outcome::Pressed(_, _, values) => {
+                self.sub = None;
+                self.notify(Event::SubClosed(Some(values)));
+            }
+        }
+        Outcome::Open
+    }
+
     pub fn key(&mut self, key: KeyEvent) -> Outcome {
+        if let Some(sub) = &mut self.sub {
+            let outcome = sub.key(key);
+            return self.after_sub(outcome);
+        }
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         let alt = key.modifiers.contains(KeyModifiers::ALT);
         if key.code == KeyCode::Esc {
             return Outcome::Closed;
         }
-        let on_edit = matches!(self.items[self.focus], Item::Edit { .. });
+        let on_edit = matches!(self.items[self.focus], Item::Edit { .. } | Item::Masked { .. });
         if let KeyCode::Char(c) = key.code {
             // Alt+letter always, a bare letter where nothing is being typed.
             if (alt || (!on_edit && !ctrl)) && c != ' ' {
@@ -807,10 +1283,8 @@ impl Dialog {
             KeyCode::BackTab | KeyCode::Up => self.move_focus(false),
             KeyCode::Enter => {
                 if let Item::Buttons(buttons) = &self.items[self.focus] {
-                    return match buttons.get(self.button).filter(|b| b.enabled) {
-                        Some(b) => self.press(b.id),
-                        None => Outcome::Open,
-                    };
+                    let id = buttons.get(self.button).filter(|b| b.enabled).map(|b| b.id);
+                    return id.map_or(Outcome::Open, |id| self.press(id));
                 }
                 return self.press_default();
             }
@@ -832,8 +1306,8 @@ impl Dialog {
                     _ => {}
                 }
             }
-            KeyCode::Char(' ') => match &mut self.items[self.focus] {
-                Item::Check { checked, .. } => *checked = !*checked,
+            KeyCode::Char(' ') => match &self.items[self.focus] {
+                Item::Check { .. } | Item::Check3 { .. } => self.toggle(self.focus),
                 Item::Radio { .. } | Item::Combo { .. } => self.cycle(1),
                 Item::Buttons(buttons) => {
                     let id = buttons.get(self.button).filter(|b| b.enabled).map(|b| b.id);
@@ -852,6 +1326,10 @@ impl Dialog {
     /// character typed into unchanged text replaces it, Del at its end
     /// clears it, and any key makes it changed.
     fn edit_key(&mut self, code: KeyCode, ctrl: bool, alt: bool) {
+        if let Item::Masked { mask, text, cursor, unchanged, .. } = &mut self.items[self.focus] {
+            masked_key(mask, text, cursor, unchanged, code, ctrl || alt);
+            return;
+        }
         let Item::Edit { text, cursor, unchanged, .. } = &mut self.items[self.focus] else { return };
         let was_unchanged = std::mem::replace(unchanged, false);
         match code {
@@ -891,12 +1369,16 @@ impl Dialog {
 
     /// What a click at (`col`, `row`) does, on a screen of `size`.
     pub fn click(&mut self, col: u16, row: u16, size: (u16, u16)) -> Outcome {
+        if let Some(sub) = &mut self.sub {
+            let outcome = sub.click(col, row, size);
+            return self.after_sub(outcome);
+        }
         let frame = self.frame(size);
         for index in 0..self.items.len() {
-            if row != frame.row_y(index) {
+            if row != self.item_y(&frame, index) {
                 continue;
             }
-            for (sub, x, w) in spans(&self.items[index], &frame) {
+            for (sub, x, w) in self.item_spans(&frame, index) {
                 if col < x || col >= x + w {
                     continue;
                 }
@@ -904,28 +1386,77 @@ impl Dialog {
                     return Outcome::Open;
                 }
                 self.focus = index;
+                let mut pressed = None;
+                let mut toggled = false;
                 match &mut self.items[index] {
                     Item::Edit { text, cursor, unchanged, .. } => {
                         let start = (*cursor + 1).saturating_sub(w as usize);
                         *cursor = (start + (col - x) as usize).min(text.len());
                         *unchanged = false;
                     }
-                    Item::Check { checked, .. } => *checked = !*checked,
+                    Item::Masked { text, cursor, unchanged, .. } => {
+                        *cursor = ((col - x) as usize).min(text.len().saturating_sub(1));
+                        *unchanged = false;
+                    }
+                    Item::Check { .. } | Item::Check3 { .. } => toggled = true,
                     Item::Radio { selected, .. } => *selected = sub,
                     Item::Combo { .. } => self.cycle(1),
                     Item::Buttons(buttons) => {
                         self.button = sub;
-                        let id = buttons.get(sub).filter(|b| b.enabled).map(|b| b.id);
-                        if let Some(id) = id {
-                            return self.press(id);
-                        }
+                        pressed = buttons.get(sub).filter(|b| b.enabled).map(|b| b.id);
                     }
                     _ => {}
                 }
-                return Outcome::Open;
+                if toggled {
+                    self.toggle(index);
+                }
+                return pressed.map_or(Outcome::Open, |id| self.press(id));
             }
         }
         Outcome::Open
+    }
+}
+
+/// A key in a masked field (edit.cpp with a mask): a digit fills the slot
+/// under the cursor and moves to the next one, the fixed characters are
+/// stepped over, Backspace and Del blank a slot; typed into an unchanged
+/// field, a digit first blanks it all.
+fn masked_key(mask: &[char], text: &mut [char], cursor: &mut usize, unchanged: &mut bool, code: KeyCode, modified: bool) {
+    let slots: Vec<usize> = (0..mask.len()).filter(|&i| is_mask_slot(mask[i])).collect();
+    let (Some(&first), Some(&last)) = (slots.first(), slots.last()) else { return };
+    let next = |from: usize| slots.iter().copied().find(|&i| i > from);
+    let previous = |from: usize| slots.iter().rev().copied().find(|&i| i < from);
+    let was_unchanged = std::mem::replace(unchanged, false);
+    match code {
+        KeyCode::Left => *cursor = previous(*cursor).unwrap_or(first),
+        KeyCode::Right => *cursor = next(*cursor).unwrap_or(last),
+        KeyCode::Home => *cursor = first,
+        KeyCode::End => *cursor = last,
+        KeyCode::Backspace => {
+            if let Some(at) = previous(*cursor) {
+                text[at] = ' ';
+                *cursor = at;
+            }
+        }
+        KeyCode::Delete => {
+            if is_mask_slot(mask[*cursor]) {
+                text[*cursor] = ' ';
+            }
+        }
+        KeyCode::Char(c) if !modified && (c.is_ascii_digit() || (c == ' ' && mask[*cursor] == 'N')) => {
+            if was_unchanged {
+                for &i in &slots {
+                    text[i] = ' ';
+                }
+                *cursor = first;
+            }
+            if !is_mask_slot(mask[*cursor]) {
+                *cursor = next(*cursor).unwrap_or(last);
+            }
+            text[*cursor] = c;
+            *cursor = next(*cursor).unwrap_or(last);
+        }
+        _ => *unchanged = was_unchanged,
     }
 }
 
@@ -1209,5 +1740,158 @@ mod tests {
         let shown = date(Some(SystemTime::now()));
         assert_eq!(shown.len(), 14, "{shown}");
         assert_eq!(date(None), "");
+    }
+
+    // ---------------------------------------------------------------- Attributes
+
+    const DMY: attr::Format = attr::Format { order: attr::DateOrder::Dmy, date_separator: '.', time_separator: ':', decimal: ',' };
+
+    fn scratch(name: &str, folder: bool) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("farsh-attrdlg-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("claude.exe");
+        if folder {
+            std::fs::create_dir_all(&path).unwrap();
+        } else {
+            std::fs::write(&path, "x").unwrap();
+        }
+        path
+    }
+
+    fn attributes_dialog(path: &std::path::Path) -> Dialog {
+        let mut setup = attr::Setup::new(vec![path.to_path_buf()]).unwrap();
+        // the dates as a Russian Windows writes them
+        setup.format = DMY;
+        let times = attr::read(path).unwrap().times;
+        setup.dates = std::array::from_fn(|i| times[i].map(|t| DMY.to_strings(t)).unwrap_or_default());
+        Dialog::attributes(setup)
+    }
+
+    /// The screen of an 80 by 25 terminal: the dialog's box is at row 2.
+    fn screen(dialog: &Dialog) -> Vec<String> {
+        let mut grid = Grid::new(80, 25);
+        dialog.paint(&mut grid);
+        (0..25).map(|row| grid.row(row).iter().map(|cell| cell.text.clone()).collect()).collect()
+    }
+
+    fn at_col(line: &str, col: usize, len: usize) -> String {
+        line.chars().skip(col).take(len).collect()
+    }
+
+    fn alt(dialog: &mut Dialog, c: char) -> Outcome {
+        dialog.key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::ALT))
+    }
+
+    #[test]
+    fn the_attributes_dialog_is_laid_out_cell_for_cell_as_far_lays_it_out() {
+        let path = scratch("layout", false);
+        let dialog = attributes_dialog(&path);
+        let rows = screen(&dialog);
+        // dialog row y is screen row y + 2; columns are the box's own
+        let row = |y: usize| rows[y + 2].clone();
+        assert_eq!(at_col(&row(1), 3, 1), "\u{2554}");
+        assert_eq!(at_col(&row(1), 34, 12), " Attributes ");
+        assert_eq!(at_col(&row(2), 27, 26), "Change file attributes for");
+        assert_eq!(at_col(&row(3), 35, 10), "claude.exe");
+        assert_eq!(at_col(&row(4), 3, 1), "\u{255F}");
+        assert_eq!(at_col(&row(4), 30, 1), "\u{252C}");
+        assert_eq!(at_col(&row(4), 76, 1), "\u{2562}");
+        assert_eq!(at_col(&row(5), 5, 13), "[ ] Read only");
+        assert_eq!(at_col(&row(14), 5, 11), "[ ] Offline");
+        assert_eq!(at_col(&row(16), 5, 8), "[ More ]");
+        assert_eq!(at_col(&row(6), 32, 10), "Date/Time:");
+        assert_eq!(at_col(&row(6), 47, 11), "DD.MM.YYYYY");
+        assert_eq!(at_col(&row(6), 59, 8), "hh:mm:ss");
+        assert_eq!(at_col(&row(7), 32, 6), "write:");
+        assert_eq!(at_col(&row(8), 32, 9), "creation:");
+        assert_eq!(at_col(&row(9), 32, 7), "access:");
+        assert_eq!(at_col(&row(10), 32, 7), "change:");
+        assert_eq!(at_col(&row(7), 49, 1), ".");
+        assert_eq!(at_col(&row(7), 61, 1), ":");
+        assert_eq!(at_col(&row(7), 67, 1), ",");
+        assert_eq!(at_col(&row(12), 36, 34), "[ Original ] [ Current ] [ Blank ]");
+        assert_eq!(at_col(&row(14), 30, 1), "\u{251C}");
+        assert_eq!(at_col(&row(14), 31, 1), "\u{2500}");
+        assert_eq!(at_col(&row(14), 76, 1), "\u{2562}");
+        assert_eq!(at_col(&row(15), 32, 6), "Owner:");
+        assert_eq!(at_col(&row(13), 30, 1), "\u{2502}");
+        assert_eq!(at_col(&row(17), 30, 1), "\u{2534}");
+        assert_eq!(at_col(&row(17), 3, 1), "\u{255F}");
+        assert_eq!(at_col(&row(18), 20, 40), "{ Set } [ System properties ] [ Cancel ]");
+        assert_eq!(at_col(&row(19), 3, 1), "\u{255A}");
+        assert!(!at_col(&row(16), 32, 43).trim().is_empty(), "the owner: {:?}", row(16));
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn a_folder_gets_process_subfolders_and_it_leaves_everything_as_it_is() {
+        let path = scratch("folder", true);
+        let mut dialog = attributes_dialog(&path);
+        // two rows taller (23): the box starts a row higher
+        let rows = screen(&dialog);
+        assert_eq!(at_col(&rows[1 + 17], 3, 1), "\u{255F}", "the separator before it");
+        assert_eq!(at_col(&rows[1 + 17], 30, 1), "\u{2534}", "the line ends on it");
+        assert_eq!(at_col(&rows[1 + 18], 5, 22), "[ ] Process subfolders");
+        assert_eq!(at_col(&rows[1 + 19], 3, 1), "\u{255F}");
+        assert_eq!(at_col(&rows[1 + 20], 20, 7), "{ Set }");
+        assert_eq!(at_col(&rows[1 + 21], 3, 1), "\u{255A}");
+        let written = dialog.values().text("wdate");
+        alt(&mut dialog, 'f');
+        let values = dialog.values();
+        assert_eq!(values.choice("readonly"), 2, "[?]: leave as it is");
+        assert!(!values.text("wdate").chars().any(|c| c.is_ascii_digit()), "the folder's times are blanked");
+        assert!(values.text("owner").is_empty());
+        assert_eq!(at_col(&screen(&dialog)[1 + 5], 5, 3), "[?]");
+        alt(&mut dialog, 'f');
+        let values = dialog.values();
+        assert_eq!(values.choice("readonly"), 0);
+        assert_eq!(values.text("wdate"), written, "back as it was");
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn original_current_and_blank_fill_the_times_and_the_dialog_stays() {
+        let path = scratch("times", false);
+        let mut dialog = attributes_dialog(&path);
+        let written = dialog.values().text("wdate");
+        assert!(matches!(alt(&mut dialog, 'b'), Outcome::Open));
+        let values = dialog.values();
+        for (date, time) in TIME_IDS {
+            assert_eq!(values.text(date), "  .  .     ");
+            assert_eq!(values.text(time), "  :  :  ,       ");
+        }
+        // Alt+O is Offline's, as in Far (it comes first)
+        alt(&mut dialog, 'o');
+        assert_eq!(dialog.values().choice("offline"), 1);
+        assert!(matches!(dialog.press("original"), Outcome::Open));
+        assert_eq!(dialog.values().text("wdate"), written);
+        alt(&mut dialog, 'n');
+        let today = DMY.to_strings(SystemTime::now()).0;
+        assert_eq!(dialog.values().text("cdate"), today);
+        // the focus went to the write date: digits typed there replace it
+        typed(&mut dialog, "01022020");
+        assert_eq!(dialog.values().text("wdate"), "01.02.2020 ");
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn compressed_and_encrypted_exclude_each_other_and_more_opens_over_the_dialog() {
+        let path = scratch("more", false);
+        let mut dialog = attributes_dialog(&path);
+        alt(&mut dialog, 'c');
+        assert_eq!(dialog.values().choice("compressed"), 1);
+        alt(&mut dialog, 'e');
+        assert_eq!(dialog.values().choice("encrypted"), 1);
+        assert_eq!(dialog.values().choice("compressed"), 0);
+        alt(&mut dialog, 'm');
+        let rows = screen(&dialog);
+        assert!(rows.iter().any(|row| row.contains("[ ] Integrity stream")), "{rows:#?}");
+        alt(&mut dialog, 'p'); // Pinned
+        press(&mut dialog, KeyCode::Enter);
+        let Action::Attributes(setup) = &dialog.action else { panic!("the dialog's action") };
+        assert_eq!(setup.current[14], 1, "Pinned, set in More, is kept");
+        assert!(!screen(&dialog).iter().any(|row| row.contains("Integrity stream")), "More is closed");
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
     }
 }

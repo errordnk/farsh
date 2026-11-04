@@ -48,6 +48,18 @@ over the shell screen.
   (`Shell::clear_line`: Esc for PSReadLine/cmd on Windows, Ctrl+E Ctrl+U for
   readline, zle and PSReadLine's Emacs mode). Every OSC 7 re-learns the bare
   prompt, since keys typed into a running program stop `write` waiting for it.
+- Ctrl+A is Far's Attributes dialog (setattr.cpp of Far 3.0.6446, the
+  user's build): `Layout::Placed` puts every item at Far's own X1/Y1/X2
+  (80 by 21, C1 = 5, C2 = 32, the `┬│┴` and `├─╢` user separators, a row
+  more for a link, two for "Process subfolders"), with 3-state check boxes,
+  masked date/time fields in the locale's order and separators, buttons
+  that keep the dialog open (Original/Current/Blank, More over it) and the
+  dialog procedure as a hook. `src/attributes.rs` reads and sets the
+  attributes (compression, encryption, sparse and reparse removal by their
+  own calls), the four times (FILE_BASIC_INFO), the owner. Known
+  differences: a link's target is shown but not editable, several hard
+  links are not listed. On Linux/macOS only Read only (the write bits),
+  the modification/access times and the owner can be set.
 - Enter on a link: a junction or symlink is entered by its own path; one
   that denies listing itself (Windows' compatibility junctions `My Documents`,
   `Application Data`, `Start Menu`...) is followed to its target, as Far does.

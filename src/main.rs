@@ -1,6 +1,7 @@
 //! farsh: the user's own shell (bash / zsh / PowerShell) in a PTY, with Far
 //! Manager style panels that Ctrl+O shows and hides.
 
+mod attributes;
 mod cwd;
 mod dialog;
 mod drives;
@@ -439,6 +440,7 @@ impl App {
             }
             Request::SortMenu => self.overlay = Overlay::Sort(self.panels.sort_menu()),
             Request::Error(text) => self.overlay = Overlay::Dialog(Dialog::error(&text)),
+            Request::Attributes(sources) => self.open_attributes(sources),
             Request::Menu => {
                 let side = if self.panels.right_active() { 4 } else { 0 };
                 self.overlay = Overlay::Menu(Menu::new(self.last_menu.unwrap_or(side), self.panels.view_modes()));
@@ -457,6 +459,11 @@ impl App {
         match command {
             menu::Command::FKey(n) => {
                 if let Key::Ask(request) = self.panels.function_key(n) {
+                    self.request(request);
+                }
+            }
+            menu::Command::Attributes => {
+                if let Key::Ask(request) = self.panels.attributes_request() {
                     self.request(request);
                 }
             }
@@ -496,8 +503,24 @@ impl App {
     }
 
     /// A button was pressed in a dialog.
-    fn accept(&mut self, action: Action, _id: &str, values: &dialog::Values) {
+    fn accept(&mut self, action: Action, id: &str, values: &dialog::Values) {
         match action {
+            Action::Attributes(setup) if id == "system" => {
+                if let Err(error) = attributes::system_properties(&setup.paths[0]) {
+                    self.overlay = Overlay::Dialog(Dialog::error(&error));
+                }
+            }
+            Action::Attributes(setup) => {
+                let change = attribute_change(&setup, values);
+                let subfolders = values.choice("subfolders") == 1;
+                for path in &setup.paths {
+                    if let Err(error) = attributes::apply_tree(path, &change, subfolders) {
+                        self.overlay = Overlay::Dialog(Dialog::error(&error));
+                        break;
+                    }
+                }
+                self.panels.refresh(None);
+            }
             Action::Copy(sources) => self.start_job(Kind::Copy, &sources, values),
             Action::Move(sources) => self.start_job(Kind::Move, &sources, values),
             Action::Delete(sources) => {
@@ -526,6 +549,14 @@ impl App {
             Action::Quit => self.quit = true,
             Action::Conflict | Action::Info => {}
         }
+    }
+
+    /// Ctrl+A over the panels: the attributes of what is selected (or under the cursor).
+    fn open_attributes(&mut self, sources: Vec<PathBuf>) {
+        self.overlay = match attributes::Setup::new(sources) {
+            Ok(setup) => Overlay::Dialog(Dialog::attributes(setup)),
+            Err(error) => Overlay::Dialog(Dialog::error(&error)),
+        };
     }
 
     fn start_job(&mut self, kind: Kind, sources: &[PathBuf], values: &dialog::Values) {
@@ -637,5 +668,66 @@ fn delete_question(sources: &[PathBuf]) -> (String, Vec<String>) {
             }
             ("Do you wish to delete the objects?".into(), names)
         }
+    }
+}
+
+/// What Set in the Attributes dialog asks for (setattr.cpp): a check box on
+/// sets, off clears, "?" leaves; a date or time field the user changed is
+/// set; an owner typed in is given.
+fn attribute_change(setup: &attributes::Setup, values: &dialog::Values) -> attributes::Change {
+    let mut change = attributes::Change { format: setup.format, ..attributes::Change::default() };
+    for i in 0..20 {
+        let state = if i < 10 { values.choice(attributes::MAIN[i].1) as u8 } else { setup.current[i] };
+        let attribute = attributes::Setup::attribute(i);
+        if !attributes::settable(attribute) {
+            continue;
+        }
+        match state {
+            1 => change.set |= attribute,
+            0 => change.clear |= attribute,
+            _ => {}
+        }
+    }
+    let (date_mask, _) = setup.format.date_mask();
+    let (time_mask, _) = setup.format.time_mask();
+    for (k, (date_id, time_id)) in dialog::TIME_IDS.iter().enumerate() {
+        let typed = (values.text(date_id), values.text(time_id));
+        let opened = (dialog::masked_text(&date_mask, &setup.dates[k].0), dialog::masked_text(&time_mask, &setup.dates[k].1));
+        if typed != opened {
+            change.times[k] = Some(typed);
+        }
+    }
+    let owner = values.text("owner");
+    if !owner.is_empty() && owner != setup.owner {
+        change.owner = Some(owner);
+    }
+    change
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn set_in_an_untouched_attributes_dialog_changes_nothing_and_a_toggle_is_applied() {
+        let dir = std::env::temp_dir().join(format!("farsh-attrset-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("a.txt");
+        std::fs::write(&file, "x").unwrap();
+        let before = attributes::read(&file).unwrap();
+        let mut dialog = Dialog::attributes(attributes::Setup::new(vec![file.clone()]).unwrap());
+        let setup = attributes::Setup::new(vec![file.clone()]).unwrap();
+        let change = attribute_change(&setup, &dialog.values());
+        assert!(change.times.iter().all(Option::is_none), "{change:?}");
+        assert_eq!(change.owner, None);
+        attributes::apply(&file, &change).unwrap();
+        assert_eq!(attributes::read(&file).unwrap(), before, "nothing moved");
+
+        dialog.key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::ALT));
+        let dialog::Outcome::Pressed(_, "ok", values) = dialog.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)) else { panic!("Set") };
+        attributes::apply(&file, &attribute_change(&setup, &values)).unwrap();
+        assert!(attributes::read(&file).unwrap().attributes & attributes::READONLY != 0);
+        attributes::apply(&file, &attributes::Change { clear: attributes::READONLY, ..attributes::Change::default() }).unwrap();
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }
