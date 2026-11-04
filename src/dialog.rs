@@ -93,6 +93,8 @@ pub enum Action {
     /// Files highlighting: delete group N; Ctrl+R's defaults.
     DeleteHighlight(usize),
     RestoreHighlight,
+    /// far:config: a number's or a text's value.
+    FarConfig { key: &'static str, mode: crate::farconfig::Mode },
     Quit,
     /// The answer to a file that already exists.
     Conflict,
@@ -977,20 +979,42 @@ pub fn masked_text(mask: &str, value: &str) -> String {
     fit_mask(&mask.chars().collect::<Vec<_>>(), value).into_iter().collect()
 }
 
-/// `value` laid over `mask`: the mask's fixed characters stay, the rest
-/// comes from `value` position by position (a blank field is all spaces).
+/// `value` laid over `mask` as Far's masked edit takes it: the mask's fixed
+/// characters stay, one that `value` has at its place is used up by it, and
+/// the rest of `value` fills the places in turn (a blank field is all
+/// spaces). So `0000000000010001` in `0xHHHHHHHHHHHHHHHH` is `0x` and the
+/// last fifteen digits, as Far shows it.
 fn fit_mask(mask: &[char], value: &str) -> Vec<char> {
-    let mut value = value.chars();
+    let mut value = value.chars().peekable();
     mask.iter()
         .map(|&m| {
-            let given = value.next();
-            if is_mask_slot(m) { given.filter(char::is_ascii_digit).unwrap_or(' ') } else { m }
+            if is_mask_slot(m) {
+                value.next().and_then(|c| mask_fits(m, c)).unwrap_or(' ')
+            } else {
+                if value.peek() == Some(&m) {
+                    value.next();
+                }
+                m
+            }
         })
         .collect()
 }
 
+/// Far's mask places: `9` a digit, `N` a digit or space, `H` a hex digit
+/// (as a capital), `B` a binary one.
 fn is_mask_slot(m: char) -> bool {
-    matches!(m, '9' | 'N')
+    matches!(m, '9' | 'N' | 'H' | 'B')
+}
+
+/// `c` as mask place `m` takes it, if it does.
+fn mask_fits(m: char, c: char) -> Option<char> {
+    match m {
+        '9' => c.is_ascii_digit().then_some(c),
+        'N' => (c.is_ascii_digit() || c == ' ').then_some(c),
+        'H' => c.is_ascii_hexdigit().then(|| c.to_ascii_uppercase()),
+        'B' => matches!(c, '0' | '1').then_some(c),
+        _ => None,
+    }
 }
 
 // ---------------------------------------------------------------- layout
@@ -1047,6 +1071,10 @@ impl Frame {
         for row in self.fy + 1..(self.fy + self.fh).saturating_sub(1) {
             grid.put(self.fx, row, "\u{2551}", p.fg, p.bg);
             grid.put(self.fx + self.fw.saturating_sub(1), row, "\u{2551}", p.fg, p.bg);
+        }
+        // a dialog without a title (DialogBuilder's default) has a plain frame
+        if title.is_empty() {
+            return;
         }
         let title = format!(" {title} ");
         grid.put(self.fx + self.fw.saturating_sub(title.chars().count() as u16) / 2, self.fy, &title, p.fg, p.bg);
@@ -1976,16 +2004,18 @@ fn masked_key(mask: &[char], text: &mut [char], cursor: &mut usize, unchanged: &
                 text[*cursor] = ' ';
             }
         }
-        KeyCode::Char(c) if !modified && (c.is_ascii_digit() || (c == ' ' && mask[*cursor] == 'N')) => {
+        KeyCode::Char(c) if !modified && (c.is_ascii_hexdigit() || c == ' ') => {
+            let at = if was_unchanged { first } else if is_mask_slot(mask[*cursor]) { *cursor } else { next(*cursor).unwrap_or(last) };
+            let Some(c) = mask_fits(mask[at], c) else {
+                *unchanged = was_unchanged;
+                return;
+            };
             if was_unchanged {
                 for &i in &slots {
                     text[i] = ' ';
                 }
-                *cursor = first;
             }
-            if !is_mask_slot(mask[*cursor]) {
-                *cursor = next(*cursor).unwrap_or(last);
-            }
+            *cursor = at;
             text[*cursor] = c;
             *cursor = next(*cursor).unwrap_or(last);
         }

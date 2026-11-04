@@ -320,9 +320,10 @@ impl VMenu {
             MouseButton::Right => "VMenu.RBtnClick",
             MouseButton::Middle => "VMenu.MBtnClick",
         };
+        // Far's VMENUCLICK_APPLY, _IGNORE, _CANCEL
         match crate::settings::int(key) {
-            1 => Outcome::Chosen(self.selected),
-            2 => Outcome::Open,
+            2 => Outcome::Chosen(self.selected),
+            0 => Outcome::Open,
             _ => Outcome::Closed,
         }
     }

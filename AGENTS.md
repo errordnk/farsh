@@ -191,6 +191,19 @@ over the shell screen.
   config.cpp's DialogBuilder ones: `src/builder.rs` ports its layout
   (TextBefore/After, Indent, two columns, LinkFlags) and binds each item to
   a setting; `src/options.rs` is the dialogs, `src/optmenu.rs` the rest.
+  - `far:config` (typed, Enter; `src/farconfig.rs`) is Far 3.0.6446's
+    AdvancedConfig cell for cell (checked against Far's console dump): all
+    297 settings from `src/farconfig_data.rs`, generated from the real Far's
+    far:config with a fresh profile (`Far.exe -s <roaming> <local>`), so
+    their names, types and defaults are Far's. A setting `settings` does not
+    know is shown with Far's default and disabled (the editor's, plugins',
+    macros'...); a farsh setting must have Far's name, type and default (a
+    test checks the types). 3-state settings are `Def::Three` (0/1/2), and
+    VMenu clicks are Far's VMENUCLICK values (0 nothing, 1 cancel, 2 apply).
+    Shift+F1 is left out of the bottom title: farsh has no help. Masked
+    fields take a value as Far does (`dialog::fit_mask`): a character equal
+    to the mask's fixed one there is used up by it, so the hex field shows
+    `0x` and 15 digits, as Far's does.
   - What acts in farsh: the Recycle Bin for F8 (SHFileOperation), the
     three histories' saving, the sorting collation / digits / case, folder
     extensions, reverse sorts, hidden files, highlighting, select folders,

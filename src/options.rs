@@ -115,7 +115,8 @@ pub fn dialogs() -> Dialog {
 
 /// Options > Menu settings (VMenuSettings).
 pub fn menus() -> Dialog {
-    let clicks = [("Cancel menu", 0), ("Execute selected item", 1), ("Do nothing", 2)];
+    // Far's VMENUCLICK_CANCEL, _APPLY, _IGNORE
+    let clicks = [("Cancel menu", 1), ("Execute selected item", 2), ("Do nothing", 0)];
     let mut b = Builder::new("Menu settings");
     for (key, label) in [
         ("VMenu.LBtnClick", "&Left mouse click outside a menu"),
@@ -140,7 +141,7 @@ pub fn cmdline() -> Dialog {
     b.indent(format, 4);
     b.link(prompt, format);
     let home = b.check("System.Executor.UseHomeDir", "Use &home dir");
-    let dir = b.edit("System.Executor.HomeDir", 33);
+    let dir = b.edit("System.Executor.~", 33);
     b.indent(dir, 4);
     b.link(home, dir);
     b.ok_cancel();

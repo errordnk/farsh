@@ -29,6 +29,8 @@ mod lang;
 mod links;
 mod listing;
 mod masks;
+mod farconfig;
+mod farconfig_data;
 mod menu;
 mod modkeys;
 mod optmenu;
@@ -114,6 +116,8 @@ enum Overlay {
     Find(Box<findfile::Results>),
     /// Options > Colors: the color dialog.
     ColorPick(Box<colorpick::Picker>),
+    /// far:config, typed on the command line.
+    FarConfig(Box<farconfig::FarConfig>),
 }
 
 struct App {
@@ -303,6 +307,12 @@ impl App {
         } else {
             self.shell.cursor()
         };
+        // far:config stays in sight under a value's dialog, as in Far
+        for under in &mut self.under {
+            if let Overlay::FarConfig(config) = under {
+                config.paint(frame);
+            }
+        }
         match &mut self.overlay {
             Overlay::None => {}
             Overlay::Dialog(dialog) => cursor = dialog.paint(frame),
@@ -336,6 +346,10 @@ impl App {
             }
             Overlay::ColorPick(picker) => {
                 picker.paint(frame);
+                cursor = None;
+            }
+            Overlay::FarConfig(config) => {
+                config.paint(frame);
                 cursor = None;
             }
             Overlay::Job(job, question) => {
@@ -406,6 +420,18 @@ impl App {
                 let outcome = picker.key(key);
                 self.color_pick_outcome(picker, outcome);
             }
+            Overlay::FarConfig(mut config) => match config.key(key) {
+                farconfig::Outcome::Open => self.overlay = Overlay::FarConfig(config),
+                farconfig::Outcome::Closed => {}
+                farconfig::Outcome::Changed => {
+                    self.far_config_changed();
+                    self.overlay = Overlay::FarConfig(config);
+                }
+                farconfig::Outcome::Edit(dialog) => {
+                    self.under.push(Overlay::FarConfig(config));
+                    self.overlay = Overlay::Dialog(dialog);
+                }
+            },
             Overlay::Find(mut results) => {
                 let outcome = results.key(key);
                 self.find_outcome(results, outcome);
@@ -470,6 +496,18 @@ impl App {
                 let outcome = picker.click(event);
                 self.color_pick_outcome(picker, outcome);
             }
+            Overlay::FarConfig(mut config) => match config.click(event) {
+                farconfig::Outcome::Closed => {}
+                farconfig::Outcome::Edit(dialog) => {
+                    self.under.push(Overlay::FarConfig(config));
+                    self.overlay = Overlay::Dialog(dialog);
+                }
+                farconfig::Outcome::Changed => {
+                    self.far_config_changed();
+                    self.overlay = Overlay::FarConfig(config);
+                }
+                farconfig::Outcome::Open => self.overlay = Overlay::FarConfig(config),
+            },
             Overlay::Find(mut results) => {
                 let outcome = results.click(event);
                 self.find_outcome(results, outcome);
@@ -575,8 +613,31 @@ impl App {
         self.send_to_shell(key);
     }
 
+    /// What depends on the settings, after far:config changed one.
+    fn far_config_changed(&mut self) {
+        lang::load();
+        colors::reload();
+        self.settings_changed();
+    }
+
+    /// Whether the command line holds Far's `far:config` (Enter opens the
+    /// configuration editor instead of running it).
+    fn typed_far_config(&self) -> bool {
+        let typed = self.shell.typed().or_else(|| {
+            let line = self.shell.cursor_line().0;
+            line.rsplit_once('>').map(|(_, typed)| typed.trim().to_string())
+        });
+        typed.is_some_and(|t| t.eq_ignore_ascii_case("far:config"))
+    }
+
     /// A key the shell gets, as typed on its line.
     fn send_to_shell(&mut self, key: KeyEvent) {
+        if key.code == KeyCode::Enter && key.modifiers.is_empty() && self.typed_far_config() {
+            self.commands.add("far:config", history::Kind::Plain);
+            self.shell.clear_line();
+            self.overlay = Overlay::FarConfig(Box::new(farconfig::FarConfig::new()));
+            return;
+        }
         if let Some(bytes) = keys::encode(panels::to_shell(key)) {
             let runs = key.code == KeyCode::Enter;
             // Far's command history: what Enter runs from the prompt

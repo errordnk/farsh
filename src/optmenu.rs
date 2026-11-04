@@ -229,6 +229,15 @@ impl App {
                 self.settings_changed();
             }
             Action::SaveSetup => self.save_setup(),
+            Action::FarConfig { key, mode } => {
+                crate::farconfig::accept(key, mode, id, &values.text("value"));
+                if let Some(Overlay::FarConfig(config)) = self.under.last_mut() {
+                    config.after_edit();
+                }
+                crate::lang::load();
+                crate::colors::reload();
+                self.settings_changed();
+            }
             Action::MaskGroup(old) => {
                 let (name, value) = (values.text("name"), values.text("masks"));
                 let mut groups = mask_groups();

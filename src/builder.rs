@@ -38,6 +38,7 @@ pub struct Builder {
     items: Vec<Placed>,
     bindings: Vec<Binding>,
     links: Vec<(usize, usize)>,
+    disabled: Vec<usize>,
     next_y: u16,
     column_start: Option<usize>,
     column_break: Option<usize>,
@@ -57,6 +58,7 @@ impl Builder {
             items: vec![],
             bindings: vec![],
             links: vec![],
+            disabled: vec![],
             next_y: 2,
             column_start: None,
             column_break: None,
@@ -71,7 +73,7 @@ impl Builder {
         match &item.item {
             Item::Label(text) | Item::Text { text, .. } => chars(text),
             Item::Check { label, .. } | Item::Option { label, .. } | Item::Check3 { label, .. } => chars(label) + 4,
-            Item::Edit { .. } | Item::Combo { .. } => item.x2 - item.x1 + 1,
+            Item::Edit { .. } | Item::Combo { .. } | Item::Masked { .. } => item.x2 - item.x1 + 1,
             _ => 0,
         }
     }
@@ -221,16 +223,55 @@ impl Builder {
 
     /// AddOKCancel: a separator, OK and Cancel.
     pub fn ok_cancel(&mut self) {
+        self.buttons(&[("OK", "ok"), ("Cancel", "cancel")]);
+    }
+
+    /// AddButtons: a separator, then the buttons (the first is the default).
+    pub fn buttons(&mut self, buttons: &[(&'static str, &'static str)]) {
         self.separator(None);
         let y = self.next_y;
         self.next_y += 1;
-        let buttons = vec![dialog::button(tr("OK"), "ok", true), dialog::button(tr("Cancel"), "cancel", false)];
+        let buttons = buttons.iter().enumerate().map(|(i, (label, id))| dialog::button(tr(label), id, i == 0)).collect();
         self.items.push(Placed { item: Item::Buttons(buttons), x1: -1, x2: 0, y });
+    }
+
+    /// AddText with a text made on the spot (not translated).
+    pub fn text_owned(&mut self, text: String) -> usize {
+        self.push(Item::Label(text), 0)
+    }
+
+    /// A text shown disabled (DIF_DISABLE).
+    pub fn text_disabled(&mut self, text: String) -> usize {
+        let index = self.text_owned(text);
+        self.disabled.push(index);
+        index
+    }
+
+    /// An edit field not bound to a setting: `width` columns.
+    pub fn free_edit(&mut self, id: &'static str, value: &str, width: i16) -> usize {
+        let index = self.push(Self::edit_item(id, value), 0);
+        self.items[index].x2 = self.items[index].x1 + width - 1;
+        index
+    }
+
+    /// A masked field (AddHexEditField, AddBinaryEditField): as wide as the mask.
+    pub fn masked(&mut self, id: &'static str, mask: &str, value: &str) -> usize {
+        let text: Vec<char> = dialog::masked_text(mask, value).chars().collect();
+        let mask: Vec<char> = mask.chars().collect();
+        let width = mask.len() as i16;
+        let index = self.push(Item::Masked { id, mask, text, cursor: 0, unchanged: true }, 0);
+        self.items[index].x2 = self.items[index].x1 + width - 1;
+        index
     }
 
     /// The dialog: UpdateBorderSize and UpdateSecondColumnPosition, then
     /// every item at its place. `action` gets the bindings.
     pub fn build(self, kind: Settings) -> Dialog {
+        self.build_as(|bindings| Action::Settings(kind, bindings))
+    }
+
+    /// The dialog, with the action made from the bindings.
+    pub fn build_as(self, action: impl FnOnce(Vec<Binding>) -> Action) -> Dialog {
         let mut max_width = self.items.iter().filter(|p| p.x1 != SECOND && p.x1 >= 0).map(|p| Self::width(p) + p.x1 - 5).max().unwrap_or(0);
         max_width = max_width.max(2 * self.column_min_width + 1);
         let box_x2 = 3 + max_width + 3;
@@ -254,11 +295,14 @@ impl Builder {
             places.push(place);
         }
         let focus = items.iter().position(|i| !matches!(i, Item::Label(_) | Item::Text { .. } | Item::Separator(_))).unwrap_or(0);
-        let mut dialog = Dialog::placed(self.title, (width, height), items, places, focus, None, Action::Settings(kind, self.bindings));
+        let mut dialog = Dialog::placed(self.title, (width, height), items, places, focus, None, action(self.bindings));
         for (parent, target) in self.links {
             dialog.link_flags(parent, target);
         }
         dialog.apply_links();
+        for index in self.disabled {
+            dialog.enable(index, false);
+        }
         dialog
     }
 }
