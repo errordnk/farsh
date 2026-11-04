@@ -1684,8 +1684,7 @@ impl Panels {
     pub fn key(&mut self, key: KeyEvent, line_is_empty: bool) -> Key {
         let plain = !key.modifiers.contains(KeyModifiers::CONTROL);
         let ctrl_only = key.modifiers == KeyModifiers::CONTROL;
-        // Alt with a character that needs Shift (`+`, `*`) comes with Shift too
-        let alt_only = key.modifiers.contains(KeyModifiers::ALT) && !key.modifiers.contains(KeyModifiers::CONTROL);
+        let alt_only = key.modifiers == KeyModifiers::ALT;
         // Far's FilePanels keys: Ctrl+L, Ctrl+Q, Ctrl+T, Ctrl+F1, Ctrl+F2
         match key.code {
             KeyCode::Char('l') if ctrl_only => return self.toggle_kind(Kind::Info),
@@ -1743,10 +1742,11 @@ impl Panels {
             // Far's Ctrl+A, whatever is typed
             KeyCode::Char('a') if ctrl_only => return self.attributes_request(),
             // Far's Gray +, Gray - and Gray * are Alt++, Alt+- and Alt+* here
-            // (keyboards without a keypad); Ctrl+M brings the marks back
+            // (keyboards without a keypad), and without Shift Alt+= and Alt+8,
+            // the keys + and * are on; Ctrl+M brings the marks back
             KeyCode::Char('+' | '=') if alt_only => return Key::Ask(Request::SelectGroup(true)),
             KeyCode::Char('-') if alt_only => return Key::Ask(Request::SelectGroup(false)),
-            KeyCode::Char('*') if alt_only => self.invert_marks(),
+            KeyCode::Char('*' | '8') if alt_only => self.invert_marks(),
             KeyCode::Char('m') if ctrl_only => self.restore_selection(),
             KeyCode::Char('g') if ctrl_only => return self.apply_command_request(),
             KeyCode::Char('z') if ctrl_only => return self.describe_request(),
@@ -2114,7 +2114,8 @@ impl Panels {
             other.move_cursor(delta);
         };
         match key.code {
-            KeyCode::Char('+') => step(self, 1),
+            // `=` is the `+` key without Shift
+            KeyCode::Char('+' | '=') => step(self, 1),
             KeyCode::Char('-') => step(self, -1),
             KeyCode::F(3) => {
                 self.right_active = !self.right_active;
@@ -2712,6 +2713,9 @@ mod tests {
         let mut marked: Vec<&String> = panels.left.marked.iter().collect();
         marked.sort();
         assert_eq!(marked, ["zeta.txt"]);
+        // Alt+8, the * key without Shift, flips them back
+        panels.key(alt('8'), true);
+        assert!(panels.left.marked.contains("apple.txt") && !panels.left.marked.contains("zeta.txt"));
         std::fs::remove_dir_all(dir).unwrap();
     }
 

@@ -147,9 +147,10 @@ impl SortMenu {
             KeyCode::Home | KeyCode::PageUp => self.selected = 0,
             KeyCode::End | KeyCode::PageDown => self.selected = self.lines.len() - 1,
             KeyCode::Enter => return self.pick(self.selected, true, false),
-            KeyCode::Char('+') => return self.pick(self.selected, false, true),
+            // `=` and `8`: the + and * keys without Shift
+            KeyCode::Char('+' | '=') => return self.pick(self.selected, false, true),
             KeyCode::Char('-') => return self.pick(self.selected, false, false),
-            KeyCode::Char('*') => return self.pick(self.selected, true, false),
+            KeyCode::Char('*' | '8') => return self.pick(self.selected, true, false),
             KeyCode::F(n) if ctrl => {
                 if let Some(index) = SortMode::MENU.iter().position(|m| m.key() == Some(n)) {
                     return self.pick(index, true, false);
@@ -336,6 +337,15 @@ mod tests {
         assert_eq!(
             menu.key(key(KeyCode::Char('-'))),
             Outcome::Picked(Picked { choice: Choice::Mode(SortMode::StreamsSize), invert: false, plus: false })
+        );
+        // = and 8: the + and * keys without Shift
+        assert_eq!(
+            menu.key(key(KeyCode::Char('='))),
+            Outcome::Picked(Picked { choice: Choice::Mode(SortMode::StreamsSize), invert: false, plus: true })
+        );
+        assert_eq!(
+            menu.key(key(KeyCode::Char('8'))),
+            Outcome::Picked(Picked { choice: Choice::Mode(SortMode::StreamsSize), invert: true, plus: false })
         );
         let ctrl_f6 = KeyEvent::new(KeyCode::F(6), KeyModifiers::CONTROL);
         assert!(matches!(menu.key(ctrl_f6), Outcome::Picked(Picked { choice: Choice::Mode(SortMode::Size), .. })));
