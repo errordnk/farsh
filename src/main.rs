@@ -88,6 +88,15 @@ struct App {
     /// The menu title F9 opened last, to open there again.
     last_menu: Option<usize>,
     size: (u16, u16),
+    /// F4 ran an editor over the panels: they come back when it ends.
+    editing: Option<Editing>,
+}
+
+/// A file being edited in the shell (F4), started at the shell's prompt
+/// number `prompts`.
+struct Editing {
+    prompts: u64,
+    name: String,
 }
 
 impl App {
@@ -101,6 +110,7 @@ impl App {
             last_click: None,
             last_menu: None,
             size: (cols, rows),
+            editing: None,
         })
     }
 
@@ -120,6 +130,15 @@ impl App {
             // The shell changed directory (a typed `cd`, a script): the panel follows.
             if let Some(dir) = self.shell.take_cwd() {
                 self.panels.go_to(dir);
+                dirty = true;
+            }
+            // The editor F4 started has ended (the shell is at its next prompt):
+            // the panels are back as they were, on the file edited, as in Far.
+            if self.editing.as_ref().is_some_and(|editing| self.shell.prompts() > editing.prompts)
+                && let Some(editing) = self.editing.take()
+            {
+                self.panels_visible = true;
+                self.panels.refresh(Some(&editing.name));
                 dirty = true;
             }
             if self.poll_job() {
@@ -388,8 +407,13 @@ impl App {
                     return;
                 }
                 let line = editor::command_line(&editor::editor(), self.shell.kind(), &path);
+                // The panels come back when the editor ends, if the shell
+                // reports its prompts (see `Shell::prompts`); else Ctrl+O does.
+                if self.panels_visible && self.shell.kind() != cwd::Kind::Other {
+                    let name = path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
+                    self.editing = Some(Editing { prompts: self.shell.prompts(), name });
+                }
                 self.shell.run(&line);
-                // the editor takes the screen; Ctrl+O brings the panels back
                 self.panels_visible = false;
             }
             Request::Copy(sources, other) => {

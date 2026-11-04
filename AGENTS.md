@@ -40,6 +40,10 @@ over the shell screen.
   vmenu.cpp, diskmenu.cpp). Known, deliberate differences: "quit farsh?",
   menu items farsh does not do are grey, Copy's "Use filter" stays disabled,
   Make folder offers no link types, Change drive has no plugin rows.
+- F4 runs the editor in the shell as a typed command (`src/editor.rs`). When
+  the shell shows its next prompt (`Shell::prompts`, counted from the OSC 7
+  hook) the panels come back, re-read, with the cursor on the edited file,
+  as in Far. A shell without the hook (cmd) gives no signal: Ctrl+O there.
 - Tests: `cargo test` (the shell test starts cmd.exe on Windows, /bin/sh elsewhere).
 - Code, comments and logs in English; talk to the user in Russian.
 

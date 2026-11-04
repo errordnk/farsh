@@ -31,6 +31,8 @@ pub struct Shell {
     /// INHERIT_CURSOR by portable-pty) starts with a cursor query and shows
     /// nothing until it is answered.
     first_output: bool,
+    /// How many prompts the shell has shown (each one reports its directory).
+    prompts: u64,
 }
 
 impl Shell {
@@ -70,7 +72,7 @@ impl Shell {
                 }
             }
         });
-        Ok(Self { master: pair.master, writer, child, output, parser: vt100::Parser::new(nz(rows), nz(cols), 0), prompt_line: String::new(), awaiting_prompt: true, kind, osc7: Osc7::default(), cwd: None, first_output: true })
+        Ok(Self { master: pair.master, writer, child, output, parser: vt100::Parser::new(nz(rows), nz(cols), 0), prompt_line: String::new(), awaiting_prompt: true, kind, osc7: Osc7::default(), cwd: None, first_output: true, prompts: 0 })
     }
 
     /// Feeds what the shell wrote to the screen; reports whether there was any.
@@ -86,6 +88,7 @@ impl Shell {
             self.parser.process(&bytes);
             if let Some(dir) = self.osc7.feed(&bytes) {
                 self.cwd = Some(dir);
+                self.prompts += 1;
             }
             any = true;
         }
@@ -110,6 +113,13 @@ impl Shell {
     /// The directory the shell reported since the last call, if it moved.
     pub fn take_cwd(&mut self) -> Option<PathBuf> {
         self.cwd.take()
+    }
+
+    /// How many prompts the shell has shown: one more means the command
+    /// started at the last one has ended. Only a shell with the directory
+    /// hook counts (PowerShell, bash, zsh); for any other it stays at 0.
+    pub fn prompts(&self) -> u64 {
+        self.prompts
     }
 
     /// Makes the shell go to `dir`, as if `cd` were typed at an empty prompt.
@@ -281,6 +291,31 @@ mod tests {
         }
         let reported = shell.take_cwd().expect("the prompt after cd reports the new directory");
         assert_eq!(reported.to_string_lossy().to_lowercase(), target.to_string_lossy().to_lowercase());
+        shell.write(b"exit\r", true);
+    }
+
+    #[test]
+    fn a_hooked_shell_counts_a_prompt_only_when_the_command_ends() {
+        let Some(program) = windows_powershell_or_skip() else { return };
+        let mut shell = Shell::spawn_program(&program, 100, 30).unwrap();
+        let wait_for_prompt = |shell: &mut Shell, after: u64| {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while shell.prompts() <= after && Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(60));
+                shell.pump();
+            }
+            assert!(shell.prompts() > after, "no prompt after {after}");
+        };
+        wait_for_prompt(&mut shell, 0);
+        settle(&mut shell);
+        let before = shell.prompts();
+        // what an editor is to the shell: a command that holds the screen a while
+        shell.run("Start-Sleep -Milliseconds 1500");
+        std::thread::sleep(Duration::from_millis(700));
+        shell.pump();
+        assert_eq!(shell.prompts(), before, "a prompt counted while the command still runs");
+        wait_for_prompt(&mut shell, before);
+        assert_eq!(shell.prompts(), before + 1);
         shell.write(b"exit\r", true);
     }
 
