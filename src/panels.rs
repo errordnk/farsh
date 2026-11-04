@@ -25,7 +25,7 @@ const BLACK: Color = palette::fg(palette::BLACK);
 const KEY_BAR: [&str; 12] =
     ["Help", "UserMn", "View", "Edit", "Copy", "RenMov", "MkFold", "Delete", "ConfMn", "Quit", "", ""];
 
-/// Far's view modes (Ctrl+1..Ctrl+4).
+/// Far's ten view modes (config.cpp's InitialModes): Ctrl+1..Ctrl+9, Ctrl+0.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ViewMode {
     /// Three columns of names, extensions aligned.
@@ -36,67 +36,198 @@ pub enum ViewMode {
     Full,
     /// Name and Size.
     Wide,
+    /// Name, Size, Allocated, Write, Created, Accessed, Attr: the whole screen.
+    Detailed,
+    /// Name (40%) and Description.
+    Descriptions,
+    /// Name, Size, Description (70%): the whole screen.
+    LongDescriptions,
+    /// Name, Size, Owner.
+    Owners,
+    /// Name, Size, number of hard links.
+    Links,
+    /// Name with the mark, Size with digit groups, Date.
+    AlternativeFull,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Col {
     Name,
     Size,
+    /// size_compressed: the space taken on the disk.
+    Allocated,
     Date,
     Time,
+    Write,
+    Created,
+    Accessed,
+    Attributes,
+    Description,
+    Owner,
+    Links,
 }
 
 impl Col {
+    /// Far's column titles (MColumn*).
     fn title(self) -> &'static str {
         match self {
             Col::Name => "Name",
             Col::Size => "Size",
+            Col::Allocated => "Allocated",
             Col::Date => "Date",
             Col::Time => "Time",
+            Col::Write => "Write",
+            Col::Created => "Created",
+            Col::Accessed => "Accessed",
+            Col::Attributes => "Attr",
+            Col::Description => "Description",
+            Col::Owner => "Owner",
+            Col::Links => "NmL",
+        }
+    }
+
+    /// panelmix.cpp's ColumnInfo default widths (0: shares what is left).
+    fn default_width(self) -> usize {
+        match self {
+            Col::Name | Col::Description | Col::Owner => 0,
+            Col::Size | Col::Allocated | Col::Attributes => 6,
+            Col::Date => 8,
+            Col::Time => 5,
+            Col::Write | Col::Created | Col::Accessed => 14,
+            Col::Links => 3,
         }
     }
 }
 
+/// A column's width in a mode: its type's default, so many cells, or so
+/// many percent of what is left (col_width::percent).
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum W {
+    Default,
+    Cells(usize),
+    Percent(usize),
+}
+
+use W::{Cells, Default as Auto, Percent};
+
+const STATUS_FULL: &[(Col, W)] = &[(Col::Name, Auto), (Col::Size, Cells(6)), (Col::Date, Auto), (Col::Time, Cells(5))];
+const STATUS_NAME: &[(Col, W)] = &[(Col::Name, Auto)];
+
 impl ViewMode {
-    /// The columns and their widths (0: shares what is left), as Far's defaults.
-    fn columns(self) -> &'static [(Col, usize)] {
+    /// The columns and their widths, as Far's defaults.
+    fn columns(self) -> &'static [(Col, W)] {
         match self {
-            ViewMode::Brief => &[(Col::Name, 0), (Col::Name, 0), (Col::Name, 0)],
-            ViewMode::Medium => &[(Col::Name, 0), (Col::Name, 0)],
-            ViewMode::Full => &[(Col::Name, 0), (Col::Size, 6), (Col::Date, 8), (Col::Time, 5)],
-            ViewMode::Wide => &[(Col::Name, 0), (Col::Size, 6)],
+            ViewMode::Brief => &[(Col::Name, Auto), (Col::Name, Auto), (Col::Name, Auto)],
+            ViewMode::Medium => &[(Col::Name, Auto), (Col::Name, Auto)],
+            ViewMode::Full => &[(Col::Name, Auto), (Col::Size, Cells(6)), (Col::Date, Auto), (Col::Time, Cells(5))],
+            ViewMode::Wide => &[(Col::Name, Auto), (Col::Size, Cells(6))],
+            ViewMode::Detailed => &[
+                (Col::Name, Auto),
+                (Col::Size, Cells(6)),
+                (Col::Allocated, Cells(6)),
+                (Col::Write, Cells(14)),
+                (Col::Created, Cells(14)),
+                (Col::Accessed, Cells(14)),
+                (Col::Attributes, Auto),
+            ],
+            ViewMode::Descriptions => &[(Col::Name, Percent(40)), (Col::Description, Auto)],
+            ViewMode::LongDescriptions => &[(Col::Name, Auto), (Col::Size, Cells(6)), (Col::Description, Percent(70))],
+            ViewMode::Owners => &[(Col::Name, Auto), (Col::Size, Cells(6)), (Col::Owner, Cells(15))],
+            ViewMode::Links => &[(Col::Name, Auto), (Col::Size, Cells(6)), (Col::Links, Cells(3))],
+            ViewMode::AlternativeFull => &[(Col::Name, Auto), (Col::Size, Cells(10)), (Col::Date, Auto)],
         }
     }
 
     /// The status line under the list.
-    fn status(self) -> &'static [(Col, usize)] {
+    fn status(self) -> &'static [(Col, W)] {
         match self {
-            ViewMode::Full => &[(Col::Name, 0)],
-            _ => &[(Col::Name, 0), (Col::Size, 6), (Col::Date, 8), (Col::Time, 5)],
+            ViewMode::Full | ViewMode::Detailed | ViewMode::LongDescriptions | ViewMode::AlternativeFull => STATUS_NAME,
+            // File owners' status has a 15-cell time (Far's own default)
+            ViewMode::Owners => &[(Col::Name, Auto), (Col::Size, Cells(6)), (Col::Date, Auto), (Col::Time, Cells(15))],
+            _ => STATUS_FULL,
         }
     }
 
+    /// PVS_ALIGNEXTENSIONS: all but Medium and Wide.
     fn align_extensions(self) -> bool {
-        matches!(self, ViewMode::Brief | ViewMode::Full)
+        !matches!(self, ViewMode::Medium | ViewMode::Wide)
+    }
+
+    /// PVS_FULLSCREEN: the panel takes the whole screen.
+    pub fn full_screen(self) -> bool {
+        matches!(self, ViewMode::Detailed | ViewMode::LongDescriptions)
+    }
+
+    /// COLFLAGS_MARK on the name and COLFLAGS_GROUPDIGITS on the size.
+    fn marks_and_groups(self) -> bool {
+        self == ViewMode::AlternativeFull
+    }
+
+    /// What the mode shows that the listing does not read by itself.
+    fn needs(self) -> &'static [crate::sorting::SortMode] {
+        use crate::sorting::SortMode;
+        match self {
+            ViewMode::Descriptions | ViewMode::LongDescriptions => &[SortMode::Descriptions],
+            ViewMode::Owners => &[SortMode::Owner],
+            ViewMode::Links => &[SortMode::Links],
+            _ => &[],
+        }
     }
 }
 
-/// Far's `PrepareColumnWidths`: zero widths share what is left; columns that
-/// do not fit are dropped from the end, the last one cut to fit.
-fn layout(spec: &[(Col, usize)], text_width: usize) -> Vec<(Col, usize)> {
-    let mut cols = spec.to_vec();
+/// Far's `PrepareColumnWidths`: a zero width takes the type's default; the
+/// percent columns share their part of what is left, the zero ones the
+/// rest; columns that do not fit are dropped from the end, the last one cut.
+fn layout(spec: &[(Col, W)], text_width: usize) -> Vec<(Col, usize)> {
+    let mut zero = 0isize;
+    let (mut total_percent, mut percent_count) = (0isize, 0isize);
+    let mut total = spec.len() as isize - 1;
+    let mut cols: Vec<(Col, isize, bool)> = spec
+        .iter()
+        .map(|&(col, w)| match w {
+            Auto | Cells(0) => {
+                let width = col.default_width() as isize;
+                if width == 0 {
+                    zero += 1;
+                }
+                total += width;
+                (col, width, false)
+            }
+            Cells(n) => {
+                total += n as isize;
+                (col, n as isize, false)
+            }
+            Percent(p) => {
+                total_percent += p as isize;
+                percent_count += 1;
+                (col, p as isize, true)
+            }
+        })
+        .collect();
     let width = text_width as isize;
-    let total = |cols: &[(Col, usize)]| cols.iter().map(|c| c.1 as isize).sum::<isize>() + cols.len() as isize - 1;
-    let mut extra = width - total(&cols);
-    let mut zero = cols.iter().filter(|c| c.1 == 0).count() as isize;
+    let mut extra = width - total;
+    if percent_count > 0 {
+        let extra_percent = if total_percent > 100 || zero == 0 { extra } else { extra * total_percent / 100 };
+        let mut used = 0;
+        for col in cols.iter_mut().filter(|c| c.2) {
+            let w = if percent_count > 1 { extra_percent * col.1 / total_percent } else { extra_percent - used };
+            let w = w.max(1);
+            used += w;
+            col.1 = w;
+            col.2 = false;
+            percent_count -= 1;
+        }
+        extra -= used;
+    }
     for col in cols.iter_mut().filter(|c| c.1 == 0) {
         let auto = (extra / zero).max(1);
-        col.1 = auto as usize;
+        col.1 = auto;
         extra -= auto;
         zero -= 1;
     }
+    let mut cols: Vec<(Col, usize)> = cols.into_iter().map(|(c, w, _)| (c, w.max(0) as usize)).collect();
     loop {
-        let sum = total(&cols);
+        let sum = cols.iter().map(|c| c.1 as isize).sum::<isize>() + cols.len() as isize - 1;
         if sum <= width {
             break;
         }
@@ -231,11 +362,24 @@ impl Panel {
             let modified = std::fs::metadata(&self.dir).and_then(|m| m.modified()).ok();
             entries.insert(0, Entry::up(modified));
         }
+        let needs = self.mode.needs();
+        if !needs.is_empty() {
+            crate::sorting::fill(&mut entries, needs, &self.dir);
+        }
         self.marked.clear();
         sorting::sort(&mut entries, &self.sorting, &self.marked, &self.dir);
         self.entries = entries;
         self.cursor = select.and_then(|name| self.entries.iter().position(|e| e.name == name)).unwrap_or(0);
         self.top = 0;
+    }
+
+    /// Reads what the view mode shows that the listing does not (owners,
+    /// links, descriptions), as Far reads them only when shown.
+    fn fill_for_view(&mut self) {
+        let needs = self.mode.needs();
+        if self.archive.is_none() && !needs.is_empty() {
+            crate::sorting::fill(&mut self.entries, needs, &self.dir);
+        }
     }
 
     /// Ctrl+F3..Ctrl+F11: Far's `SetSortMode` (the same mode again flips).
@@ -440,12 +584,37 @@ impl Panel {
     }
 
     fn cell(&self, entry: &Entry, col: Col, width: usize, status: bool) -> (String, bool) {
+        let marks = self.mode.marks_and_groups() && !status;
         match col {
             Col::Name if status => (listing::status_name(&entry.name, width), false),
+            // COLFLAGS_MARK: `√ ` before a marked name, two spaces before the rest
+            Col::Name if marks && width > 2 => {
+                let mark = if self.marked.contains(&entry.name) { "\u{221A} " } else { "  " };
+                let (name, cut) = listing::list_name(&entry.name, width - 2, self.mode.align_extensions() && !entry.is_dir);
+                (format!("{mark}{name}"), cut)
+            }
             Col::Name => listing::list_name(&entry.name, width, self.mode.align_extensions() && !entry.is_dir),
+            Col::Size if marks => (listing::size_column_grouped(entry, width), false),
             Col::Size => (listing::size_column(entry, width), false),
+            Col::Allocated => (listing::size_column(&Entry { size: entry.allocated, ..entry.clone() }, width), false),
             Col::Date => (listing::right(&listing::date_time(entry.modified).0, width), false),
-            Col::Time => (listing::right(&listing::date_time(entry.modified).1, width), false),
+            Col::Time => (listing::right(&listing::time_of_width(entry.modified, width), width), false),
+            Col::Write => (listing::right(&listing::date_and_time(entry.modified, width), width), false),
+            Col::Created => (listing::right(&listing::date_and_time(entry.created, width), width), false),
+            Col::Accessed => (listing::right(&listing::date_and_time(entry.accessed, width), width), false),
+            Col::Attributes => (listing::attribute_letters(entry.attributes, width), false),
+            Col::Description => {
+                let text = entry.description.as_deref().unwrap_or("");
+                let text = text.split('\u{4}').next().unwrap_or("");
+                (listing::left(text, width), false)
+            }
+            // DOMAIN\name shows as name
+            Col::Owner => {
+                let owner = entry.owner.as_deref().unwrap_or("");
+                let owner = owner.rsplit(['\\', '/']).next().unwrap_or(owner);
+                (listing::left(owner, width), false)
+            }
+            Col::Links => (listing::right(&entry.links.map(|n| n.to_string()).unwrap_or_default(), width), false),
         }
     }
 
@@ -770,18 +939,32 @@ impl Panels {
         self.right_active
     }
 
-    const VIEWS: [ViewMode; 4] = [ViewMode::Brief, ViewMode::Medium, ViewMode::Full, ViewMode::Wide];
+    /// Far's numbering: Ctrl+1 is Brief .. Ctrl+9 File links, Ctrl+0 Alternative full.
+    const VIEWS: [ViewMode; 10] = [
+        ViewMode::AlternativeFull,
+        ViewMode::Brief,
+        ViewMode::Medium,
+        ViewMode::Full,
+        ViewMode::Wide,
+        ViewMode::Detailed,
+        ViewMode::Descriptions,
+        ViewMode::LongDescriptions,
+        ViewMode::Owners,
+        ViewMode::Links,
+    ];
 
-    /// The left and right panels' views as Far numbers them (1 Brief .. 4 Wide).
+    /// The left and right panels' views as Far numbers them (1 Brief .. 9, 0).
     pub fn view_modes(&self) -> [u8; 2] {
-        let number = |mode: ViewMode| Self::VIEWS.iter().position(|&m| m == mode).map_or(2, |i| i as u8 + 1);
+        let number = |mode: ViewMode| Self::VIEWS.iter().position(|&m| m == mode).map_or(2, |i| i as u8);
         [number(self.left.mode), number(self.right.mode)]
     }
 
-    /// Ctrl+1..Ctrl+4 (or the F9 menu) for the left or right panel.
+    /// Ctrl+0..Ctrl+9 (or the F9 menu) for the left or right panel.
     pub fn set_view(&mut self, right: bool, mode: u8) {
-        if let Some(&view) = Self::VIEWS.get(usize::from(mode).wrapping_sub(1)) {
-            if right { self.right.mode = view } else { self.left.mode = view }
+        if let Some(&view) = Self::VIEWS.get(usize::from(mode)) {
+            let panel = if right { &mut self.right } else { &mut self.left };
+            panel.mode = view;
+            panel.fill_for_view();
         }
     }
 
@@ -903,7 +1086,7 @@ impl Panels {
                 self.active().stripe_move(right);
             }
             // Ctrl+1..Ctrl+4: Far's Brief, Medium, Full and Wide views
-            KeyCode::Char(c @ '1'..='4') if ctrl_only => {
+            KeyCode::Char(c @ '0'..='9') if ctrl_only => {
                 let right = self.right_active;
                 self.set_view(right, c as u8 - b'0');
             }
@@ -1081,8 +1264,16 @@ impl Panels {
         let left_width = grid.cols.div_ceil(2);
         let right_width = grid.cols - left_width;
         let right_active = self.right_active;
-        self.left.paint(grid, 0, left_width, height, !right_active);
-        self.right.paint(grid, left_width, right_width, height, right_active);
+        // PVS_FULLSCREEN: such a panel takes the whole screen; the active panel is drawn last, on top
+        let place = |panel: &Panel, left: bool| if panel.mode.full_screen() { (0, grid.cols) } else if left { (0, left_width) } else { (left_width, right_width) };
+        let (left_at, right_at) = (place(&self.left, true), place(&self.right, false));
+        if right_active {
+            self.left.paint(grid, left_at.0, left_at.1, height, false);
+            self.right.paint(grid, right_at.0, right_at.1, height, true);
+        } else {
+            self.right.paint(grid, right_at.0, right_at.1, height, false);
+            self.left.paint(grid, left_at.0, left_at.1, height, true);
+        }
 
         let row = grid.rows - 2;
         grid.set_row(row, line);
@@ -1527,6 +1718,56 @@ mod tests {
         panels.key(key(KeyCode::Down), true);
         let Key::Ask(Request::Error(message)) = panels.key(key(KeyCode::F(8)), true) else { panic!("F8 in a tar") };
         assert_eq!(message, "Archive modification not supported");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    fn painted(panels: &mut Panels) -> Vec<String> {
+        let mut grid = Grid::new(80, 25);
+        panels.paint(&mut grid, &[], 0);
+        (0..25).map(|row| grid.row(row).iter().map(|cell| cell.text.clone()).collect()).collect()
+    }
+
+    #[test]
+    fn the_widths_are_fars_prepare_column_widths() {
+        // Descriptions in a 38-cell panel: the name 40% of what is left, the description the rest
+        assert_eq!(layout(ViewMode::Descriptions.columns(), 38), [(Col::Name, 14), (Col::Description, 23)]);
+        // Detailed on the whole 80-cell screen: the fixed columns, the name what is left
+        let detailed = layout(ViewMode::Detailed.columns(), 78);
+        assert_eq!(detailed.iter().map(|c| c.1).collect::<Vec<_>>(), [12, 6, 6, 14, 14, 14, 6]);
+        // Long descriptions: the description 70% of what is left (no zero-width column but the name)
+        let long = layout(ViewMode::LongDescriptions.columns(), 78);
+        assert_eq!(long, [(Col::Name, 21), (Col::Size, 6), (Col::Description, 49)], "70 left: 70 * 70 / 100 = 49, the name the 21 after");
+    }
+
+    #[test]
+    fn ctrl_5_to_ctrl_0_switch_to_fars_other_modes() {
+        let dir = scratch("modes");
+        let mut panels = Panels::new(dir.clone());
+        let ctrl = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL);
+        panels.key(ctrl('5'), true);
+        assert_eq!(panels.view_modes()[0], 5);
+        let rows = painted(&mut panels);
+        // the whole screen, Far's titles
+        assert_eq!(rows[0].chars().next(), Some('\u{2554}'));
+        assert_eq!(rows[0].chars().nth(79), Some('\u{2557}'));
+        for title in ["Name", "Size", "Alloca", "Write", "Created", "Accessed", "Attr"] {
+            assert!(rows[1].contains(title), "{title} in {:?}", rows[1]);
+        }
+        // a folder's attributes letter D, a file's A (Windows) or nothing extra
+        assert!(rows.iter().any(|r| r.contains("Alpha") && r.trim_end_matches(['\u{2551}', ' ']).ends_with('D')), "{rows:#?}");
+        for (key, number) in [('6', 6), ('7', 7), ('8', 8), ('9', 9), ('0', 0), ('1', 1)] {
+            panels.key(ctrl(key), true);
+            assert_eq!(panels.view_modes()[0], number);
+            painted(&mut panels);
+        }
+        // Alternative full: the mark before a marked name
+        panels.key(ctrl('0'), true);
+        panels.key(key(KeyCode::Down), true);
+        panels.key(key(KeyCode::Insert), true);
+        let rows = painted(&mut panels);
+        assert!(rows.iter().any(|r| r.contains("\u{221A} Alpha")), "{rows:#?}");
+        let rows_titles = &rows[1];
+        assert!(rows_titles.contains("Size") && rows_titles.contains("Date") && !rows_titles.contains("Time"));
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

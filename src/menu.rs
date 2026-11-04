@@ -68,7 +68,7 @@ struct Title {
     items: Vec<Item>,
 }
 
-/// `mode`: the panel's view, 1 Brief .. 4 Wide.
+/// `mode`: the panel's view as Far numbers them, 1 Brief .. 9 File links, 0 Alternative full.
 fn panel_menu(title: &'static str, f: u8, mode: u8) -> Title {
     let (on_off, drive) = if f == 1 { ("Ctrl+F1", "Alt+F1") } else { ("Ctrl+F2", "Alt+F2") };
     let right = f == 2;
@@ -79,12 +79,12 @@ fn panel_menu(title: &'static str, f: u8, mode: u8) -> Title {
             view("&Medium", "Ctrl+2", right, 2, mode),
             view("&Full", "Ctrl+3", right, 3, mode),
             view("&Wide", "Ctrl+4", right, 4, mode),
-            item("Detai&led", "Ctrl+5", None),
-            item("&Descriptions", "Ctrl+6", None),
-            item("Lon&g descriptions", "Ctrl+7", None),
-            item("File own&ers", "Ctrl+8", None),
-            item("File lin&ks", "Ctrl+9", None),
-            item("&Alternative full", "Ctrl+0", None),
+            view("Detai&led", "Ctrl+5", right, 5, mode),
+            view("&Descriptions", "Ctrl+6", right, 6, mode),
+            view("Lon&g descriptions", "Ctrl+7", right, 7, mode),
+            view("File own&ers", "Ctrl+8", right, 8, mode),
+            view("File lin&ks", "Ctrl+9", right, 9, mode),
+            view("&Alternative full", "Ctrl+0", right, 0, mode),
             SEPARATOR,
             item("&Info panel", "Ctrl+L", None),
             item("Quick &view", "Ctrl+Q", None),

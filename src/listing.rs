@@ -26,6 +26,9 @@ pub struct Entry {
     pub allocated: u64,
     /// Hidden or system (dimmed, as Far's first highlighting groups do).
     pub hidden: bool,
+    /// The file attributes (Windows' FILE_ATTRIBUTE_*; elsewhere directory,
+    /// read only, hidden and reparse point made up from what is there).
+    pub attributes: u32,
     /// The reparse tag of a junction, symlink, cloud placeholder...
     pub reparse: Option<u32>,
     /// Place in the folder's own order (Far's "Unsorted").
@@ -40,7 +43,7 @@ pub struct Entry {
 
 impl Entry {
     pub fn up(modified: Option<SystemTime>) -> Self {
-        Self { name: "..".into(), is_dir: true, modified, ..Self::default() }
+        Self { name: "..".into(), is_dir: true, modified, attributes: 0x10, ..Self::default() }
     }
 
     pub fn is_up(&self) -> bool {
@@ -115,6 +118,7 @@ pub fn read(dir: &Path) -> Vec<Entry> {
                     changed: file_time(info.ChangeTime),
                     allocated: info.AllocationSize as u64,
                     hidden: attrs & (FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM) != 0,
+                    attributes: attrs,
                     // for a reparse point the EA size field holds the tag
                     reparse: (attrs & FILE_ATTRIBUTE_REPARSE_POINT != 0).then_some(info.EaSize),
                     position: entries.len(),
@@ -149,6 +153,11 @@ pub fn read(dir: &Path) -> Vec<Entry> {
             let link = item.file_type().is_ok_and(|t| t.is_symlink());
             let meta = std::fs::metadata(item.path()).ok().or_else(|| item.metadata().ok());
             Entry {
+                attributes: {
+                    let is_dir = meta.as_ref().is_some_and(|m| m.is_dir());
+                    let read_only = meta.as_ref().is_some_and(|m| m.permissions().readonly());
+                    u32::from(is_dir) * 0x10 | u32::from(read_only) | u32::from(name.starts_with('.')) * 0x2 | u32::from(link) * 0x400
+                },
                 hidden: name.starts_with('.'),
                 name,
                 is_dir: meta.as_ref().is_some_and(|m| m.is_dir()),
@@ -261,6 +270,104 @@ pub fn center(s: &str, width: usize) -> String {
 }
 
 /// Far's `fit_to_right`: padded on the left, cut on the right.
+/// Far's fit_to_left: `s` in `width` cells, cut or padded on the right.
+pub fn left(s: &str, width: usize) -> String {
+    let len = chars(s);
+    if len >= width { take(s, width) } else { format!("{s}{}", " ".repeat(width - len)) }
+}
+
+/// Far's FormatStr_Attribute: the letters of the attributes the file has,
+/// in Far's order (N for none), left aligned.
+pub fn attribute_letters(attributes: u32, width: usize) -> String {
+    const LETTERS: [(char, u32); 22] = [
+        ('N', 0x80),
+        ('R', 0x1),
+        ('H', 0x2),
+        ('S', 0x4),
+        ('D', 0x10),
+        ('A', 0x20),
+        ('T', 0x100),
+        ('$', 0x200),
+        ('L', 0x400),
+        ('C', 0x800),
+        ('O', 0x1000),
+        ('I', 0x2000),
+        ('E', 0x4000),
+        ('V', 0x8000),
+        ('?', 0x1_0000),
+        ('X', 0x2_0000),
+        ('P', 0x8_0000),
+        ('U', 0x10_0000),
+        ('\u{203C}', 0x4_0000),
+        ('!', 0x40_0000),
+        ('B', 0x2000_0000),
+        ('*', 0x40),
+    ];
+    let attributes = if attributes == 0 { 0x80 } else { attributes };
+    let text: String = LETTERS.iter().filter(|(_, a)| attributes & a != 0).map(|(c, _)| *c).take(width).collect();
+    left(&text, width)
+}
+
+/// Far's time column of `width`: `hh:mm` under 7 cells, else
+/// `hh:mm:ss,fffffff` cut to the width.
+pub fn time_of_width(time: Option<SystemTime>, width: usize) -> String {
+    let Some(time) = time else { return String::new() };
+    let local = chrono::DateTime::<chrono::Local>::from(time);
+    if width < 7 {
+        return local.format("%H:%M").to_string();
+    }
+    let ticks = chrono::Timelike::nanosecond(&local) % 1_000_000_000 / 100;
+    let full = format!("{},{ticks:07}", local.format("%H:%M:%S"));
+    full.chars().take(width).collect()
+}
+
+/// Far's FormatStr_DateTime for the date-and-time columns (Write, Created,
+/// Accessed): the date (the full year at 15, 16, 18, 19 or more than 21
+/// cells), a space and the time in what is left past 9 cells.
+pub fn date_and_time(time: Option<SystemTime>, width: usize) -> String {
+    let Some(at) = time else { return String::new() };
+    let local = chrono::DateTime::<chrono::Local>::from(at);
+    let full_year = matches!(width, 15 | 16 | 18 | 19) || width > 21;
+    let date = local.format(if full_year { "%d.%m.%Y" } else { "%d.%m.%y" }).to_string();
+    let clock = time_of_width(time, width.saturating_sub(9));
+    format!("{date} {clock}")
+}
+
+/// The size column with COLFLAGS_GROUPDIGITS (Alternative full): `1 234 567`.
+pub fn size_column_grouped(entry: &Entry, width: usize) -> String {
+    let have_size = !entry.is_dir && (entry.reparse.is_none() || entry.size > 0);
+    if !have_size {
+        return size_column(entry, width);
+    }
+    let group = |n: u64| {
+        let digits = n.to_string();
+        let mut out = String::new();
+        for (i, c) in digits.chars().enumerate() {
+            if i > 0 && (digits.len() - i) % 3 == 0 {
+                out.push(' ');
+            }
+            out.push(c);
+        }
+        out
+    };
+    let mut text = group(entry.size);
+    if chars(&text) > width {
+        let max = width.saturating_sub(2);
+        let mut unit = 0;
+        while unit < UNITS.len() - 1 && chars(&text) > max {
+            let divider = 1u128 << (10 * (unit + 1));
+            let units = (entry.size as u128 + divider / 2) / divider;
+            if units == 0 {
+                break;
+            }
+            unit += 1;
+            text = group(units as u64);
+        }
+        text = format!("{text} {}", UNITS[unit]);
+    }
+    fit_number(text, width)
+}
+
 pub fn right(s: &str, width: usize) -> String {
     let len = chars(s);
     if len >= width { take(s, width) } else { format!("{}{s}", " ".repeat(width - len)) }

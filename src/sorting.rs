@@ -276,7 +276,7 @@ fn natural(a: &str, b: &str) -> Ordering {
 }
 
 /// Reads what the layers need and the folder listing does not carry.
-fn fill(entries: &mut [Entry], needs: &[SortMode], dir: &Path) {
+pub fn fill(entries: &mut [Entry], needs: &[SortMode], dir: &Path) {
     if needs.contains(&Descriptions) {
         let descriptions = read_descriptions(dir);
         for entry in entries.iter_mut() {
