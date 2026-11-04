@@ -34,6 +34,8 @@ pub enum Action {
     Attributes(Box<crate::attributes::Setup>),
     /// Shift+F1: Create archive.
     CreateArchive(Box<crate::arcdialog::CreateSetup>),
+    /// F5/F6 in an archive: Extract files.
+    Extract(Box<crate::arcdialog::ExtractSetup>),
     Quit,
     /// The answer to a file that already exists.
     Conflict,
@@ -590,6 +592,11 @@ impl Dialog {
             closing: None,
             action,
         }
+    }
+
+    /// Far's FDLG_WARNING: the red colors.
+    pub(crate) fn set_warning(&mut self) {
+        self.style = Style::Warning;
     }
 
     /// From the hook: close the dialog as if `id` was pressed.
@@ -1816,7 +1823,7 @@ pub fn paint_progress(job: &Job, grid: &mut Grid) {
     if matches!(job.kind, Kind::Delete | Kind::Wipe) {
         return paint_delete_progress(job, grid);
     }
-    if job.kind == Kind::Pack {
+    if matches!(job.kind, Kind::Pack | Kind::Unpack) {
         return paint_pack_progress(job, grid);
     }
     let p = Style::Normal.palette();
@@ -1843,7 +1850,7 @@ pub fn paint_progress(job: &Job, grid: &mut Grid) {
         Kind::Copy => "Copying the file",
         Kind::Move => "Moving the file",
         Kind::Delete | Kind::Wipe => "Deleting the file",
-        Kind::Pack => "Adding the file",
+        Kind::Pack | Kind::Unpack => "Adding the file",
     };
     line(grid, verb);
     line(grid, &fit(&progress.from));

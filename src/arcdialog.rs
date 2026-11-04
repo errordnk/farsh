@@ -76,6 +76,20 @@ impl Layout {
         self.push(Item::Separator(None), Place { x: -1, y, x2: 0, y2: 0 })
     }
 
+    /// A plain label of `size` cells (arclite's label with a box size, DIF_SHOWAMPERSAND).
+    fn text_box(&mut self, text: &str, size: u16) -> usize {
+        let (x, y) = (self.x, self.y);
+        self.x += size;
+        self.grow();
+        self.push(Item::Text { text: text.into(), align: crate::dialog::Align::Left, highlight: false }, Place { x: x as i16, y, x2: self.x - 1, y2: 0 })
+    }
+
+    fn pad(&mut self, pos: u16) {
+        if pos > self.x - X_FRAME {
+            self.spacer(pos - (self.x - X_FRAME));
+        }
+    }
+
     fn label(&mut self, text: &'static str) -> usize {
         let (x, y) = (self.x, self.y);
         self.x += label_len(text);
@@ -133,6 +147,15 @@ impl Layout {
         self.push(Item::Buttons(vec![button]), Place { x: x as i16, y, x2: x + width - 1, y2: 0 })
     }
 
+    /// A button that cannot be pressed (farsh keeps no profiles or settings).
+    fn button_off(&mut self, label: &'static str, id: &'static str) -> usize {
+        let index = self.button(label, id, true);
+        if let Item::Buttons(buttons) = &mut self.items[index] {
+            buttons[0].enabled = false;
+        }
+        index
+    }
+
     /// The DIF_CENTERGROUP buttons of the last row, centered as Far centers them.
     fn center_buttons(&mut self, buttons: Vec<Button>) -> usize {
         let y = self.y;
@@ -148,6 +171,163 @@ impl Layout {
         let size = (self.client_xs + 2 * X_FRAME, self.y - Y_FRAME + 2 * Y_FRAME);
         Dialog::placed(title.into(), size, self.items, self.places, focus, hook, action)
     }
+}
+
+// ---------------------------------------------------------------- Extract files
+
+/// What Extract files works on and where its controls are (arclite's ExtractOptions).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ExtractSetup {
+    pub pick: crate::panels::ArchivePick,
+    move_files: usize,
+}
+
+/// arclite's ExtractDialog (c_client_xs 60): F5/F6 from an archive's panel.
+/// The archive is not updatable here, so "Delete files from archive" is
+/// [?] and off; "Go to target directory" is for Shift+F2 only (off).
+pub fn extract(pick: crate::panels::ArchivePick, dest: &Path) -> Dialog {
+    let mut l = Layout::new("Extract files", 60);
+    l.label("&Extract files to:");
+    l.new_line();
+    let mut dst = dest.display().to_string();
+    if !dst.ends_with(std::path::MAIN_SEPARATOR) {
+        dst.push(std::path::MAIN_SEPARATOR);
+    }
+    let dst_id = l.edit_box("dest", &dst, Some(60), true, false);
+    l.new_line();
+    l.separator();
+    l.new_line();
+    l.check_box("ignoreerrors", "&Ignore errors", 0, false);
+    l.new_line();
+    l.label("When destination file exists:");
+    l.new_line();
+    l.spacer(2);
+    l.radio("overwrite", 0, "As&k", true);
+    l.spacer(2);
+    l.radio("overwrite", 1, "&Overwrite", false);
+    l.spacer(2);
+    l.radio("overwrite", 2, "&Skip", false);
+    l.new_line();
+    l.spacer(2);
+    l.radio("overwrite", 3, "&Rename", false);
+    l.spacer(2);
+    l.radio("overwrite", 4, "&Append", false);
+    l.new_line();
+    let move_files = l.check_box("movefiles", "&Delete files from archive after extraction", 2, true);
+    l.new_line();
+    l.check_box("deletearchive", "De&lete archive after extraction", 0, false);
+    l.new_line();
+    l.check_box("separatedir", "Ex&tract archive into separate directory", 2, true);
+    l.new_line();
+    let open_dir = l.check_box("opendir", "&Go to target directory after extraction", 2, true);
+    l.new_line();
+    l.label("Pass&word:");
+    l.edit_box("password", pick.view.password.as_deref().unwrap_or(""), Some(20), false, true);
+    l.new_line();
+    l.separator();
+    l.new_line();
+    l.center_buttons(vec![
+        Button { label: "OK", id: "ok", default: true, enabled: true, stay: false },
+        Button { label: "Cancel", id: "cancel", default: false, enabled: true, stay: false },
+        Button { label: "Sa&ve settings", id: "saveparams", default: false, enabled: false, stay: true },
+    ]);
+    l.new_line();
+    let setup = ExtractSetup { pick, move_files };
+    let mut dialog = l.finish("Extract files", dst_id, Some(extract_hook), Action::Extract(Box::new(setup)));
+    // triUndef: the archive cannot lose files here; the folder to go to is Shift+F2's
+    dialog.enable(move_files, false);
+    dialog.enable(open_dir, false);
+    dialog
+}
+
+/// ExtractDialog's dialog_proc: "Delete files from archive" is on only for
+/// an updatable archive whose file stays (`move_files != triUndef &&
+/// !delete_archive`); farsh's archives are never updatable, so it stays off.
+fn extract_hook(dialog: &mut Dialog, event: Event) {
+    let Action::Extract(setup) = dialog.action_mut() else { return };
+    let move_files = setup.move_files;
+    if event == Event::Toggled("deletearchive") {
+        dialog.enable(move_files, false);
+    }
+}
+
+// ---------------------------------------------------------------- Overwrite file
+
+/// arclite's OverwriteDialog (c_client_xs 60, FDLG_WARNING) for extracting:
+/// the file, the question, source and destination with size and time (the
+/// newer one marked), Remember choice, Overwrite/Skip/Rename/Append/Cancel.
+pub fn overwrite(path: &Path, src: (u64, Option<std::time::SystemTime>), dst: (u64, Option<std::time::SystemTime>)) -> Dialog {
+    let mut l = Layout::new("Overwrite file", 60);
+    let shown = fit_str(&path.display().to_string(), 60);
+    l.text_box(&shown, 60);
+    l.new_line();
+    l.label("Destination file already exists. Overwrite?");
+    l.new_line();
+    l.separator();
+    l.new_line();
+    let (src_label, dst_label) = ("Source:", "Destination:");
+    let label_pad = src_label.len().max(dst_label.len()) as u16 + 1;
+    let (src_size, dst_size) = (src.0.to_string(), dst.0.to_string());
+    let size_pad = label_pad + src_size.len().max(dst_size.len()) as u16 + 1;
+    let newer = |a: Option<std::time::SystemTime>, b: Option<std::time::SystemTime>| matches!((a, b), (Some(a), Some(b)) if a > b);
+    for (label, (size, time), other) in [(src_label, (&src_size, src.1), dst.1), (dst_label, (&dst_size, dst.1), src.1)] {
+        l.text_box(label, label.len() as u16);
+        l.pad(label_pad);
+        l.text_box(size, size.len() as u16);
+        l.pad(size_pad);
+        let when = file_time(time);
+        l.text_box(&when, when.chars().count() as u16);
+        if newer(time, other) {
+            l.spacer(1);
+            l.label("(newer)");
+        }
+        l.new_line();
+    }
+    l.separator();
+    l.new_line();
+    l.check_box("remember", "&Remember choice", 0, false);
+    l.new_line();
+    l.separator();
+    l.new_line();
+    let button = |label, id, default| Button { label, id, default, enabled: true, stay: false };
+    let buttons = vec![
+        button("&Overwrite", "overwrite", true),
+        button("&Skip", "skip", false),
+        button("R&ename", "rename", false),
+        button("A&ppend", "append", false),
+        button("&Cancel", "cancel", false),
+    ];
+    // the spacer(1) arclite puts between them is in the group's own spacing
+    let focus = l.center_buttons(buttons);
+    l.new_line();
+    let mut dialog = l.finish("Overwrite file", focus, None, Action::Conflict);
+    dialog.set_warning();
+    dialog
+}
+
+/// arclite's fit_str: the middle replaced with `...`.
+fn fit_str(text: &str, size: usize) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    if chars.len() <= size {
+        return text.to_string();
+    }
+    if size <= 3 {
+        return chars[..size].iter().collect();
+    }
+    let keep = size - 3;
+    let mut out: String = chars[..keep / 2].iter().collect();
+    out.push_str("...");
+    out.extend(&chars[chars.len() - (keep - keep / 2)..]);
+    out
+}
+
+/// arclite's format_file_time: the locale's short date and time.
+fn file_time(time: Option<std::time::SystemTime>) -> String {
+    let Some(time) = time else { return String::new() };
+    let format = crate::attributes::Format::system();
+    let (date, clock) = format.to_strings(time);
+    let clock: String = clock.chars().take(8).collect();
+    format!("{} {clock}", date.trim())
 }
 
 // ---------------------------------------------------------------- Create archive
@@ -218,7 +398,7 @@ pub fn create_archive(sources: Vec<PathBuf>, base: &Path) -> Dialog {
     l.label("&Profile:");
     ids.profile = l.combo("profile", vec![""], 0, Some(30));
     l.spacer(1);
-    l.button("Save", "saveprofile", true);
+    l.button_off("Save", "saveprofile");
     l.spacer(1);
     ids.delete_profile = l.button("Delete", "deleteprofile", true);
     l.new_line();
@@ -312,7 +492,7 @@ pub fn create_archive(sources: Vec<PathBuf>, base: &Path) -> Dialog {
     l.center_buttons(vec![
         Button { label: "OK", id: "ok", default: true, enabled: true, stay: false },
         Button { label: "Cancel", id: "cancel", default: false, enabled: true, stay: false },
-        Button { label: "Save settings", id: "saveparams", default: false, enabled: true, stay: true },
+        Button { label: "Save settings", id: "saveparams", default: false, enabled: false, stay: true },
     ]);
     l.new_line();
 
@@ -456,9 +636,6 @@ fn create_hook(dialog: &mut Dialog, event: Event) {
         Event::Button("evaluate") => {
             let path = eval_arc_path(dialog, &setup).display().to_string();
             dialog.set_text_at(setup.ids.arc_path, &path);
-        }
-        Event::Button("saveparams" | "saveprofile") => {
-            dialog.message_over("Create archive", &["Settings saved"], &[("OK", "ok")]);
         }
         Event::Closing("ok") => {
             let options = match archive_options(dialog, &setup) {
@@ -623,5 +800,49 @@ mod tests {
         assert!(matches!(dialog.key(crossterm::event::KeyEvent::new(crossterm::event::KeyCode::Enter, crossterm::event::KeyModifiers::NONE)), crate::dialog::Outcome::Open));
         assert!(screen(&dialog, 78, 25).iter().any(|row| row.contains("Passwords don't match")));
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn extract_files_and_overwrite_file_are_laid_out_as_arclite_lays_them_out() {
+        let listing = crate::archive::Listing { chain: vec![Format::Zip], items: vec![] };
+        let view = crate::panels::ArchiveView { file: PathBuf::from("a.zip"), listing, dir: String::new(), password: None };
+        let pick = crate::panels::ArchivePick { view, items: vec!["x".into()] };
+        let dest = std::env::temp_dir();
+        let dialog = extract(pick, &dest);
+        // 70 by 18 (client 60 by 14)
+        let rows = screen(&dialog, 70, 18);
+        let row = |y: usize| rows[y].clone();
+        assert_eq!(at(&row(1), 27, 15), " Extract files ");
+        assert_eq!(at(&row(2), 5, 17), "Extract files to:");
+        assert_eq!(at(&row(3), 64, 1), "\u{2193}");
+        assert_eq!(at(&row(5), 5, 17), "[ ] Ignore errors");
+        assert_eq!(at(&row(6), 5, 29), "When destination file exists:");
+        assert_eq!(at(&row(7), 7, 7), "(\u{2022}) Ask");
+        assert_eq!(at(&row(7), 16, 13), "( ) Overwrite");
+        assert_eq!(at(&row(7), 31, 8), "( ) Skip");
+        assert_eq!(at(&row(8), 7, 10), "( ) Rename");
+        assert_eq!(at(&row(8), 19, 10), "( ) Append");
+        assert_eq!(at(&row(9), 5, 46), "[?] Delete files from archive after extraction");
+        assert_eq!(at(&row(10), 5, 35), "[ ] Delete archive after extraction");
+        assert_eq!(at(&row(11), 5, 43), "[?] Extract archive into separate directory");
+        assert_eq!(at(&row(12), 5, 43), "[?] Go to target directory after extraction");
+        assert_eq!(at(&row(13), 5, 9), "Password:");
+        assert_eq!(at(&row(15), 17, 35), "{ OK } [ Cancel ] [ Save settings ]");
+        assert_eq!(at(&row(16), 3, 1), "\u{255A}");
+
+        let when = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_800_000_000);
+        let older = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        let dialog = overwrite(Path::new("C:/x/a.txt"), (17, Some(when)), (3, Some(older)));
+        let rows = screen(&dialog, 70, 14);
+        assert_eq!(at(&rows[1], 27, 16), " Overwrite file ");
+        assert_eq!(at(&rows[2], 5, 10), "C:/x/a.txt");
+        assert_eq!(at(&rows[3], 5, 43), "Destination file already exists. Overwrite?");
+        assert_eq!(at(&rows[5], 5, 7), "Source:");
+        assert_eq!(at(&rows[5], 18, 2), "17");
+        assert!(rows[5].contains("(newer)") && !rows[6].contains("(newer)"));
+        assert_eq!(at(&rows[6], 5, 12), "Destination:");
+        assert_eq!(at(&rows[6], 18, 1), "3");
+        assert_eq!(at(&rows[8], 5, 19), "[ ] Remember choice");
+        assert!(rows[10].contains("{ Overwrite } [ Skip ] [ Rename ] [ Append ] [ Cancel ]"), "{:?}", rows[10]);
     }
 }

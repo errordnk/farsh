@@ -123,8 +123,45 @@ fn stripe_len(cols: &[(Col, usize)]) -> usize {
         .unwrap_or(n.max(1))
 }
 
+/// An archive the panel shows (arclite's plugin panel): the file, what is
+/// in it, the folder inside (`""` is the top).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ArchiveView {
+    pub file: PathBuf,
+    pub listing: crate::archive::Listing,
+    pub dir: String,
+    pub password: Option<String>,
+}
+
+impl ArchiveView {
+    /// arclite's PanelTitle: `ArcLite:zip:a.zip`, then `:\folder\inside`.
+    pub fn title(&self) -> String {
+        let name = self.file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let mut title = format!("ArcLite:{}:{name}", self.listing.chain_name());
+        if !self.dir.is_empty() {
+            title.push_str(&format!(":\\{}", self.dir.replace('/', "\\")));
+        }
+        title
+    }
+
+    /// The path inside the archive of `name` in the current folder.
+    pub fn inner(&self, name: &str) -> String {
+        if self.dir.is_empty() { name.to_string() } else { format!("{}/{name}", self.dir) }
+    }
+}
+
+/// What F3/F5/F6 asked of an archive the panel shows.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ArchivePick {
+    pub view: ArchiveView,
+    /// Paths inside the archive.
+    pub items: Vec<String>,
+}
+
 pub struct Panel {
     pub dir: PathBuf,
+    /// Shown instead of `dir` while an archive is open in the panel.
+    pub archive: Option<ArchiveView>,
     pub entries: Vec<Entry>,
     pub cursor: usize,
     /// Names of the marked entries.
@@ -145,6 +182,7 @@ impl Panel {
     pub fn new(dir: PathBuf) -> Self {
         let mut panel = Self {
             dir,
+            archive: None,
             entries: Vec::new(),
             cursor: 0,
             marked: HashSet::new(),
@@ -164,6 +202,30 @@ impl Panel {
     /// panel's sort order; the cursor goes to `select` if it is there, else
     /// to the top. Marks are dropped.
     pub fn reload(&mut self, select: Option<&str>) {
+        if let Some(view) = &self.archive {
+            // arclite's GetFindData, with OPIF_ADDDOTS: `..` even at the top
+            let mut entries: Vec<Entry> = view
+                .listing
+                .children(&view.dir)
+                .iter()
+                .enumerate()
+                .map(|(position, item)| Entry {
+                    name: item.path.rsplit('/').next().unwrap_or(&item.path).to_string(),
+                    is_dir: item.is_dir,
+                    size: item.size,
+                    modified: item.modified,
+                    position,
+                    ..Entry::default()
+                })
+                .collect();
+            entries.insert(0, Entry::up(None));
+            self.marked.clear();
+            sorting::sort(&mut entries, &self.sorting, &self.marked, &self.dir);
+            self.entries = entries;
+            self.cursor = select.and_then(|name| self.entries.iter().position(|e| e.name == name)).unwrap_or(0);
+            self.top = 0;
+            return;
+        }
         let mut entries = listing::read(&self.dir);
         if self.dir.parent().is_some() {
             let modified = std::fs::metadata(&self.dir).and_then(|m| m.modified()).ok();
@@ -308,7 +370,39 @@ impl Panel {
     /// panel stays where it was.
     pub fn enter(&mut self) -> Result<(), String> {
         let Some(entry) = self.entries.get(self.cursor).cloned() else { return Ok(()) };
+        if let Some(view) = &mut self.archive {
+            if entry.is_up() {
+                match view.dir.rsplit_once('/') {
+                    Some((parent, name)) => {
+                        let name = name.to_string();
+                        view.dir = parent.to_string();
+                        self.reload(Some(&name));
+                    }
+                    None if !view.dir.is_empty() => {
+                        let name = std::mem::take(&mut view.dir);
+                        self.reload(Some(&name));
+                    }
+                    // `..` at the top of the archive: back to its folder, on it
+                    None => {
+                        let file = view.file.file_name().map(|n| n.to_string_lossy().into_owned());
+                        self.archive = None;
+                        self.reload(file.as_deref());
+                    }
+                }
+            } else if entry.is_dir {
+                view.dir = view.inner(&entry.name);
+                self.reload(None);
+            }
+            return Ok(());
+        }
         if !entry.is_dir {
+            // Enter on an archive opens it (arclite's OpenFilePlugin)
+            let path = self.dir.join(&entry.name);
+            if crate::archive::detect(&path).is_some() {
+                let listing = crate::archive::list(&path, None).map_err(|error| format!("{}: {error}", path.display()))?;
+                self.archive = Some(ArchiveView { file: path, listing, dir: String::new(), password: None });
+                self.reload(None);
+            }
             return Ok(());
         }
         if entry.is_up() {
@@ -403,7 +497,10 @@ impl Panel {
 
         // the folder in the top border
         let max = inner;
-        let mut title = self.dir.display().to_string();
+        let mut title = match &self.archive {
+            Some(view) => view.title(),
+            None => self.dir.display().to_string(),
+        };
         if max >= 2 {
             title = listing::truncate_path(&title, max - 2);
         }
@@ -541,6 +638,10 @@ pub enum Request {
     Attributes(Vec<PathBuf>),
     /// Shift+F1: put these into a new archive.
     CreateArchive(Vec<PathBuf>),
+    /// F5/F6 in an archive (to the other panel's folder), Shift+F2 on archives.
+    Extract(ArchivePick, PathBuf),
+    /// F3 on a file in an archive.
+    ViewInArchive(ArchivePick),
 }
 
 /// Where the link at `path` points, as an ordinary path: a relative target
@@ -601,8 +702,48 @@ impl Panels {
         if self.active_dir() != dir {
             let panel = self.active();
             panel.dir = dir;
+            panel.archive = None;
             panel.reload(None);
         }
+    }
+
+    /// What the selection (or the entry under the cursor) is inside the
+    /// archive the active panel shows, if it shows one.
+    pub fn archive_pick(&self) -> Option<ArchivePick> {
+        let panel = self.active_ref();
+        let view = panel.archive.clone()?;
+        let names: Vec<String> = if panel.marked.is_empty() {
+            panel.current().filter(|e| !e.is_up()).map(|e| vec![e.name.clone()]).unwrap_or_default()
+        } else {
+            panel.entries.iter().filter(|e| panel.marked.contains(&e.name)).map(|e| e.name.clone()).collect()
+        };
+        let items = names.iter().map(|name| view.inner(name)).collect();
+        Some(ArchivePick { view, items })
+    }
+
+    /// Shift+F2 on an archive file: all of it, to the other panel's folder.
+    pub fn extract_archive_request(&mut self) -> Key {
+        if self.in_archive() {
+            return Key::Taken;
+        }
+        let Some(path) = self.active_ref().sources().into_iter().next().filter(|p| p.is_file()) else { return Key::Taken };
+        if crate::archive::detect(&path).is_none() {
+            return Key::Taken;
+        }
+        let other = self.other_dir().to_path_buf();
+        match crate::archive::list(&path, None) {
+            Ok(listing) => {
+                let items = listing.children("").iter().map(|i| i.path.clone()).collect();
+                let view = ArchiveView { file: path, listing, dir: String::new(), password: None };
+                Key::Ask(Request::Extract(ArchivePick { view, items }, other))
+            }
+            Err(error) => Key::Ask(Request::Error(format!("{}: {error}", path.display()))),
+        }
+    }
+
+    /// Whether the active panel shows an archive.
+    pub fn in_archive(&self) -> bool {
+        self.active_ref().archive.is_some()
     }
 
     /// The folder the left or right panel shows.
@@ -696,6 +837,12 @@ impl Panels {
     /// Reads both panels again (after a copy, a delete...); the active
     /// panel's cursor goes to `select` if given.
     pub fn refresh(&mut self, select: Option<&str>) {
+        // an archive that is gone (deleted after extraction) is left
+        for panel in [&mut self.left, &mut self.right] {
+            if panel.archive.as_ref().is_some_and(|view| !view.file.exists()) {
+                panel.archive = None;
+            }
+        }
         let keep = self.active_ref().current().map(|e| e.name.clone());
         let other_keep = {
             let other = if self.right_active { &self.left } else { &self.right };
@@ -750,9 +897,11 @@ impl Panels {
             KeyCode::F(12) if ctrl_only => return Key::Ask(Request::SortMenu),
             // Shift+F1: arclite's "Add to archive"
             KeyCode::F(1) if key.modifiers == KeyModifiers::SHIFT => {
-                let sources = self.active_ref().sources();
+                let sources = if self.in_archive() { vec![] } else { self.active_ref().sources() };
                 return if sources.is_empty() { Key::Taken } else { Key::Ask(Request::CreateArchive(sources)) };
             }
+            // Shift+F2: arclite's "Extract files" of the archive under the cursor
+            KeyCode::F(2) if key.modifiers == KeyModifiers::SHIFT => return self.extract_archive_request(),
             // Far's Alt+Del: Wipe
             KeyCode::Delete if key.modifiers == KeyModifiers::ALT => return self.wipe_request(),
             // Far's Ctrl+A, whatever is typed
@@ -841,17 +990,38 @@ impl Panels {
 
     /// Alt+Del: wipe the selection, or the entry under the cursor (not `..`).
     pub fn wipe_request(&mut self) -> Key {
+        if self.in_archive() {
+            return Key::Taken;
+        }
         let sources = self.active_ref().sources();
         if sources.is_empty() { Key::Taken } else { Key::Ask(Request::Wipe(sources)) }
     }
 
     /// Ctrl+A: the selection's attributes, or the entry's under the cursor (not `..`).
     pub fn attributes_request(&mut self) -> Key {
+        if self.in_archive() {
+            return Key::Taken;
+        }
         let sources = self.active_ref().sources();
         if sources.is_empty() { Key::Taken } else { Key::Ask(Request::Attributes(sources)) }
     }
 
     pub fn function_key(&mut self, n: u8) -> Key {
+        if let Some(pick) = self.archive_pick() {
+            // arclite's panel: F5/F6 extract (the archive is not updated:
+            // farsh does not write into archives), F3 views a file
+            let other = self.other_dir().to_path_buf();
+            let file_picked = pick.items.len() == 1 && pick.view.listing.items.iter().any(|i| i.path == pick.items[0] && !i.is_dir);
+            let request = match n {
+                3 => file_picked.then(|| Request::ViewInArchive(pick)),
+                5 | 6 => (!pick.items.is_empty()).then(|| Request::Extract(pick, other)),
+                7 | 8 => Some(Request::Error("farsh does not change archives: only extracting from them".into())),
+                9 => Some(Request::Menu),
+                10 => Some(Request::Quit),
+                _ => None,
+            };
+            return request.map_or(Key::Taken, Key::Ask);
+        }
         let sources = self.active_ref().sources();
         let file = sources.first().filter(|path| path.is_file()).cloned();
         let other = self.other_dir().to_path_buf();
@@ -1209,6 +1379,74 @@ mod tests {
         assert_eq!(grid.cell_mut(0, 0).unwrap().text, "\u{2554}");
         assert_eq!(grid.cell_mut(40, 0).unwrap().text, "\u{2554}");
         assert_eq!(grid.cell_mut(0, 23).unwrap().text, "1");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    fn zip_of_scratch(name: &str) -> PathBuf {
+        let dir = scratch(name);
+        let options = crate::archive::Options {
+            path: dir.join("out.zip"),
+            format: crate::archive::Format::Zip,
+            level: 5,
+            method: "Deflate".into(),
+            solid: false,
+            password: None,
+            encrypt_header: false,
+            volume_size: None,
+            move_files: false,
+            ignore_errors: false,
+        };
+        struct Quiet;
+        impl crate::archive::Progress for Quiet {
+            fn file(&mut self, _: &crate::archive::Entry) -> std::io::Result<()> {
+                Ok(())
+            }
+            fn bytes(&mut self, _: u64) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        crate::archive::create(&options, &[dir.join("Alpha"), dir.join("zeta.txt")], &mut Quiet).unwrap();
+        std::fs::write(dir.join("Alpha").join("inner.txt"), "in").unwrap();
+        dir
+    }
+
+    #[test]
+    fn enter_opens_an_archive_as_arclite_does_and_dots_leave_it_on_the_archive() {
+        let dir = zip_of_scratch("arcpanel");
+        let mut panel = Panel::new(dir.clone());
+        panel.cursor = panel.entries.iter().position(|e| e.name == "out.zip").unwrap();
+        panel.enter().unwrap();
+        assert_eq!(panel.archive.as_ref().unwrap().title(), "ArcLite:zip:out.zip");
+        assert_eq!(names(&panel), ["..", "Alpha", "zeta.txt"]);
+        panel.cursor = 1;
+        panel.enter().unwrap();
+        assert_eq!(panel.archive.as_ref().unwrap().title(), "ArcLite:zip:out.zip:\\Alpha");
+        assert_eq!(names(&panel), [".."], "Alpha was empty when it went in");
+        panel.enter().unwrap();
+        assert_eq!(panel.entries[panel.cursor].name, "Alpha", "back up, on the folder");
+        panel.cursor = 0;
+        panel.enter().unwrap();
+        assert!(panel.archive.is_none());
+        assert_eq!(panel.dir, dir);
+        assert_eq!(panel.entries[panel.cursor].name, "out.zip", "out of the archive, on it");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn f5_in_an_archive_asks_to_extract_and_f8_says_farsh_does_not_change_archives() {
+        let dir = zip_of_scratch("arcf5");
+        let mut panels = Panels::new(dir.clone());
+        let at = panels.left.entries.iter().position(|e| e.name == "out.zip").unwrap();
+        panels.left.cursor = at;
+        panels.key(key(KeyCode::Enter), true);
+        panels.key(key(KeyCode::Down), true);
+        panels.key(key(KeyCode::Down), true); // zeta.txt
+        let Key::Ask(Request::Extract(pick, dest)) = panels.key(key(KeyCode::F(5)), true) else { panic!("F5 extracts") };
+        assert_eq!(pick.items, ["zeta.txt"]);
+        assert_eq!(dest, dir);
+        assert!(matches!(panels.key(key(KeyCode::F(8)), true), Key::Ask(Request::Error(_))));
+        assert!(matches!(panels.key(key(KeyCode::F(3)), true), Key::Ask(Request::ViewInArchive(_))));
+        assert_eq!(panels.key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL), true), Key::Taken, "no Ctrl+A in an archive");
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

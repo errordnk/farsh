@@ -19,6 +19,8 @@ pub enum Kind {
     Wipe,
     /// Shift+F1: an archive is made (`crate::archive`).
     Pack,
+    /// F5 from an archive: files come out of it.
+    Unpack,
 }
 
 impl Kind {
@@ -30,6 +32,7 @@ impl Kind {
             Kind::Delete => "Delete",
             Kind::Wipe => "Wipe",
             Kind::Pack => "Creating archive...",
+            Kind::Unpack => "Extracting files...",
         }
     }
 }
@@ -102,6 +105,8 @@ pub enum Question {
     ReadOnly(PathBuf),
     /// Wipe: "Several hard links link to this file."
     HardLinks(PathBuf),
+    /// Extracting: arclite's "Overwrite file" (the new and the old: size, time).
+    Exists { path: PathBuf, new: (u64, Option<SystemTime>), old: (u64, Option<SystemTime>) },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -114,6 +119,10 @@ pub enum Answer {
     All,
     /// Delete/Wipe: skip this one and every other like it.
     SkipAll,
+    /// Extracting: the new one under a free name.
+    Rename { remember: bool },
+    /// Extracting: the new one written at the end of the old.
+    Append { remember: bool },
     Cancel,
 }
 
@@ -199,6 +208,12 @@ pub struct Reporter<'a>(&'a mut Worker);
 impl Reporter<'_> {
     pub fn progress(&mut self) -> &mut Progress {
         &mut self.0.progress
+    }
+
+    /// Asks the user and waits for the answer (`Err` when cancelled).
+    pub fn ask(&mut self, question: Question) -> std::io::Result<Answer> {
+        self.0.send(true);
+        self.0.ask(question)
     }
 
     /// Sends the progress (at most every 50 ms); `Err` when the user cancelled.
@@ -341,7 +356,7 @@ impl Worker {
                 self.copy_all(&plan)
             }
             Kind::Move => self.move_all(items),
-            Kind::Pack => Ok(()),
+            Kind::Pack | Kind::Unpack => Ok(()),
             Kind::Delete | Kind::Wipe => {
                 for (src, _) in items {
                     self.remove(src)?;
@@ -898,6 +913,7 @@ mod tests {
                     Question::FolderNotEmpty(path) => format!("folder {}", path.file_name().unwrap().to_string_lossy()),
                     Question::ReadOnly(path) => format!("read only {}", path.file_name().unwrap().to_string_lossy()),
                     Question::HardLinks(path) => format!("hard links {}", path.file_name().unwrap().to_string_lossy()),
+                    Question::Exists { path, .. } => format!("exists {}", path.display()),
                 });
                 job.answer(answers.get(asked.len() - 1).copied().unwrap_or(Answer::Cancel));
             }

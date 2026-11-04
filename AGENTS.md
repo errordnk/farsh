@@ -76,9 +76,16 @@ over the shell screen.
   `src/arcdialog.rs` ports it (`Layout`) and the dialogs line by line, with
   their dialog procedures as hooks (set_control_state, change_extension,
   the checks on OK as a message over the dialog). Shift+F1 is Create
-  archive. Known differences: no SFX (7-Zip's modules), no profiles or
-  saved settings, zip cannot be written with LZMA or Deflate64 nor 7z with
-  Deflate64 (an error says so).
+  archive. Enter on an archive opens it in the panel as arclite's plugin
+  panel (`ArchiveView`: title `ArcLite:zip:a.zip:\dir`, `..` even at the
+  top, leaving it lands on the archive); F5/F6 there and Shift+F2 on an
+  archive open Extract files, a file in the way asks arclite's Overwrite
+  file (Overwrite/Skip/Rename/Append, Remember choice), F3 views a file
+  from inside. Known differences: archives are read-only (no adding,
+  deleting or F7 inside: a message says so), no SFX (7-Zip's modules), no
+  profiles or saved settings (those buttons are disabled), zip cannot be
+  written with LZMA or Deflate64 nor 7z with Deflate64 (an error says so),
+  Shift+F2 cannot "Go to target directory".
 - Enter on a link: a junction or symlink is entered by its own path; one
   that denies listing itself (Windows' compatibility junctions `My Documents`,
   `Application Data`, `Start Menu`...) is followed to its target, as Far does.
