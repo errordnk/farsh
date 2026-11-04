@@ -1,6 +1,13 @@
 //! Far style dialogs: a grey (or red, for warnings) box with a shadow, a
-//! double frame with the title in it, separators, an input line, radio
-//! buttons, a drop-down, check boxes and buttons, with hot keys.
+//! double frame with the title in it, separators, input lines, radio
+//! buttons, drop-downs, check boxes and buttons, with hot keys.
+//!
+//! The geometry is Far Manager 3's own: a box `W` columns wide with the
+//! frame 3 columns and 1 row in (message.cpp, dialog.cpp), the controls
+//! from column 5 of the box to `W - 6`, a history arrow at `W - 5`, button
+//! rows centered as DIF_CENTERGROUP does. Messages (message.cpp) and
+//! DialogBuilder dialogs are `MaxLength + 10` wide; the dialogs Far lays
+//! out by hand (copy.cpp, mkdir.cpp) have their fixed width.
 
 use std::path::PathBuf;
 use std::time::SystemTime;
@@ -42,55 +49,84 @@ struct Palette {
     focus_fg: Color,
     edit_bg: Color,
     edit_fg: Color,
+    /// An input line's text before the first key (Far's "unchanged" color).
+    unchanged_fg: Color,
+    /// A focused drop-down.
+    selected_bg: Color,
+    selected_fg: Color,
     dim: Color,
 }
 
 impl Style {
     fn palette(self) -> Palette {
+        let common = Palette {
+            bg: palette::bg(palette::LIGHT_GRAY),
+            fg: palette::fg(palette::BLACK),
+            hot: palette::fg(palette::YELLOW),
+            focus_bg: palette::bg(palette::CYAN),
+            focus_fg: palette::fg(palette::BLACK),
+            edit_bg: palette::bg(palette::CYAN),
+            edit_fg: palette::fg(palette::BLACK),
+            unchanged_fg: palette::fg(palette::LIGHT_GRAY),
+            selected_bg: palette::bg(palette::BLACK),
+            selected_fg: palette::fg(palette::WHITE),
+            dim: palette::fg(palette::DARK_GRAY),
+        };
         match self {
             // Far's COL_DIALOG*: black on light gray, yellow hotkeys, cyan focus and edits
-            Style::Normal => Palette {
-                bg: palette::bg(palette::LIGHT_GRAY),
-                fg: palette::fg(palette::BLACK),
-                hot: palette::fg(palette::YELLOW),
-                focus_bg: palette::bg(palette::CYAN),
-                focus_fg: palette::fg(palette::BLACK),
-                edit_bg: palette::bg(palette::CYAN),
-                edit_fg: palette::fg(palette::BLACK),
-                dim: palette::fg(palette::DARK_GRAY),
-            },
+            Style::Normal => common,
             // COL_WARNDIALOG*: white on red, the focus black on light gray
             Style::Warning => Palette {
                 bg: palette::bg(palette::RED),
                 fg: palette::fg(palette::WHITE),
-                hot: palette::fg(palette::YELLOW),
                 focus_bg: palette::bg(palette::LIGHT_GRAY),
-                focus_fg: palette::fg(palette::BLACK),
-                edit_bg: palette::bg(palette::CYAN),
-                edit_fg: palette::fg(palette::BLACK),
-                dim: palette::fg(palette::DARK_GRAY),
+                ..common
             },
         }
     }
 }
 
 pub struct Button {
-    /// With `&` before the hot key.
+    /// With `&` before the hot key, if it has one.
     pub label: &'static str,
     pub id: &'static str,
     pub default: bool,
     pub enabled: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Align {
+    Left,
+    Center,
+}
+
 pub enum Item {
-    Text { text: String, center: bool },
-    /// The `↓` at its end says it has a history in Far; here it only shows that it is a field.
-    Edit { id: &'static str, text: Vec<char>, cursor: usize },
+    /// Plain text: `&` is just a character (DIF_SHOWAMPERSAND). A
+    /// highlighted line is in the hot color (the names Delete lists).
+    Text { text: String, align: Align, highlight: bool },
+    /// A text with a hot key (`&`, `&&` for a plain one) that focuses the next control.
+    Label(String),
+    /// An input line from column `x` of the box to `W - 6`, its label (if
+    /// any) at column 5; `history` puts Far's `↓` after it. Until the first
+    /// key the text is "unchanged": a typed character replaces all of it.
+    Edit { id: &'static str, label: Option<&'static str>, x: u16, text: Vec<char>, cursor: usize, unchanged: bool, enabled: bool, history: bool },
     Radio { id: &'static str, label: &'static str, options: Vec<&'static str>, selected: usize },
     Check { id: &'static str, label: &'static str, checked: bool, enabled: bool },
-    Combo { id: &'static str, label: &'static str, options: Vec<&'static str>, selected: usize },
+    /// A drop-down list from column `x` of the box, its label at column 5.
+    Combo { id: &'static str, label: &'static str, x: u16, options: Vec<&'static str>, selected: usize, unchanged: bool },
     Separator(Option<&'static str>),
     Buttons(Vec<Button>),
+}
+
+/// How the box is sized and placed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Layout {
+    /// Far's Message(): as wide as the content, one row higher than centered.
+    Message,
+    /// A DialogBuilder dialog: as wide as the content, centered.
+    Builder,
+    /// A dialog with its own width, centered.
+    Fixed(u16),
 }
 
 /// What the dialog's controls say.
@@ -118,8 +154,7 @@ impl Values {
 pub struct Dialog {
     title: String,
     style: Style,
-    /// The least frame width wanted.
-    width: u16,
+    layout: Layout,
     items: Vec<Item>,
     focus: usize,
     /// The focused button, when the focus is on a row of buttons.
@@ -137,61 +172,81 @@ pub enum Outcome {
 // ---------------------------------------------------------------- building
 
 fn text(text: impl Into<String>) -> Item {
-    Item::Text { text: text.into(), center: false }
+    Item::Text { text: text.into(), align: Align::Left, highlight: false }
 }
 
 fn centered(text: impl Into<String>) -> Item {
-    Item::Text { text: text.into(), center: true }
+    Item::Text { text: text.into(), align: Align::Center, highlight: false }
 }
 
 fn edit(id: &'static str, value: &str) -> Item {
     let text: Vec<char> = value.chars().collect();
     let cursor = text.len();
-    Item::Edit { id, text, cursor }
+    let unchanged = !text.is_empty();
+    Item::Edit { id, label: None, x: 5, text, cursor, unchanged, enabled: true, history: true }
 }
 
 fn button(label: &'static str, id: &'static str, default: bool) -> Button {
     Button { label, id, default, enabled: true }
 }
 
+/// `"name"` only when it starts or ends with a space (Far's QuoteOuterSpace).
+pub fn quote_outer_space(name: &str) -> String {
+    if name.starts_with(' ') || name.ends_with(' ') {
+        format!("\"{name}\"")
+    } else {
+        name.to_string()
+    }
+}
+
+/// `&` doubled, to show it in a label with a hot key.
+pub fn escape_ampersands(text: &str) -> String {
+    text.replace('&', "&&")
+}
+
 impl Dialog {
-    /// F5 and F6: where to, and how.
+    /// F5 and F6: where to, and how (copy.cpp: 76 wide).
     pub fn copy_or_move(kind: Kind, label: String, dest: &str, action: Action) -> Self {
         let moving = kind == Kind::Move;
-        let mut items = vec![text(label), edit("dest", dest), Item::Separator(None)];
-        items.push(Item::Radio { id: "access", label: "&Access rights:", options: vec!["Default", "Copy", "Inherit"], selected: 0 });
-        items.push(Item::Separator(None));
-        items.push(Item::Combo { id: "existing", label: "Already e&xisting files:", options: vec!["Ask", "Overwrite", "Skip"], selected: 0 });
-        if !moving {
-            items.push(Item::Check { id: "timestamps", label: "&Preserve all timestamps", checked: false, enabled: true });
-            items.push(Item::Check { id: "links", label: "Cop&y contents of symbolic links", checked: false, enabled: true });
-        }
-        items.push(Item::Check { id: "multiple", label: "Process &multiple destinations", checked: false, enabled: true });
-        items.push(Item::Separator(None));
-        items.push(Item::Check { id: "filter", label: "&Use filter", checked: false, enabled: false });
-        items.push(Item::Separator(None));
-        let ok = if moving { "&Rename" } else { "&Copy" };
-        items.push(Item::Buttons(vec![
-            button(ok, "ok", true),
-            Button { label: "&Filter", id: "filter", default: false, enabled: false },
-            button("Ca&ncel", "cancel", false),
-        ]));
-        Self { title: if moving { "Rename/Move" } else { "Copy" }.into(), style: Style::Normal, width: 70, items, focus: 1, button: 0, action }
+        let items = vec![
+            Item::Label(label),
+            edit("dest", dest),
+            Item::Separator(None),
+            Item::Radio { id: "access", label: "&Access rights:", options: vec!["Defau&lt", "Co&py", "&Inherit"], selected: 0 },
+            Item::Separator(None),
+            Item::Combo { id: "existing", label: "Already e&xisting files:", x: 29, options: vec!["Ask", "Overwrite", "Skip"], selected: 0, unchanged: true },
+            Item::Check { id: "timestamps", label: "Preserve all timestamps", checked: false, enabled: true },
+            Item::Check { id: "links", label: "Cop&y contents of symbolic links", checked: false, enabled: true },
+            // a move goes to one place only
+            Item::Check { id: "multiple", label: "Process &multiple destinations", checked: false, enabled: !moving },
+            Item::Separator(None),
+            Item::Check { id: "filter", label: "&Use filter", checked: false, enabled: false },
+            Item::Separator(None),
+            Item::Buttons(vec![
+                button(if moving { "&Rename" } else { "&Copy" }, "ok", true),
+                Button { label: "&Filter", id: "filter", default: false, enabled: false },
+                button("Ca&ncel", "cancel", false),
+            ]),
+        ];
+        Self { title: if moving { "Rename/Move" } else { "Copy" }.into(), style: Style::Normal, layout: Layout::Fixed(76), items, focus: 1, button: 0, action }
     }
 
-    /// F7.
+    /// F7 (mkdir.cpp: 76 wide). Links are not made yet: the link type is
+    /// only "none" and the target stays disabled, as Far shows it then.
     pub fn mkdir() -> Self {
         Self {
             title: "Make folder".into(),
             style: Style::Normal,
-            width: 62,
+            layout: Layout::Fixed(76),
             items: vec![
-                text("Create the folder"),
+                Item::Label("Create the &folder:".into()),
                 edit("name", ""),
                 Item::Separator(None),
+                Item::Combo { id: "link", label: "&Link type:", x: 20, options: vec!["none"], selected: 0, unchanged: true },
+                Item::Edit { id: "target", label: Some("&Target:"), x: 20, text: vec![], cursor: 0, unchanged: false, enabled: false, history: true },
                 Item::Check { id: "multiple", label: "Process &multiple names", checked: false, enabled: true },
                 Item::Separator(None),
-                Item::Buttons(vec![button("&OK", "ok", true), button("&Cancel", "cancel", false)]),
+                Item::Buttons(vec![button("OK", "ok", true), button("Cancel", "cancel", false)]),
             ],
             focus: 1,
             button: 0,
@@ -199,28 +254,37 @@ impl Dialog {
         }
     }
 
-    /// F8: the question is the `lines`.
-    pub fn delete(lines: Vec<String>, action: Action) -> Self {
-        let mut items: Vec<Item> = lines.into_iter().map(centered).collect();
+    /// F8 (delete.cpp): for one item the question and its name centered
+    /// (and where a link points); for several, the question, then the names
+    /// highlighted.
+    pub fn delete(question: String, names: Vec<String>, single: bool, action: Action) -> Self {
+        let mut items = vec![if single { centered(question) } else { text(question) }];
+        if !single {
+            items.push(Item::Separator(None));
+        }
+        for name in names {
+            let align = if single { Align::Center } else { Align::Left };
+            items.push(Item::Text { text: name, align, highlight: !single });
+        }
         items.push(Item::Separator(None));
-        items.push(Item::Buttons(vec![button("&Delete", "ok", true), button("&Cancel", "cancel", false)]));
+        items.push(Item::Buttons(vec![button("Delete", "ok", true), button("Cancel", "cancel", false)]));
         let focus = items.len() - 1;
-        Self { title: "Delete".into(), style: Style::Warning, width: 0, items, focus, button: 0, action }
+        Self { title: "Delete".into(), style: Style::Warning, layout: Layout::Builder, items, focus, button: 0, action }
     }
 
-    /// A question with Yes and No.
+    /// A question with Yes and No (Far's Message with no hot keys).
     pub fn confirm(title: &str, line: &str, action: Action) -> Self {
-        let items = vec![centered(line), Item::Separator(None), Item::Buttons(vec![button("&Yes", "ok", true), button("&No", "cancel", false)])];
-        Self { title: title.into(), style: Style::Normal, width: 0, items, focus: 2, button: 0, action }
+        let items = vec![centered(line), Item::Separator(None), Item::Buttons(vec![button("Yes", "ok", true), button("No", "cancel", false)])];
+        Self { title: title.into(), style: Style::Normal, layout: Layout::Message, items, focus: 2, button: 0, action }
     }
 
     /// An error to read.
     pub fn error(text: &str) -> Self {
         let mut items: Vec<Item> = text.lines().map(centered).collect();
         items.push(Item::Separator(None));
-        items.push(Item::Buttons(vec![button("&OK", "ok", true)]));
+        items.push(Item::Buttons(vec![button("OK", "ok", true)]));
         let focus = items.len() - 1;
-        Self { title: "Error".into(), style: Style::Warning, width: 0, items, focus, button: 0, action: Action::Info }
+        Self { title: "Error".into(), style: Style::Warning, layout: Layout::Message, items, focus, button: 0, action: Action::Info }
     }
 
     /// Something to read, in the normal colors.
@@ -245,7 +309,7 @@ impl Dialog {
             Item::Separator(None),
             Item::Buttons(vec![button("&Overwrite", "overwrite", true), button("&Skip", "skip", false), button("&Cancel", "cancel", false)]),
         ];
-        Self { title: "Warning".into(), style: Style::Warning, width: 60, items, focus: 8, button: 0, action: Action::Conflict }
+        Self { title: "Warning".into(), style: Style::Warning, layout: Layout::Fixed(76), items, focus: 8, button: 0, action: Action::Conflict }
     }
 
     pub fn values(&self) -> Values {
@@ -279,30 +343,27 @@ struct Frame {
 }
 
 impl Frame {
-    /// A box for `rows` rows of content in a frame at least `want` wide.
-    fn new(size: (u16, u16), title: &str, want: u16, rows: u16) -> Self {
-        let (cols, screen_rows) = size;
-        let w = (want.max(title.chars().count() as u16 + 8) + 6).min(cols);
-        let h = (rows + 4).min(screen_rows);
-        let (fx_off, fy_off) = (3.min(w / 2), 1);
-        Self {
-            x: (cols - w) / 2,
-            y: (screen_rows - h) / 2,
-            w,
-            h,
-            fx: (cols - w) / 2 + fx_off,
-            fy: (screen_rows - h) / 2 + fy_off,
-            fw: w.saturating_sub(2 * fx_off),
-            fh: h.saturating_sub(2 * fy_off),
-        }
+    /// A box `w` by `h` centered on a screen of `size`; a message sits one row higher.
+    fn new(size: (u16, u16), w: u16, h: u16, message: bool) -> Self {
+        let (cols, rows) = size;
+        let (w, h) = (w.min(cols), h.min(rows));
+        let x = (cols - w) / 2;
+        let y = if message { rows.saturating_sub(1).saturating_sub(h) / 2 } else { (rows - h) / 2 };
+        let (fx_off, fy_off) = (3.min(w / 2), 1.min(h / 2));
+        Self { x, y, w, h, fx: x + fx_off, fy: y + fy_off, fw: w - 2 * fx_off, fh: h - 2 * fy_off }
+    }
+
+    /// The progress boxes' old sizing: a frame at least `want` wide for `rows` rows.
+    fn sized(size: (u16, u16), title: &str, want: u16, rows: u16) -> Self {
+        Self::new(size, want.max(title.chars().count() as u16 + 8) + 6, rows + 4, false)
     }
 
     fn text_x(&self) -> u16 {
-        self.fx + 2
+        self.x + 5.min(self.w)
     }
 
     fn text_w(&self) -> u16 {
-        self.fw.saturating_sub(4)
+        self.w.saturating_sub(10)
     }
 
     fn row_y(&self, index: usize) -> u16 {
@@ -315,10 +376,10 @@ impl Frame {
         palette::drop_shadow(grid, self.x, self.y, self.w, self.h);
         let line = "\u{2550}".repeat(self.fw.saturating_sub(2) as usize);
         grid.put(self.fx, self.fy, &format!("\u{2554}{line}\u{2557}"), p.fg, p.bg);
-        grid.put(self.fx, self.fy + self.fh - 1, &format!("\u{255A}{line}\u{255D}"), p.fg, p.bg);
-        for row in self.fy + 1..self.fy + self.fh - 1 {
+        grid.put(self.fx, self.fy + self.fh.saturating_sub(1), &format!("\u{255A}{line}\u{255D}"), p.fg, p.bg);
+        for row in self.fy + 1..(self.fy + self.fh).saturating_sub(1) {
             grid.put(self.fx, row, "\u{2551}", p.fg, p.bg);
-            grid.put(self.fx + self.fw - 1, row, "\u{2551}", p.fg, p.bg);
+            grid.put(self.fx + self.fw.saturating_sub(1), row, "\u{2551}", p.fg, p.bg);
         }
         let title = format!(" {title} ");
         grid.put(self.fx + self.fw.saturating_sub(title.chars().count() as u16) / 2, self.fy, &title, p.fg, p.bg);
@@ -338,16 +399,48 @@ impl Frame {
 /// What a click or the focus can land on: (sub item, x, width).
 type Span = (usize, u16, u16);
 
+/// The length of a label as shown: `&` marks the hot key, `&&` is one `&`.
 fn label_len(label: &str) -> u16 {
-    label.replace('&', "").chars().count() as u16
+    shown(label).chars().count() as u16
+}
+
+/// A label without its hot key mark.
+fn shown(label: &str) -> String {
+    let mut out = String::new();
+    let mut chars = label.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '&' {
+            if chars.peek() == Some(&'&') {
+                chars.next();
+                out.push('&');
+            }
+            continue;
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// Buttons in a row, each `[ label ]`, one space apart (DIF_CENTERGROUP).
+fn buttons_len(buttons: &[Button]) -> u16 {
+    let total: u16 = buttons.iter().map(|b| label_len(b.label) + 5).sum();
+    total.saturating_sub(1)
 }
 
 /// The parts of an item along its row.
 fn spans(item: &Item, frame: &Frame) -> Vec<Span> {
-    let (x, w) = (frame.text_x(), frame.text_w());
+    let x = frame.text_x();
+    // input lines and drop-downs end at column W - 6
+    let field = |at: u16| {
+        let start = frame.x + at;
+        (start, (frame.x + frame.w).saturating_sub(5).saturating_sub(start))
+    };
     match item {
-        Item::Text { .. } | Item::Separator(_) => vec![],
-        Item::Edit { .. } => vec![(0, x, w)],
+        Item::Text { .. } | Item::Label(_) | Item::Separator(_) => vec![],
+        Item::Edit { x: at, .. } | Item::Combo { x: at, .. } => {
+            let (start, width) = field(*at);
+            vec![(0, start, width)]
+        }
         Item::Check { label, .. } => vec![(0, x, 4 + label_len(label))],
         Item::Radio { label, options, .. } => {
             let mut at = x + label_len(label) + 1;
@@ -355,25 +448,20 @@ fn spans(item: &Item, frame: &Frame) -> Vec<Span> {
                 .iter()
                 .enumerate()
                 .map(|(i, name)| {
-                    let width = 4 + name.chars().count() as u16;
+                    let width = 4 + label_len(name);
                     let span = (i, at, width);
                     at += width + 1;
                     span
                 })
                 .collect()
         }
-        Item::Combo { label, .. } => {
-            let start = x + label_len(label) + 1;
-            vec![(0, start, (x + w).saturating_sub(start))]
-        }
         Item::Buttons(buttons) => {
-            let widths: Vec<u16> = buttons.iter().map(|b| label_len(b.label) + 4).collect();
-            let total: u16 = widths.iter().sum::<u16>() + widths.len().saturating_sub(1) as u16;
-            let mut at = x + w.saturating_sub(total) / 2;
-            widths
-                .into_iter()
+            let mut at = frame.x + frame.w.saturating_sub(buttons_len(buttons)) / 2;
+            buttons
+                .iter()
                 .enumerate()
-                .map(|(i, width)| {
+                .map(|(i, b)| {
+                    let width = label_len(b.label) + 4;
                     let span = (i, at, width);
                     at += width + 1;
                     span
@@ -383,47 +471,88 @@ fn spans(item: &Item, frame: &Frame) -> Vec<Span> {
     }
 }
 
-/// The width the content wants, without the frame's margins.
+/// The width the content wants (Far's MaxLength), for the dialogs sized by it.
 fn natural_width(item: &Item) -> u16 {
     match item {
         Item::Text { text, .. } => text.chars().count() as u16,
+        Item::Label(label) => label_len(label),
         Item::Edit { .. } | Item::Separator(_) => 0,
         Item::Check { label, .. } => 4 + label_len(label),
-        Item::Radio { label, options, .. } => {
-            label_len(label) + 1 + options.iter().map(|o| 5 + o.chars().count() as u16).sum::<u16>()
-        }
+        Item::Radio { label, options, .. } => label_len(label) + 1 + options.iter().map(|o| 5 + label_len(o)).sum::<u16>(),
         Item::Combo { label, options, .. } => label_len(label) + 3 + options.iter().map(|o| o.chars().count() as u16).max().unwrap_or(0),
-        Item::Buttons(buttons) => buttons.iter().map(|b| label_len(b.label) + 5).sum(),
+        Item::Buttons(buttons) => buttons_len(buttons),
     }
 }
 
-/// Draws `label` with the letter after `&` in the hot color.
+/// Draws `label` with the letter after `&` in the hot color (`&&` is a plain `&`).
 fn put_label(grid: &mut Grid, x: u16, y: u16, label: &str, fg: Color, bg: Color, hot: Color) {
     let mut col = x;
-    let mut next_is_hot = false;
-    for c in label.chars() {
-        if c == '&' && !next_is_hot {
-            next_is_hot = true;
-            continue;
-        }
-        grid.put(col, y, &c.to_string(), if next_is_hot { hot } else { fg }, bg);
-        next_is_hot = false;
+    let mut chars = label.chars().peekable();
+    while let Some(c) = chars.next() {
+        let (c, color) = match c {
+            '&' if chars.peek() == Some(&'&') => {
+                chars.next();
+                ('&', fg)
+            }
+            '&' => match chars.next() {
+                Some(next) => (next, hot),
+                None => break,
+            },
+            c => (c, fg),
+        };
+        grid.put(col, y, &c.to_string(), color, bg);
         col += 1;
     }
 }
 
 fn hot_key(label: &str) -> Option<char> {
-    let at = label.find('&')?;
-    label[at + 1..].chars().next().map(|c| c.to_lowercase().next().unwrap_or(c))
+    let mut chars = label.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '&' {
+            match chars.next() {
+                Some('&') => continue,
+                Some(next) => return next.to_lowercase().next(),
+                None => return None,
+            }
+        }
+    }
+    None
+}
+
+/// `text` cut in the middle with `…` to `width` (Far's truncate_center).
+fn truncate_center(text: &str, width: usize) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    if chars.len() <= width {
+        return text.to_string();
+    }
+    if width == 0 {
+        return String::new();
+    }
+    let left = (width - 1) / 2;
+    let right = width - 1 - left;
+    let mut out: String = chars[..left].iter().collect();
+    out.push('\u{2026}');
+    out.extend(&chars[chars.len() - right..]);
+    out
 }
 
 // ---------------------------------------------------------------- drawing
 
 impl Dialog {
     fn frame(&self, size: (u16, u16)) -> Frame {
-        let natural = self.items.iter().map(natural_width).max().unwrap_or(0) + 4;
-        let want = natural.max(self.width).min(size.0.saturating_sub(6));
-        Frame::new(size, &self.title, want, self.items.len() as u16)
+        let h = self.items.len() as u16 + 4;
+        let content = |cap: u16| {
+            let widest = self.items.iter().map(natural_width).max().unwrap_or(0);
+            let buttons = self.items.iter().map(|i| if let Item::Buttons(b) = i { buttons_len(b) } else { 0 }).max().unwrap_or(0);
+            widest.max(self.title.chars().count() as u16 + 2).min(cap.max(buttons)) + 10
+        };
+        match self.layout {
+            // message.cpp: no wider than the screen less 10
+            Layout::Message => Frame::new(size, content(size.0.saturating_sub(11)), h, true),
+            // delete.cpp truncates its lines to the screen less 12
+            Layout::Builder => Frame::new(size, content(size.0.saturating_sub(12)), h, false),
+            Layout::Fixed(w) => Frame::new(size, w, h, false),
+        }
     }
 
     /// Draws the dialog centered on `grid`; returns where the text cursor goes.
@@ -432,73 +561,95 @@ impl Dialog {
         let frame = self.frame((grid.cols, grid.rows));
         frame.draw(grid, &self.title, &p);
         let mut cursor = None;
+        let (x, text_w) = (frame.text_x(), frame.text_w() as usize);
         for (i, item) in self.items.iter().enumerate() {
             let y = frame.row_y(i);
             let focused = i == self.focus;
             let spans = spans(item, &frame);
             match item {
-                Item::Text { text, center } => {
-                    let x = if *center {
-                        frame.text_x() + frame.text_w().saturating_sub(text.chars().count() as u16) / 2
-                    } else {
-                        frame.text_x()
+                Item::Text { text, align, highlight } => {
+                    let text = truncate_center(text, text_w);
+                    let len = text.chars().count() as u16;
+                    let at = match align {
+                        Align::Left => x,
+                        Align::Center => frame.x + frame.w.saturating_sub(len) / 2,
                     };
-                    grid.put(x, y, text, p.fg, p.bg);
+                    grid.put(at, y, &text, if *highlight { p.hot } else { p.fg }, p.bg);
                 }
+                Item::Label(label) => put_label(grid, x, y, label, p.fg, p.bg, p.hot),
                 Item::Separator(title) => frame.separator(grid, y, *title, &p),
-                Item::Edit { text, cursor: at, .. } => {
-                    let (x, w) = (spans[0].1, spans[0].2);
-                    let visible = w.saturating_sub(1) as usize;
-                    let start = (*at + 1).saturating_sub(visible);
-                    grid.fill(x, y, w, 1, p.edit_bg);
-                    grid.put(x, y, &text.iter().skip(start).take(visible).collect::<String>(), p.edit_fg, p.edit_bg);
-                    grid.put((x + w).saturating_sub(1), y, "\u{2193}", p.edit_fg, p.edit_bg);
+                Item::Edit { label, text, cursor: at, unchanged, enabled, history, .. } => {
+                    if let Some(label) = label {
+                        // Far keeps the label's colors when the line is disabled
+                        put_label(grid, x, y, label, p.fg, p.bg, p.hot);
+                    }
+                    let (fx, w) = (spans[0].1, spans[0].2);
+                    let start = (*at + 1).saturating_sub(w as usize);
+                    let visible: String = text.iter().skip(start).take(w as usize).collect();
+                    let fg = if *enabled { p.edit_fg } else { p.dim };
+                    grid.fill_with(fx, y, w, 1, fg, p.edit_bg);
+                    grid.put(fx, y, &visible, fg, p.edit_bg);
+                    if *unchanged && *enabled {
+                        grid.put(fx, y, &visible, p.unchanged_fg, p.edit_bg);
+                    }
+                    if *history {
+                        grid.put(fx + w, y, "\u{2193}", if *enabled { p.fg } else { p.dim }, p.bg);
+                    }
                     if focused {
-                        cursor = Some((x + at.saturating_sub(start) as u16, y));
+                        cursor = Some((fx + at.saturating_sub(start) as u16, y));
                     }
                 }
                 Item::Check { label, checked, enabled, .. } => {
-                    let (fg, bg) = if !enabled {
-                        (p.dim, p.bg)
-                    } else if focused {
-                        (p.focus_fg, p.focus_bg)
-                    } else {
-                        (p.fg, p.bg)
-                    };
-                    let hot = if focused && *enabled { p.focus_fg } else { p.hot };
-                    grid.put(spans[0].1, y, &format!("[{}] ", if *checked { 'x' } else { ' ' }), fg, bg);
-                    put_label(grid, spans[0].1 + 4, y, label, fg, bg, if *enabled { hot } else { p.dim });
-                }
-                Item::Radio { label, options, selected, .. } => {
-                    put_label(grid, frame.text_x(), y, label, p.fg, p.bg, p.hot);
-                    for ((i, x, _), name) in spans.iter().zip(options) {
-                        let on = i == selected;
-                        let (fg, bg) = if focused && on { (p.focus_fg, p.focus_bg) } else { (p.fg, p.bg) };
-                        grid.put(*x, y, &format!("({}) {name}", if on { '\u{2022}' } else { ' ' }), fg, bg);
+                    let (fg, hot) = if *enabled { (p.fg, p.hot) } else { (p.dim, p.dim) };
+                    grid.put(spans[0].1, y, &format!("[{}] ", if *checked { 'x' } else { ' ' }), fg, p.bg);
+                    put_label(grid, spans[0].1 + 4, y, label, fg, p.bg, hot);
+                    if focused {
+                        cursor = Some((spans[0].1 + 1, y));
                     }
                 }
-                Item::Combo { label, options, selected, .. } => {
-                    put_label(grid, frame.text_x(), y, label, p.fg, p.bg, p.hot);
-                    let (x, w) = (spans[0].1, spans[0].2);
-                    let (fg, bg) = if focused { (p.focus_fg, p.focus_bg) } else { (p.edit_fg, p.edit_bg) };
-                    grid.fill(x, y, w, 1, bg);
-                    grid.put(x, y, options[*selected], fg, bg);
-                    grid.put((x + w).saturating_sub(1), y, "\u{2193}", fg, bg);
+                Item::Radio { label, options, selected, .. } => {
+                    put_label(grid, x, y, label, p.fg, p.bg, p.hot);
+                    for ((i, ox, _), name) in spans.iter().zip(options) {
+                        let on = i == selected;
+                        grid.put(*ox, y, &format!("({}) ", if on { '\u{2022}' } else { ' ' }), p.fg, p.bg);
+                        put_label(grid, *ox + 4, y, name, p.fg, p.bg, p.hot);
+                        if focused && on {
+                            cursor = Some((*ox + 1, y));
+                        }
+                    }
+                }
+                Item::Combo { label, options, selected, unchanged, .. } => {
+                    put_label(grid, x, y, label, p.fg, p.bg, p.hot);
+                    let (fx, w) = (spans[0].1, spans[0].2);
+                    let (fg, bg) = if focused {
+                        (p.selected_fg, p.selected_bg)
+                    } else if *unchanged {
+                        (p.unchanged_fg, p.edit_bg)
+                    } else {
+                        (p.edit_fg, p.edit_bg)
+                    };
+                    let value = shown(options[*selected]);
+                    grid.fill_with(fx, y, w, 1, fg, bg);
+                    grid.put(fx, y, &value, fg, bg);
+                    grid.put(fx + w, y, "\u{2193}", p.fg, p.bg);
+                    if focused {
+                        cursor = Some((fx + value.chars().count() as u16, y));
+                    }
                 }
                 Item::Buttons(buttons) => {
-                    for ((i, x, _), b) in spans.iter().zip(buttons) {
+                    for ((i, bx, _), b) in spans.iter().zip(buttons) {
                         let on = focused && *i == self.button;
-                        let (fg, bg) = if !b.enabled {
-                            (p.dim, p.bg)
+                        let (fg, bg, hot) = if !b.enabled {
+                            (p.dim, p.bg, p.dim)
                         } else if on {
-                            (p.focus_fg, p.focus_bg)
+                            (p.focus_fg, p.focus_bg, p.hot)
                         } else {
-                            (p.fg, p.bg)
+                            (p.fg, p.bg, p.hot)
                         };
                         let (open, close) = if b.default { ('{', '}') } else { ('[', ']') };
-                        grid.put(*x, y, &format!("{open} "), fg, bg);
-                        put_label(grid, *x + 2, y, b.label, fg, bg, if !b.enabled { p.dim } else if on { p.focus_fg } else { p.hot });
-                        grid.put(*x + 2 + label_len(b.label), y, &format!(" {close}"), fg, bg);
+                        grid.put(*bx, y, &format!("{open} "), fg, bg);
+                        put_label(grid, *bx + 2, y, b.label, fg, bg, hot);
+                        grid.put(*bx + 2 + label_len(b.label), y, &format!(" {close}"), fg, bg);
                     }
                 }
             }
@@ -512,23 +663,46 @@ impl Dialog {
 impl Dialog {
     fn focusable(&self, index: usize) -> bool {
         match &self.items[index] {
-            Item::Edit { .. } | Item::Radio { .. } | Item::Combo { .. } => true,
-            Item::Check { enabled, .. } => *enabled,
+            Item::Radio { .. } | Item::Combo { .. } => true,
+            Item::Edit { enabled, .. } | Item::Check { enabled, .. } => *enabled,
             Item::Buttons(buttons) => buttons.iter().any(|b| b.enabled),
-            Item::Text { .. } | Item::Separator(_) => false,
+            Item::Text { .. } | Item::Label(_) | Item::Separator(_) => false,
         }
     }
 
     fn move_focus(&mut self, forward: bool) {
+        // each button is a control of its own: Tab goes through them in turn
+        if let Item::Buttons(buttons) = &self.items[self.focus] {
+            let next = if forward {
+                (self.button + 1..buttons.len()).find(|&i| buttons[i].enabled)
+            } else {
+                (0..self.button).rev().find(|&i| buttons[i].enabled)
+            };
+            if let Some(next) = next {
+                self.button = next;
+                return;
+            }
+        }
         let count = self.items.len();
         let mut at = self.focus;
         for _ in 0..count {
             at = if forward { (at + 1) % count } else { (at + count - 1) % count };
             if self.focusable(at) {
                 self.focus = at;
-                self.button = self.first_enabled_button();
+                if let Item::Buttons(buttons) = &self.items[at] {
+                    let mut enabled = buttons.iter().enumerate().filter(|(_, b)| b.enabled).map(|(i, _)| i);
+                    self.button = if forward { enabled.next() } else { enabled.last() }.unwrap_or(0);
+                }
                 return;
             }
+        }
+    }
+
+    /// Focuses the first control after `index` (what a label's hot key does).
+    fn focus_after(&mut self, index: usize) {
+        if let Some(next) = (index + 1..self.items.len()).find(|&i| self.focusable(i)) {
+            self.focus = next;
+            self.button = self.first_enabled_button();
         }
     }
 
@@ -561,26 +735,50 @@ impl Dialog {
 
     fn cycle(&mut self, step: isize) {
         match &mut self.items[self.focus] {
-            Item::Radio { options, selected, .. } | Item::Combo { options, selected, .. } => {
+            Item::Radio { options, selected, .. } => {
                 *selected = (*selected as isize + step).rem_euclid(options.len() as isize) as usize;
+            }
+            Item::Combo { options, selected, unchanged, .. } => {
+                *selected = (*selected as isize + step).rem_euclid(options.len() as isize) as usize;
+                *unchanged = false;
             }
             _ => {}
         }
     }
 
-    /// A hot key: focuses the control, toggles a check box, presses a button.
+    /// A hot key: focuses the control, toggles a check box, picks a radio
+    /// button, presses a button.
     fn hot(&mut self, c: char) -> Option<Outcome> {
         let c = c.to_lowercase().next().unwrap_or(c);
         for index in 0..self.items.len() {
             match &mut self.items[index] {
+                Item::Label(label) if hot_key(label) == Some(c) => {
+                    self.focus_after(index);
+                    return Some(Outcome::Open);
+                }
                 Item::Check { label, checked, enabled, .. } if *enabled && hot_key(label) == Some(c) => {
                     *checked = !*checked;
                     self.focus = index;
                     return Some(Outcome::Open);
                 }
-                Item::Radio { label, .. } | Item::Combo { label, .. } if hot_key(label) == Some(c) => {
+                Item::Edit { label: Some(label), enabled: true, .. } if hot_key(label) == Some(c) => {
                     self.focus = index;
                     return Some(Outcome::Open);
+                }
+                Item::Combo { label, .. } if hot_key(label) == Some(c) => {
+                    self.focus = index;
+                    return Some(Outcome::Open);
+                }
+                Item::Radio { label, options, selected, .. } => {
+                    if let Some(option) = options.iter().position(|o| hot_key(o) == Some(c)) {
+                        *selected = option;
+                        self.focus = index;
+                        return Some(Outcome::Open);
+                    }
+                    if hot_key(label) == Some(c) {
+                        self.focus = index;
+                        return Some(Outcome::Open);
+                    }
                 }
                 Item::Buttons(buttons) => {
                     let id = buttons.iter().find(|b| b.enabled && hot_key(b.label) == Some(c)).map(|b| b.id);
@@ -603,11 +801,14 @@ impl Dialog {
         let on_edit = matches!(self.items[self.focus], Item::Edit { .. });
         if let KeyCode::Char(c) = key.code {
             // Alt+letter always, a bare letter where nothing is being typed.
-            if (alt || (!on_edit && !ctrl)) && !(c == ' ') {
+            if (alt || (!on_edit && !ctrl)) && c != ' ' {
                 if let Some(outcome) = self.hot(c) {
                     return outcome;
                 }
             }
+        }
+        if !matches!(key.code, KeyCode::Tab | KeyCode::BackTab | KeyCode::Up | KeyCode::Down | KeyCode::Enter) {
+            self.edit_key(key.code, ctrl, alt);
         }
         match key.code {
             KeyCode::Tab | KeyCode::Down => self.move_focus(true),
@@ -624,7 +825,6 @@ impl Dialog {
             KeyCode::Left | KeyCode::Right => {
                 let step = if key.code == KeyCode::Left { -1 } else { 1 };
                 match &mut self.items[self.focus] {
-                    Item::Edit { text, cursor, .. } => *cursor = (*cursor as isize + step).clamp(0, text.len() as isize) as usize,
                     Item::Buttons(buttons) => {
                         let count = buttons.len() as isize;
                         let mut at = self.button as isize;
@@ -640,23 +840,9 @@ impl Dialog {
                     _ => {}
                 }
             }
-            KeyCode::Home => {
-                if let Item::Edit { cursor, .. } = &mut self.items[self.focus] {
-                    *cursor = 0;
-                }
-            }
-            KeyCode::End => {
-                if let Item::Edit { text, cursor, .. } = &mut self.items[self.focus] {
-                    *cursor = text.len();
-                }
-            }
             KeyCode::Char(' ') => match &mut self.items[self.focus] {
                 Item::Check { checked, .. } => *checked = !*checked,
                 Item::Radio { .. } | Item::Combo { .. } => self.cycle(1),
-                Item::Edit { text, cursor, .. } => {
-                    text.insert(*cursor, ' ');
-                    *cursor += 1;
-                }
                 Item::Buttons(buttons) => {
                     let id = buttons.get(self.button).filter(|b| b.enabled).map(|b| b.id);
                     if let Some(id) = id {
@@ -665,36 +851,50 @@ impl Dialog {
                 }
                 _ => {}
             },
-            KeyCode::Backspace => {
-                if let Item::Edit { text, cursor, .. } = &mut self.items[self.focus] {
-                    if *cursor > 0 {
-                        *cursor -= 1;
-                        text.remove(*cursor);
-                    }
-                }
-            }
-            KeyCode::Delete => {
-                if let Item::Edit { text, cursor, .. } = &mut self.items[self.focus] {
-                    if *cursor < text.len() {
-                        text.remove(*cursor);
-                    }
-                }
-            }
-            KeyCode::Char('u') if ctrl => {
-                if let Item::Edit { text, cursor, .. } = &mut self.items[self.focus] {
-                    text.clear();
-                    *cursor = 0;
-                }
-            }
-            KeyCode::Char(c) if !ctrl && !alt => {
-                if let Item::Edit { text, cursor, .. } = &mut self.items[self.focus] {
-                    text.insert(*cursor, c);
-                    *cursor += 1;
-                }
-            }
             _ => {}
         }
         Outcome::Open
+    }
+
+    /// What a key does to the focused input line (edit.cpp): the first
+    /// character typed into unchanged text replaces it, Del at its end
+    /// clears it, and any key makes it changed.
+    fn edit_key(&mut self, code: KeyCode, ctrl: bool, alt: bool) {
+        let Item::Edit { text, cursor, unchanged, .. } = &mut self.items[self.focus] else { return };
+        let was_unchanged = std::mem::replace(unchanged, false);
+        match code {
+            KeyCode::Left => *cursor = cursor.saturating_sub(1),
+            KeyCode::Right => *cursor = (*cursor + 1).min(text.len()),
+            KeyCode::Home => *cursor = 0,
+            KeyCode::End => *cursor = text.len(),
+            KeyCode::Backspace => {
+                if *cursor > 0 {
+                    *cursor -= 1;
+                    text.remove(*cursor);
+                }
+            }
+            KeyCode::Delete => {
+                if was_unchanged && *cursor >= text.len() {
+                    text.clear();
+                    *cursor = 0;
+                } else if *cursor < text.len() {
+                    text.remove(*cursor);
+                }
+            }
+            KeyCode::Char('u') if ctrl => {
+                text.clear();
+                *cursor = 0;
+            }
+            KeyCode::Char(c) if !ctrl && !alt => {
+                if was_unchanged {
+                    text.clear();
+                    *cursor = 0;
+                }
+                text.insert(*cursor, c);
+                *cursor += 1;
+            }
+            _ => *unchanged = was_unchanged,
+        }
     }
 
     /// What a click at (`col`, `row`) does, on a screen of `size`.
@@ -713,10 +913,10 @@ impl Dialog {
                 }
                 self.focus = index;
                 match &mut self.items[index] {
-                    Item::Edit { text, cursor, .. } => {
-                        let visible = w.saturating_sub(1) as usize;
-                        let start = (*cursor + 1).saturating_sub(visible);
+                    Item::Edit { text, cursor, unchanged, .. } => {
+                        let start = (*cursor + 1).saturating_sub(w as usize);
                         *cursor = (start + (col - x) as usize).min(text.len());
+                        *unchanged = false;
                     }
                     Item::Check { checked, .. } => *checked = !*checked,
                     Item::Radio { selected, .. } => *selected = sub,
@@ -745,7 +945,7 @@ pub fn paint_progress(job: &Job, grid: &mut Grid) {
     let progress = &job.progress;
     let copying = job.kind != Kind::Delete;
     let rows: u16 = if copying { 11 } else { 7 };
-    let frame = Frame::new((grid.cols, grid.rows), job.kind.title(), (grid.cols * 3 / 4).clamp(40, 74), rows);
+    let frame = Frame::sized((grid.cols, grid.rows), job.kind.title(), (grid.cols * 3 / 4).clamp(40, 74), rows);
     frame.draw(grid, job.kind.title(), &p);
     let (x, w) = (frame.text_x(), frame.text_w() as usize);
     let fit = |text: &str| -> String {
@@ -917,12 +1117,28 @@ mod tests {
     #[test]
     fn a_question_is_answered_with_y_and_n_without_alt() {
         let mut dialog = Dialog::confirm("Quit", "Do you want to quit farsh?", Action::Quit);
-        assert!(matches!(press(&mut dialog, KeyCode::Char('n')), Outcome::Closed));
-        let (id, _) = pressed(press(&mut dialog, KeyCode::Char('y')));
+        // Far's Yes and No have no hot keys: letters do nothing, Enter is Yes
+        assert!(matches!(press(&mut dialog, KeyCode::Char('n')), Outcome::Open));
+        let (id, _) = pressed(press(&mut dialog, KeyCode::Enter));
         assert_eq!(id, "ok");
         let mut dialog = Dialog::confirm("Quit", "Do you want to quit farsh?", Action::Quit);
         press(&mut dialog, KeyCode::Right);
         assert!(matches!(press(&mut dialog, KeyCode::Enter), Outcome::Closed), "focus moved to No");
+    }
+
+    #[test]
+    fn tab_goes_through_each_button_and_skips_disabled_ones() {
+        let mut dialog = copy_dialog();
+        for _ in 0..6 {
+            press(&mut dialog, KeyCode::Tab);
+        }
+        assert_eq!((dialog.focus, dialog.button), (dialog.items.len() - 1, 0), "on Copy");
+        press(&mut dialog, KeyCode::Tab);
+        assert_eq!(dialog.button, 2, "Filter is disabled: on Cancel");
+        press(&mut dialog, KeyCode::Tab);
+        assert_eq!(dialog.focus, 1, "round to the input line");
+        press(&mut dialog, KeyCode::BackTab);
+        assert_eq!(dialog.button, 2, "back to Cancel");
     }
 
     #[test]
@@ -975,7 +1191,7 @@ mod tests {
         Dialog::mkdir().paint(&mut grid);
         Dialog::error("It failed\nfor a reason").paint(&mut grid);
         Dialog::confirm("Quit", "Do you want to quit farsh?", Action::Quit).paint(&mut grid);
-        Dialog::delete(vec!["Do you wish to delete".into(), "file \"a\"".into()], Action::Quit).paint(&mut grid);
+        Dialog::delete("Do you wish to delete the file?".into(), vec!["a".into()], true, Action::Quit).paint(&mut grid);
         // a tiny screen must not panic
         let mut tiny = Grid::new(10, 4);
         copy_dialog().paint(&mut tiny);

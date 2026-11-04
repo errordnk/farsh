@@ -32,6 +32,11 @@ over the shell screen.
   Far's string order (`CompareString`, linguistic, case ignored, digits as
   numbers); owner, hard links and streams are read only when a mode needs
   them. The "Sort by" menu's F4 (editing the layers) is not done.
+- Dialogs and menus copy Far's layout too (`src/dialog.rs`: message.cpp,
+  dialog.cpp, copy.cpp, mkdir.cpp, delete.cpp; `src/menu.rs`, `src/drives.rs`:
+  vmenu.cpp, diskmenu.cpp). Known, deliberate differences: "quit farsh?",
+  menu items farsh does not do are grey, Copy's "Use filter" stays disabled,
+  Make folder offers no link types, Change drive has no plugin rows.
 - Tests: `cargo test` (the shell test starts cmd.exe on Windows, /bin/sh elsewhere).
 - Code, comments and logs in English; talk to the user in Russian.
 

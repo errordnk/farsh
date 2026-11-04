@@ -1,6 +1,8 @@
 //! Far's F9 menu: a bar over the panels (Left, Files, Commands, Options,
-//! Right) with a drop-down under the chosen title. Items farsh does not do
-//! yet are shown grey and cannot be chosen.
+//! Right) with a drop-down under the chosen title. As in Far, F9 shows the
+//! bar alone; Enter or Down drops the title's list, which opens on its
+//! first item. Items farsh does not do yet are shown grey: the highlight
+//! can rest on them (Far's moves over every item), but they do nothing.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use crossterm::style::Color;
@@ -148,29 +150,29 @@ fn titles(modes: [u8; 2]) -> Vec<Title> {
         Title {
             label: "&Options",
             items: vec![
-                item("&System settings", "", None),
+                item("S&ystem settings", "", None),
                 item("&Panel settings", "", None),
                 item("&Interface settings", "", None),
                 item("Lan&guages", "", None),
                 item("Pl&ugins configuration", "", None),
-                item("Plugi&ns manager settings", "", None),
-                item("Dial&og settings", "", None),
-                item("Menu se&ttings", "", None),
-                item("Co&mmand line settings", "", None),
-                item("&AutoComplete settings", "", None),
-                item("Info&Panel settings", "", None),
+                item("Plugins manage&r settings", "", None),
+                item("Di&alog settings", "", None),
+                item("Menu settings", "", None),
+                item("&Command line settings", "", None),
+                item("Au&toComplete settings", "", None),
+                item("Inf&oPanel settings", "", None),
                 item("Groups of file mas&ks", "", None),
                 SEPARATOR,
-                item("Con&firmations", "", None),
+                item("Co&nfirmations", "", None),
                 item("File panel &modes", "", None),
                 item("File &descriptions", "", None),
-                item("Folder description &files", "", None),
+                item("&Folder description files", "", None),
                 SEPARATOR,
                 item("&Viewer settings", "", None),
                 item("&Editor settings", "", None),
                 item("Code pages", "", None),
                 SEPARATOR,
-                item("&Colors", "", None),
+                item("Co&lors", "", None),
                 item("Files &highlighting and sort groups", "", None),
                 SEPARATOR,
                 item("&Save setup", "Shift+F9", None),
@@ -217,13 +219,15 @@ pub struct Menu {
     /// The open title and the highlighted item in it.
     current: usize,
     item: usize,
+    /// Whether the drop-down is shown, or only the bar.
+    dropped: bool,
 }
 
 impl Menu {
     /// Opens on title `current` (0 is Left, 4 is Right); `modes` are the
     /// left and right panels' views (1 Brief .. 4 Wide).
     pub fn new(current: usize, modes: [u8; 2]) -> Self {
-        let mut menu = Self { titles: titles(modes), current: 0, item: 0 };
+        let mut menu = Self { titles: titles(modes), current: 0, item: 0, dropped: false };
         menu.open(current);
         menu
     }
@@ -235,28 +239,27 @@ impl Menu {
 
     fn open(&mut self, index: usize) {
         self.current = index % self.titles.len();
-        let items = &self.titles[self.current].items;
-        self.item = items.iter().position(|i| i.command.is_some()).unwrap_or(0);
+        self.item = 0;
     }
 
     fn items(&self) -> &[Item] {
         &self.titles[self.current].items
     }
 
-    /// Moves the highlight by `step`, over separators and grey items, round the ends.
+    /// Moves the highlight by `step`, over separators, round the ends.
     fn step(&mut self, step: isize) {
         let len = self.items().len() as isize;
         let mut at = self.item as isize;
         for _ in 0..len {
             at = (at + step).rem_euclid(len);
-            if self.items()[at as usize].command.is_some() {
+            if self.items()[at as usize].label != "-" {
                 self.item = at as usize;
                 return;
             }
         }
     }
 
-    /// The first (or last) item that can be chosen.
+    /// The first (or last) item.
     fn edge(&mut self, last: bool) {
         self.item = if last { 0 } else { self.items().len() - 1 };
         self.step(if last { -1 } else { 1 });
@@ -270,6 +273,9 @@ impl Menu {
     }
 
     pub fn key(&mut self, key: KeyEvent) -> Outcome {
+        if !self.dropped {
+            return self.bar_key(key);
+        }
         match key.code {
             KeyCode::Esc | KeyCode::F(9) | KeyCode::F(10) => return Outcome::Closed,
             KeyCode::Left => self.open(self.current + self.titles.len() - 1),
@@ -291,6 +297,28 @@ impl Menu {
                 {
                     self.item = index;
                     return self.choose(index);
+                }
+            }
+            _ => {}
+        }
+        Outcome::Open
+    }
+
+    /// A key while only the bar shows: Left and Right move along it, Enter
+    /// and Down drop the list, a title's letter drops its list.
+    fn bar_key(&mut self, key: KeyEvent) -> Outcome {
+        match key.code {
+            KeyCode::Esc | KeyCode::F(9) | KeyCode::F(10) => return Outcome::Closed,
+            KeyCode::Left => self.open(self.current + self.titles.len() - 1),
+            KeyCode::Right => self.open(self.current + 1),
+            KeyCode::Home => self.open(0),
+            KeyCode::End => self.open(self.titles.len() - 1),
+            KeyCode::Enter | KeyCode::Down | KeyCode::Up => self.dropped = true,
+            KeyCode::Char(c) => {
+                let c = c.to_lowercase().next().unwrap_or(c);
+                if let Some(index) = self.titles.iter().position(|t| hot_letter(t.label) == Some(c)) {
+                    self.open(index);
+                    self.dropped = true;
                 }
             }
             _ => {}
@@ -336,10 +364,13 @@ impl Menu {
             }
         }
 
+        if !self.dropped {
+            return;
+        }
         let (x, y, w, h) = self.drop_down(cols);
-        // the shadow, then the box with one more row under the frame
-        grid.fill_with(x, y, w, h + 1, TEXT, BG);
-        palette::drop_shadow(grid, x, y, w, h + 1);
+        // the shadow, then the frame (no margin: it hangs from the bar)
+        grid.fill_with(x, y, w, h, TEXT, BG);
+        palette::drop_shadow(grid, x, y, w, h);
         let line = "\u{2550}".repeat(w.saturating_sub(2) as usize);
         grid.put(x, y, &format!("\u{2554}{line}\u{2557}"), TEXT, BG);
         grid.put(x, y + h - 1, &format!("\u{255A}{line}\u{255D}"), TEXT, BG);
@@ -379,18 +410,22 @@ impl Menu {
         if row == 0 {
             if let Some(index) = self.title_spans().iter().position(|&(x, w)| col >= x && col < x + w) {
                 self.open(index);
+                self.dropped = true;
             }
             return Outcome::Open;
+        }
+        if !self.dropped {
+            return Outcome::Closed;
         }
         let (x, y, w, h) = self.drop_down(cols);
         if col > x && col + 1 < x + w && row > y && row + 1 < y + h {
             let index = (row - y - 1) as usize;
-            if self.items()[index].command.is_some() {
+            if self.items()[index].label != "-" {
                 self.item = index;
             }
             return self.choose(index);
         }
-        if col >= x && col < x + w && row >= y && row <= y + h {
+        if col >= x && col < x + w && row >= y && row < y + h {
             return Outcome::Open;
         }
         Outcome::Closed
@@ -406,24 +441,33 @@ mod tests {
     }
 
     #[test]
-    fn opens_on_the_first_item_that_can_be_chosen_and_skips_grey_ones() {
+    fn f9_shows_the_bar_and_enter_drops_the_list_on_its_first_item() {
         let mut menu = Menu::new(1, [2, 2]);
+        assert!(!menu.dropped, "the bar alone");
+        menu.key(key(KeyCode::Right));
+        assert_eq!(menu.current(), 2);
+        assert!(!menu.dropped, "Right moves along the bar");
+        menu.key(key(KeyCode::Left));
+        assert_eq!(menu.key(key(KeyCode::Enter)), Outcome::Open);
+        assert!(menu.dropped);
         assert_eq!(menu.key(key(KeyCode::Enter)), Outcome::Chosen(Command::FKey(3)));
-        menu.key(key(KeyCode::Down));
-        menu.key(key(KeyCode::Down));
-        menu.key(key(KeyCode::Down));
-        // Link is grey: Down goes from Rename or move to Make folder
+        // the highlight stops on grey items too, which do nothing
+        for _ in 0..4 {
+            menu.key(key(KeyCode::Down));
+        }
+        assert_eq!(menu.key(key(KeyCode::Enter)), Outcome::Open, "Link is grey");
         menu.key(key(KeyCode::Down));
         assert_eq!(menu.key(key(KeyCode::Enter)), Outcome::Chosen(Command::FKey(7)));
-        // Up from the top goes round to the last item that can be chosen
-        menu.key(key(KeyCode::Home));
-        menu.key(key(KeyCode::Up));
-        assert_eq!(menu.key(key(KeyCode::Enter)), Outcome::Chosen(Command::InvertSelection));
+        // a panel menu opens on Brief, not on the checked mode
+        let mut menu = Menu::new(0, [2, 2]);
+        menu.key(key(KeyCode::Down));
+        assert_eq!(menu.key(key(KeyCode::Enter)), Outcome::Chosen(Command::View { right: false, mode: 1 }));
     }
 
     #[test]
     fn left_and_right_go_round_the_bar_and_letters_pick_items() {
         let mut menu = Menu::new(0, [2, 2]);
+        menu.dropped = true;
         menu.key(key(KeyCode::Left));
         assert_eq!(menu.current(), 4, "Left from Left is Right");
         menu.key(key(KeyCode::Right));
@@ -444,7 +488,8 @@ mod tests {
     #[test]
     fn painting_puts_the_bar_on_top_and_the_drop_down_under_its_title() {
         let mut grid = Grid::new(80, 30);
-        let menu = Menu::new(1, [2, 2]);
+        let mut menu = Menu::new(1, [2, 2]);
+        menu.dropped = true;
         menu.paint(&mut grid);
         let top: String = (0..40).map(|c| grid.row(0)[c].text.clone()).collect();
         assert!(top.contains("Left") && top.contains("Files") && top.contains("Commands"), "{top}");

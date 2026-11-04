@@ -19,7 +19,7 @@ mod sortmenu;
 mod viewer;
 
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::Result;
@@ -393,19 +393,20 @@ impl App {
                 self.panels_visible = false;
             }
             Request::Copy(sources, other) => {
-                let label = format!("Copy {} to:", describe(&sources));
-                let dialog = Dialog::copy_or_move(Kind::Copy, label, &other.display().to_string(), Action::Copy(sources));
+                let label = copy_label("Copy", &sources);
+                let dialog = Dialog::copy_or_move(Kind::Copy, label, &default_dest(&sources, &other), Action::Copy(sources));
                 self.overlay = Overlay::Dialog(dialog);
             }
             Request::Move(sources, other) => {
-                let label = format!("Rename or move {} to:", describe(&sources));
-                let dialog = Dialog::copy_or_move(Kind::Move, label, &other.display().to_string(), Action::Move(sources));
+                let label = copy_label("Rename or move", &sources);
+                let dialog = Dialog::copy_or_move(Kind::Move, label, &default_dest(&sources, &other), Action::Move(sources));
                 self.overlay = Overlay::Dialog(dialog);
             }
             Request::MkDir => self.overlay = Overlay::Dialog(Dialog::mkdir()),
             Request::Delete(sources) => {
-                let lines = vec!["Do you wish to delete".to_string(), describe(&sources)];
-                self.overlay = Overlay::Dialog(Dialog::delete(lines, Action::Delete(sources)));
+                let (question, names) = delete_question(&sources);
+                let single = sources.len() == 1;
+                self.overlay = Overlay::Dialog(Dialog::delete(question, names, single, Action::Delete(sources)));
             }
             Request::Quit => {
                 self.overlay = Overlay::Dialog(Dialog::confirm("Quit", "Do you want to quit farsh?", Action::Quit));
@@ -557,13 +558,61 @@ fn log_key(key: &KeyEvent) {
     }
 }
 
-/// `file "a"`, `folder "b"` or `3 items`, for a dialog's text.
-fn describe(sources: &[PathBuf]) -> String {
+fn file_name(path: &Path) -> String {
+    path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.display().to_string())
+}
+
+/// `Copy README t&o:` or `Copy 3 items t&o:` (Far's MCopyFile / MCopyFiles).
+fn copy_label(verb: &str, sources: &[PathBuf]) -> String {
+    match sources {
+        [one] => format!("{verb} {} t&o:", dialog::escape_ampersands(&dialog::quote_outer_space(&file_name(one)))),
+        many => format!("{verb} {} item{} t&o:", many.len(), if many.len() == 1 { "" } else { "s" }),
+    }
+}
+
+/// Where a copy goes at first: the other panel's folder with a separator
+/// after it, or the file's own name when that folder is its own (copy.cpp).
+fn default_dest(sources: &[PathBuf], other: &Path) -> String {
+    if let [one] = sources {
+        let same = |a: &Path, b: &Path| a == b || std::fs::canonicalize(a).ok().zip(std::fs::canonicalize(b).ok()).is_some_and(|(a, b)| a == b);
+        if one.parent().is_some_and(|parent| same(parent, other)) {
+            return file_name(one);
+        }
+    }
+    let mut dest = other.display().to_string();
+    if !dest.ends_with(std::path::MAIN_SEPARATOR) && !dest.ends_with('/') {
+        dest.push(std::path::MAIN_SEPARATOR);
+    }
+    dest
+}
+
+/// Delete's question and the names under it (delete.cpp): "the file" or
+/// "the folder" and its name, and where a link points; for several items
+/// the first ten names and "…and N more".
+fn delete_question(sources: &[PathBuf]) -> (String, Vec<String>) {
+    const SHOWN: usize = 10;
     match sources {
         [one] => {
-            let name = one.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-            format!("{} \"{name}\"", if one.is_dir() { "folder" } else { "file" })
+            let link = std::fs::symlink_metadata(one).is_ok_and(|m| m.file_type().is_symlink());
+            let what = if one.is_dir() { "the folder" } else { "the file" };
+            let mut names = vec![dialog::quote_outer_space(&file_name(one))];
+            if link {
+                if let Ok(target) = std::fs::read_link(one) {
+                    let target = target.display().to_string();
+                    let target = target.strip_prefix(r"\\?\").or_else(|| target.strip_prefix(r"\??\")).unwrap_or(&target).to_string();
+                    names.push("a link to".into());
+                    names.push(target);
+                }
+            }
+            (format!("Do you wish to delete {what}?"), names)
         }
-        many => format!("{} items", many.len()),
+        many => {
+            let shown = if many.len() > SHOWN + 1 { SHOWN } else { many.len() };
+            let mut names: Vec<String> = many[..shown].iter().map(|p| dialog::quote_outer_space(&file_name(p))).collect();
+            if shown < many.len() {
+                names.push(format!("\u{2026}and {} more", many.len() - shown));
+            }
+            ("Do you wish to delete the objects?".into(), names)
+        }
     }
 }

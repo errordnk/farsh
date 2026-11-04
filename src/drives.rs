@@ -39,7 +39,8 @@ pub struct Drive {
 pub fn list() -> Vec<Drive> {
     let mut drives = mounts();
     let (tx, rx) = mpsc::channel();
-    for (index, drive) in drives.iter().enumerate() {
+    // Far leaves a network drive's sizes out unless asked (DRIVE_SHOW_REMOTE)
+    for (index, drive) in drives.iter().enumerate().filter(|(_, d)| d.kind != "network") {
         let tx = tx.clone();
         let path = drive.path.clone();
         std::thread::spawn(move || {
@@ -289,15 +290,16 @@ impl DriveMenu {
         (name, kind, sizes)
     }
 
-    /// The double frame: column, row, width, height, centred over its panel.
+    /// The double frame: column, row, width, height. Far puts it 5 columns
+    /// into its panel (diskmenu.cpp) and centers it up and down.
     fn frame(&self, cols: u16, rows: u16) -> (u16, u16, u16, u16) {
         let (name, kind, sizes) = self.widths();
-        let width = (1 + 1 + name + 1 + kind + 1 + 1 + 1 + sizes + 1 + 1 + 1 + sizes + 1 + 1) as u16;
-        let width = width.max(18).min(cols.saturating_sub(6));
+        // ║, the check mark column, " name kind │ total │ free ", ║
+        let width = (1 + 2 + name + 1 + kind + 1 + 1 + 1 + sizes + 1 + 1 + 1 + sizes + 1 + 1) as u16;
+        let width = width.max(18).min(cols.saturating_sub(4));
         let height = (self.drives.len() as u16 + 2).min(rows.saturating_sub(2));
-        let half = cols / 2;
-        let (from, span) = if self.right { (half, cols - half) } else { (0, half) };
-        let x = (from + span.saturating_sub(width) / 2).min(cols.saturating_sub(width + 3)).max(3);
+        let from = if self.right { cols / 2 } else { 0 };
+        let x = (from + 5).min(cols.saturating_sub(width + 2)).max(2);
         let y = (rows.saturating_sub(height)) / 2;
         (x, y, width, height)
     }
@@ -305,12 +307,12 @@ impl DriveMenu {
     pub fn paint(&self, grid: &mut Grid) {
         let (x, y, w, h) = self.frame(grid.cols, grid.rows);
         let (name_w, kind_w, size_w) = self.widths();
-        // the box around the frame, and its shadow
-        let (bx, by, bw, bh) = (x.saturating_sub(3), y.saturating_sub(1), w + 6, h + 2);
+        // the box around the frame (a menu's: 2 columns, 1 row), and its shadow
+        let (bx, by, bw, bh) = (x.saturating_sub(2), y.saturating_sub(1), w + 4, h + 2);
         grid.fill_with(bx, by, bw, bh, TEXT, BG);
         palette::drop_shadow(grid, bx, by, bw, bh);
 
-        let first = 1 + 1 + name_w + 1 + kind_w + 1;
+        let first = 2 + 1 + name_w + 1 + kind_w + 1;
         let second = first + 1 + 1 + size_w + 1;
         let inner = w.saturating_sub(2) as usize;
         let border = |left: char, right: char, joint: char| {
@@ -337,7 +339,7 @@ impl DriveMenu {
             let name: String = drive.name.chars().take(name_w).collect();
             let shown = |n: Option<u64>| n.map(size).unwrap_or_default();
             let text = format!(
-                " {name:<name_w$} {kind:<kind_w$} \u{2502} {total:>size_w$} \u{2502} {free:>size_w$} ",
+                "  {name:<name_w$} {kind:<kind_w$} \u{2502} {total:>size_w$} \u{2502} {free:>size_w$} ",
                 kind = drive.kind,
                 total = shown(drive.total),
                 free = shown(drive.free),
@@ -346,7 +348,7 @@ impl DriveMenu {
             grid.put(x + 1, row, &text, fg, bg);
             // the drive letter is its hot key, yellow on the selection too
             if drive.name.len() == 2 && drive.name.ends_with(':') {
-                grid.put(x + 2, row, &drive.name[..1], HOT, bg);
+                grid.put(x + 3, row, &drive.name[..1], HOT, bg);
             }
         }
     }
@@ -363,7 +365,7 @@ impl DriveMenu {
             self.selected = index;
             return self.choose(index);
         }
-        if col + 3 >= x && col < x + w + 3 && row + 1 >= y && row <= y + h {
+        if col + 2 >= x && col < x + w + 2 && row + 1 >= y && row <= y + h {
             return Outcome::Open;
         }
         Outcome::Closed
