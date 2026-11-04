@@ -26,6 +26,8 @@ pub struct Entry {
     pub allocated: u64,
     /// Hidden or system (dimmed, as Far's first highlighting groups do).
     pub hidden: bool,
+    /// The 8.3 name, where the volume keeps one (Ctrl+N shows it).
+    pub short_name: String,
     /// The file attributes (Windows' FILE_ATTRIBUTE_*; elsewhere directory,
     /// read only, hidden and reparse point made up from what is there).
     pub attributes: u32,
@@ -68,8 +70,8 @@ pub fn read(dir: &Path) -> Vec<Entry> {
     use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::Storage::FileSystem::{
         CreateFileW, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_HIDDEN, FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_SYSTEM,
-        FILE_FLAG_BACKUP_SEMANTICS, FILE_FULL_DIR_INFO, FILE_LIST_DIRECTORY, FILE_SHARE_DELETE, FILE_SHARE_READ,
-        FILE_SHARE_WRITE, FileFullDirectoryInfo, GetFileInformationByHandleEx, OPEN_EXISTING,
+        FILE_FLAG_BACKUP_SEMANTICS, FILE_ID_BOTH_DIR_INFO, FILE_LIST_DIRECTORY, FILE_SHARE_DELETE, FILE_SHARE_READ,
+        FILE_SHARE_WRITE, FileIdBothDirectoryInfo, GetFileInformationByHandleEx, OPEN_EXISTING,
     };
 
     let path: Vec<u16> = dir.as_os_str().encode_wide().chain(Some(0)).collect();
@@ -93,7 +95,7 @@ pub fn read(dir: &Path) -> Vec<Entry> {
     loop {
         let size = (buffer.len() * 8) as u32;
         // SAFETY: the buffer is 8-byte aligned and `size` bytes long.
-        if unsafe { GetFileInformationByHandleEx(handle, FileFullDirectoryInfo, buffer.as_mut_ptr().cast(), size) } == 0 {
+        if unsafe { GetFileInformationByHandleEx(handle, FileIdBothDirectoryInfo, buffer.as_mut_ptr().cast(), size) } == 0 {
             break;
         }
         let base = buffer.as_ptr().cast::<u8>();
@@ -101,7 +103,7 @@ pub fn read(dir: &Path) -> Vec<Entry> {
         loop {
             // SAFETY: the system wrote a chain of records into the buffer; each
             // starts at an 8-byte aligned offset given by the previous one.
-            let info = unsafe { &*base.add(offset).cast::<FILE_FULL_DIR_INFO>() };
+            let info = unsafe { &*base.add(offset).cast::<FILE_ID_BOTH_DIR_INFO>() };
             let len = info.FileNameLength as usize / 2;
             // SAFETY: the name runs `FileNameLength` bytes from `FileName`.
             let name16 = unsafe { std::slice::from_raw_parts(info.FileName.as_ptr(), len) };
@@ -119,6 +121,7 @@ pub fn read(dir: &Path) -> Vec<Entry> {
                     allocated: info.AllocationSize as u64,
                     hidden: attrs & (FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM) != 0,
                     attributes: attrs,
+                    short_name: String::from_utf16_lossy(&info.ShortName[..(info.ShortNameLength as usize / 2).min(12)]),
                     // for a reparse point the EA size field holds the tag
                     reparse: (attrs & FILE_ATTRIBUTE_REPARSE_POINT != 0).then_some(info.EaSize),
                     position: entries.len(),
@@ -512,6 +515,18 @@ pub fn date_time(time: Option<SystemTime>) -> (String, String) {
         (local.format("%d.%m.%y").to_string(), local.format("%H:%M").to_string())
     })
     .unwrap_or_default()
+}
+
+/// Far's truncate_left: the end of `s` in `cells`, `…` first when it is cut.
+pub fn truncate_left(s: &str, cells: usize) -> String {
+    let len = chars(s);
+    if len <= cells {
+        return s.to_string();
+    }
+    if cells == 0 {
+        return String::new();
+    }
+    format!("\u{2026}{}", s.chars().skip(len - (cells - 1)).collect::<String>())
 }
 
 /// Far's `truncate_path`: the root, an ellipsis and the tail.

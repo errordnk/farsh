@@ -88,6 +88,30 @@ impl Viewer {
         Outcome::Open
     }
 
+    /// The text in a window of the screen, wrapped at its width (the quick
+    /// view's viewer: Far's ViewerIsWrap is on by default), no bars.
+    pub fn paint_area(&mut self, grid: &mut Grid, x: u16, y: u16, width: u16, height: u16) {
+        self.page = height as usize;
+        let width = width.max(1) as usize;
+        let mut row = 0u16;
+        'lines: for line in self.lines.iter().skip(self.top) {
+            let chars: Vec<char> = line.chars().collect();
+            let mut start = 0;
+            loop {
+                if row >= height {
+                    break 'lines;
+                }
+                let piece: String = chars[start..(start + width).min(chars.len())].iter().collect();
+                grid.put(x, y + row, &piece, FG, BG);
+                row += 1;
+                start += width;
+                if start >= chars.len() {
+                    break;
+                }
+            }
+        }
+    }
+
     pub fn paint(&mut self, grid: &mut Grid) {
         grid.fill_with(0, 0, grid.cols, grid.rows, FG, BG);
         if grid.rows < 3 {

@@ -38,6 +38,14 @@ pub enum Command {
     Attributes,
     /// Alt+Del over the active panel.
     Wipe,
+    /// The Left/Right menu's Info panel, Quick view (no Tree panel: Far's
+    /// Tree.TurnOffCompletely hides it by default).
+    Info { right: bool },
+    QuickView { right: bool },
+    /// Show long names (Ctrl+N).
+    LongNames { right: bool },
+    /// Panel On/Off (Ctrl+F1, Ctrl+F2).
+    PanelOnOff { right: bool },
 }
 
 struct Item {
@@ -52,10 +60,6 @@ const fn item(label: &'static str, shortcut: &'static str, command: Option<Comma
     Item { label, shortcut, command, checked: false }
 }
 
-const fn checked(label: &'static str, shortcut: &'static str) -> Item {
-    Item { label, shortcut, command: None, checked: true }
-}
-
 /// A view mode item, checked when the panel shows it.
 fn view(label: &'static str, shortcut: &'static str, right: bool, mode: u8, current: u8) -> Item {
     Item { label, shortcut, command: Some(Command::View { right, mode }), checked: mode == current }
@@ -63,13 +67,20 @@ fn view(label: &'static str, shortcut: &'static str, right: bool, mode: u8, curr
 
 const SEPARATOR: Item = item("-", "", None);
 
+use crate::panels::Kind;
+
+#[cfg(test)]
+const FILES: [(Kind, bool, bool); 2] = [(Kind::Files, true, true), (Kind::Files, true, true)];
+
 struct Title {
     label: &'static str,
     items: Vec<Item>,
 }
 
 /// `mode`: the panel's view as Far numbers them, 1 Brief .. 9 File links, 0 Alternative full.
-fn panel_menu(title: &'static str, f: u8, mode: u8) -> Title {
+fn panel_menu(title: &'static str, f: u8, mode: u8, state: (Kind, bool, bool)) -> Title {
+    // SetLeftRightMenuChecks: the view mode is checked on a file panel only
+    let mode = if state.0 == Kind::Files { mode } else { u8::MAX };
     let (on_off, drive) = if f == 1 { ("Ctrl+F1", "Alt+F1") } else { ("Ctrl+F2", "Alt+F2") };
     let right = f == 2;
     Title {
@@ -86,21 +97,21 @@ fn panel_menu(title: &'static str, f: u8, mode: u8) -> Title {
             view("File lin&ks", "Ctrl+9", right, 9, mode),
             view("&Alternative full", "Ctrl+0", right, 0, mode),
             SEPARATOR,
-            item("&Info panel", "Ctrl+L", None),
-            item("Quick &view", "Ctrl+Q", None),
+            Item { label: "&Info panel", shortcut: "Ctrl+L", command: Some(Command::Info { right }), checked: state.0 == Kind::Info },
+            Item { label: "Quick &view", shortcut: "Ctrl+Q", command: Some(Command::QuickView { right }), checked: state.0 == Kind::QuickView },
             SEPARATOR,
             item("&Sort modes", "Ctrl+F12", Some(Command::SortModes { right })),
-            checked("Show long &names", "Ctrl+N"),
-            item("Panel &On/Off", on_off, None),
+            Item { label: "Show long &names", shortcut: "Ctrl+N", command: Some(Command::LongNames { right }), checked: state.2 },
+            item("Panel &On/Off", on_off, Some(Command::PanelOnOff { right })),
             item("&Re-read", "Ctrl+R", Some(Command::Reread)),
             item("&Change drive", drive, Some(Command::ChangeDrive { right: f == 2 })),
         ],
     }
 }
 
-fn titles(modes: [u8; 2]) -> Vec<Title> {
+fn titles(modes: [u8; 2], states: [(Kind, bool, bool); 2]) -> Vec<Title> {
     vec![
-        panel_menu("&Left", 1, modes[0]),
+        panel_menu("&Left", 1, modes[0], states[0]),
         Title {
             label: "&Files",
             items: vec![
@@ -182,7 +193,7 @@ fn titles(modes: [u8; 2]) -> Vec<Title> {
                 item("&Save setup", "Shift+F9", None),
             ],
         },
-        panel_menu("&Right", 2, modes[1]),
+        panel_menu("&Right", 2, modes[1], states[1]),
     ]
 }
 
@@ -230,8 +241,9 @@ pub struct Menu {
 impl Menu {
     /// Opens on title `current` (0 is Left, 4 is Right); `modes` are the
     /// left and right panels' views (1 Brief .. 4 Wide).
-    pub fn new(current: usize, modes: [u8; 2]) -> Self {
-        let mut menu = Self { titles: titles(modes), current: 0, item: 0, dropped: false };
+    /// `states`: each panel's kind, whether it is shown, whether it shows long names.
+    pub fn new(current: usize, modes: [u8; 2], states: [(Kind, bool, bool); 2]) -> Self {
+        let mut menu = Self { titles: titles(modes, states), current: 0, item: 0, dropped: false };
         menu.open(current);
         menu
     }
@@ -446,7 +458,7 @@ mod tests {
 
     #[test]
     fn f9_shows_the_bar_and_enter_drops_the_list_on_its_first_item() {
-        let mut menu = Menu::new(1, [2, 2]);
+        let mut menu = Menu::new(1, [2, 2], FILES);
         assert!(!menu.dropped, "the bar alone");
         menu.key(key(KeyCode::Right));
         assert_eq!(menu.current(), 2);
@@ -463,14 +475,14 @@ mod tests {
         menu.key(key(KeyCode::Down));
         assert_eq!(menu.key(key(KeyCode::Enter)), Outcome::Chosen(Command::FKey(7)));
         // a panel menu opens on Brief, not on the checked mode
-        let mut menu = Menu::new(0, [2, 2]);
+        let mut menu = Menu::new(0, [2, 2], FILES);
         menu.key(key(KeyCode::Down));
         assert_eq!(menu.key(key(KeyCode::Enter)), Outcome::Chosen(Command::View { right: false, mode: 1 }));
     }
 
     #[test]
     fn left_and_right_go_round_the_bar_and_letters_pick_items() {
-        let mut menu = Menu::new(0, [2, 2]);
+        let mut menu = Menu::new(0, [2, 2], FILES);
         menu.dropped = true;
         menu.key(key(KeyCode::Left));
         assert_eq!(menu.current(), 4, "Left from Left is Right");
@@ -492,7 +504,7 @@ mod tests {
     #[test]
     fn painting_puts_the_bar_on_top_and_the_drop_down_under_its_title() {
         let mut grid = Grid::new(80, 30);
-        let mut menu = Menu::new(1, [2, 2]);
+        let mut menu = Menu::new(1, [2, 2], FILES);
         menu.dropped = true;
         menu.paint(&mut grid);
         let top: String = (0..40).map(|c| grid.row(0)[c].text.clone()).collect();
@@ -503,7 +515,7 @@ mod tests {
 
     #[test]
     fn clicks_open_titles_choose_items_and_close_outside() {
-        let mut menu = Menu::new(0, [2, 2]);
+        let mut menu = Menu::new(0, [2, 2], FILES);
         let click = |col, row| MouseEvent {
             kind: MouseEventKind::Down(MouseButton::Left),
             column: col,

@@ -289,8 +289,23 @@ pub struct ArchivePick {
     pub items: Vec<String>,
 }
 
+/// What a panel is (Far's panel_type).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Kind {
+    Files,
+    /// Ctrl+L: about the other panel's disk and folder.
+    Info,
+    /// Ctrl+Q: the other panel's file under the cursor.
+    QuickView,
+}
+
 pub struct Panel {
     pub dir: PathBuf,
+    pub kind: Kind,
+    /// Ctrl+F1 / Ctrl+F2 hide and show it.
+    pub visible: bool,
+    /// Ctrl+N off: the short (8.3) names where there are any.
+    pub short_names: bool,
     /// Shown instead of `dir` while an archive is open in the panel.
     pub archive: Option<ArchiveView>,
     pub entries: Vec<Entry>,
@@ -313,6 +328,9 @@ impl Panel {
     pub fn new(dir: PathBuf) -> Self {
         let mut panel = Self {
             dir,
+            kind: Kind::Files,
+            visible: true,
+            short_names: false,
             archive: None,
             entries: Vec::new(),
             cursor: 0,
@@ -585,6 +603,14 @@ impl Panel {
 
     fn cell(&self, entry: &Entry, col: Col, width: usize, status: bool) -> (String, bool) {
         let marks = self.mode.marks_and_groups() && !status;
+        // Ctrl+N: AlternateOrNormal, the short name where there is one
+        let shown;
+        let entry = if self.short_names && !entry.short_name.is_empty() {
+            shown = Entry { name: entry.short_name.clone(), ..entry.clone() };
+            &shown
+        } else {
+            entry
+        };
         match col {
             Col::Name if status => (listing::status_name(&entry.name, width), false),
             // COLFLAGS_MARK: `√ ` before a marked name, two spaces before the rest
@@ -845,6 +871,10 @@ pub struct Panels {
     left: Panel,
     right: Panel,
     right_active: bool,
+    /// What the information panel shows, read for this folder (Far reads it when it draws).
+    info: Option<(PathBuf, crate::infopanel::Info)>,
+    /// What the quick view panel shows.
+    qview: Option<crate::qview::State>,
     /// The screen size at the last paint.
     screen: (u16, u16),
     /// Where each key of the key bar ends (exclusive), at the last paint.
@@ -853,7 +883,7 @@ pub struct Panels {
 
 impl Panels {
     pub fn new(dir: PathBuf) -> Self {
-        Self { left: Panel::new(dir.clone()), right: Panel::new(dir), right_active: false, screen: (0, 0), key_ends: Vec::new() }
+        Self { left: Panel::new(dir.clone()), right: Panel::new(dir), right_active: false, info: None, qview: None, screen: (0, 0), key_ends: Vec::new() }
     }
 
     pub fn active_dir(&self) -> &Path {
@@ -895,6 +925,70 @@ impl Panels {
         };
         let items = names.iter().map(|name| view.inner(name)).collect();
         Some(ArchivePick { view, items })
+    }
+
+    /// Ctrl+L/Q (Far's FilePanels::ProcessKey; Ctrl+T is off: Far's
+    /// Tree.TurnOffCompletely is on by default): the passive panel becomes
+    /// that kind, or the active one if it is already; again, a file panel.
+    pub fn toggle_kind(&mut self, kind: Kind) -> Key {
+        if !self.active_ref().visible {
+            return Key::Taken;
+        }
+        let target_right = if self.active_ref().kind == kind { self.right_active } else { !self.right_active };
+        let panel = if target_right { &mut self.right } else { &mut self.left };
+        panel.kind = if panel.kind == kind { Kind::Files } else { kind };
+        if panel.kind == Kind::Files {
+            panel.reload(None);
+        }
+        self.info = None;
+        Key::Taken
+    }
+
+    /// The Left/Right menu's Info panel, Quick view: that panel
+    /// becomes the kind (a file panel again if it is already).
+    pub fn set_kind(&mut self, right: bool, kind: Kind) {
+        let panel = if right { &mut self.right } else { &mut self.left };
+        panel.kind = if panel.kind == kind { Kind::Files } else { kind };
+        if panel.kind == Kind::Files {
+            panel.reload(None);
+        }
+        self.info = None;
+    }
+
+    /// Ctrl+F1 / Ctrl+F2 (Far's FilePanels): hide the panel (the other one
+    /// becomes active if it is shown), or show it (it becomes active if the
+    /// other one is hidden).
+    pub fn toggle_visible(&mut self, right: bool) -> Key {
+        let other_visible = if right { self.left.visible } else { self.right.visible };
+        let panel = if right { &mut self.right } else { &mut self.left };
+        if panel.visible {
+            panel.visible = false;
+            if other_visible {
+                self.right_active = !right;
+            }
+        } else {
+            panel.visible = true;
+            if !other_visible {
+                self.right_active = right;
+            }
+        }
+        Key::Taken
+    }
+
+    /// Whether something is still being counted for the quick view.
+    pub fn busy(&self) -> bool {
+        let shown = |panel: &Panel| panel.visible && panel.kind == Kind::QuickView;
+        (shown(&self.left) || shown(&self.right)) && self.qview.as_ref().is_some_and(crate::qview::State::scanning)
+    }
+
+    /// The panels' kinds, visibility and long names, for the menu.
+    pub fn states(&self) -> [(Kind, bool, bool); 2] {
+        [(self.left.kind, self.left.visible, !self.left.short_names), (self.right.kind, self.right.visible, !self.right.short_names)]
+    }
+
+    pub fn toggle_short_names(&mut self, right: bool) {
+        let panel = if right { &mut self.right } else { &mut self.left };
+        panel.short_names = !panel.short_names;
     }
 
     /// Shift+F2 on an archive file: all of it, to the other panel's folder.
@@ -1074,8 +1168,39 @@ impl Panels {
     pub fn key(&mut self, key: KeyEvent, line_is_empty: bool) -> Key {
         let plain = !key.modifiers.contains(KeyModifiers::CONTROL);
         let ctrl_only = key.modifiers == KeyModifiers::CONTROL;
+        // Far's FilePanels keys: Ctrl+L, Ctrl+Q, Ctrl+T, Ctrl+F1, Ctrl+F2
         match key.code {
-            KeyCode::Tab => self.right_active = !self.right_active,
+            KeyCode::Char('l') if ctrl_only => return self.toggle_kind(Kind::Info),
+            KeyCode::Char('q') if ctrl_only => return self.toggle_kind(Kind::QuickView),
+            KeyCode::F(1) if ctrl_only => return self.toggle_visible(false),
+            KeyCode::F(2) if ctrl_only => return self.toggle_visible(true),
+            KeyCode::Tab => {
+                if self.passive_ref().visible {
+                    self.right_active = !self.right_active;
+                }
+                return Key::Taken;
+            }
+            _ => {}
+        }
+        // no panel shown: everything is the command line's
+        if !self.active_ref().visible {
+            return Key::Pass;
+        }
+        if self.active_ref().kind == Kind::QuickView {
+            return self.quick_view_key(key);
+        }
+        if self.active_ref().kind != Kind::Files {
+            // the information panel takes no keys of its own; the function keys still work
+            return match key.code {
+                KeyCode::F(9 | 10) => self.function_key(if key.code == KeyCode::F(9) { 9 } else { 10 }),
+                _ => Key::Pass,
+            };
+        }
+        match key.code {
+            KeyCode::Char('n') if ctrl_only => {
+                let panel = self.active();
+                panel.short_names = !panel.short_names;
+            }
             KeyCode::Up if plain => self.active().move_cursor(-1),
             KeyCode::Down if plain => self.active().move_cursor(1),
             KeyCode::PageUp => self.active().page_move(false),
@@ -1265,14 +1390,13 @@ impl Panels {
         let right_width = grid.cols - left_width;
         let right_active = self.right_active;
         // PVS_FULLSCREEN: such a panel takes the whole screen; the active panel is drawn last, on top
-        let place = |panel: &Panel, left: bool| if panel.mode.full_screen() { (0, grid.cols) } else if left { (0, left_width) } else { (left_width, right_width) };
+        let place = |panel: &Panel, left: bool| {
+            if panel.kind == Kind::Files && panel.mode.full_screen() { (0, grid.cols) } else if left { (0, left_width) } else { (left_width, right_width) }
+        };
         let (left_at, right_at) = (place(&self.left, true), place(&self.right, false));
-        if right_active {
-            self.left.paint(grid, left_at.0, left_at.1, height, false);
-            self.right.paint(grid, right_at.0, right_at.1, height, true);
-        } else {
-            self.right.paint(grid, right_at.0, right_at.1, height, false);
-            self.left.paint(grid, left_at.0, left_at.1, height, true);
+        for right in [!right_active, right_active] {
+            let at = if right { right_at } else { left_at };
+            self.paint_one(grid, right, at.0, at.1, height, right == right_active);
         }
 
         let row = grid.rows - 2;
@@ -1280,6 +1404,72 @@ impl Panels {
 
         self.paint_key_bar(grid);
         Some((cursor_col.min(grid.cols - 1), row))
+    }
+
+    /// One panel, as what it is; a hidden one is not drawn (the shell shows there).
+    fn paint_one(&mut self, grid: &mut Grid, right: bool, x: u16, width: u16, height: u16, active: bool) {
+        let (panel, other) = if right { (&mut self.right, &self.left) } else { (&mut self.left, &self.right) };
+        if !panel.visible {
+            panel.area = (0, 0, 0, 0);
+            return;
+        }
+        match panel.kind {
+            Kind::Files => panel.paint(grid, x, width, height, active),
+            Kind::Info => {
+                panel.area = (x, 0, width, height);
+                let dir = other.dir.clone();
+                let in_archive = other.archive.is_some();
+                if self.info.as_ref().is_none_or(|(at, _)| *at != dir) {
+                    self.info = Some((dir.clone(), crate::infopanel::read(&dir)));
+                }
+                if let Some((_, info)) = &self.info {
+                    crate::infopanel::paint(grid, x, width, height, active, info, &dir, in_archive);
+                }
+            }
+            Kind::QuickView => {
+                panel.area = (x, 0, width, height);
+                // the other panel's entry under the cursor (not `..`, not inside an archive)
+                let target = (other.kind == Kind::Files && other.archive.is_none())
+                    .then(|| other.current().filter(|e| !e.is_up()).map(|e| other.dir.join(&e.name)))
+                    .flatten();
+                match target {
+                    Some(path) => {
+                        if self.qview.as_ref().is_none_or(|state| state.path != path) {
+                            self.qview = Some(crate::qview::State::new(path));
+                        }
+                        crate::qview::paint(grid, x, width, height, active, self.qview.as_mut());
+                    }
+                    None => crate::qview::paint(grid, x, width, height, active, None),
+                }
+            }
+        }
+    }
+
+    /// Keys of an active quick view (QuickView::ProcessKey): the viewer's
+    /// scrolling, `+`/`-` move the other panel's cursor, F3 views the file.
+    fn quick_view_key(&mut self, key: KeyEvent) -> Key {
+        let step = |panels: &mut Panels, delta: isize| {
+            let other = if panels.right_active { &mut panels.left } else { &mut panels.right };
+            other.move_cursor(delta);
+        };
+        match key.code {
+            KeyCode::Char('+') => step(self, 1),
+            KeyCode::Char('-') => step(self, -1),
+            KeyCode::F(3) => {
+                self.right_active = !self.right_active;
+                let asked = self.function_key(3);
+                self.right_active = !self.right_active;
+                return asked;
+            }
+            KeyCode::F(9 | 10) => return self.function_key(if key.code == KeyCode::F(9) { 9 } else { 10 }),
+            KeyCode::Up | KeyCode::Down | KeyCode::PageUp | KeyCode::PageDown | KeyCode::Home | KeyCode::End | KeyCode::Left | KeyCode::Right => {
+                if let Some(viewer) = self.qview.as_mut().and_then(|state| state.viewer()) {
+                    viewer.key(key);
+                }
+            }
+            _ => return Key::Pass,
+        }
+        Key::Taken
     }
 
     /// Far's `KeyBar::DisplayObject`: twelve keys of at least 8 cells (10-12
@@ -1768,6 +1958,60 @@ mod tests {
         assert!(rows.iter().any(|r| r.contains("\u{221A} Alpha")), "{rows:#?}");
         let rows_titles = &rows[1];
         assert!(rows_titles.contains("Size") && rows_titles.contains("Date") && !rows_titles.contains("Time"));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn ctrl_l_and_ctrl_q_turn_the_other_panel_into_info_and_quick_view() {
+        let dir = scratch("kinds");
+        let mut panels = Panels::new(dir.clone());
+        let ctrl = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL);
+        panels.key(ctrl('l'), true);
+        assert_eq!((panels.left.kind, panels.right.kind), (Kind::Files, Kind::Info));
+        let rows = painted(&mut panels);
+        assert!(rows[0].contains(" Information "), "{:?}", rows[0]);
+        // Ctrl+Q over it: the other panel becomes the quick view of the file under the cursor
+        panels.key(ctrl('q'), true);
+        assert_eq!(panels.right.kind, Kind::QuickView);
+        for _ in 0..3 {
+            panels.key(key(KeyCode::Down), true);
+        }
+        assert_eq!(panels.left.current().unwrap().name, "apple.txt");
+        let rows = painted(&mut panels);
+        assert!(rows[0].contains(" Quick view "));
+        assert!(rows.iter().any(|r| r.contains("apple.txt")));
+        // again: a file panel
+        panels.key(ctrl('q'), true);
+        assert_eq!(panels.right.kind, Kind::Files);
+        // Ctrl+T does nothing: Far's tree is off by default
+        panels.key(ctrl('t'), true);
+        assert_eq!(panels.right.kind, Kind::Files);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn ctrl_f1_and_ctrl_f2_hide_and_show_a_panel_and_tab_does_not_go_to_a_hidden_one() {
+        let dir = scratch("onoff");
+        let mut panels = Panels::new(dir.clone());
+        let ctrl_f = |n| KeyEvent::new(KeyCode::F(n), KeyModifiers::CONTROL);
+        panels.key(ctrl_f(1), true);
+        assert!(!panels.left.visible);
+        assert!(panels.right_active, "the other panel took over");
+        panels.key(key(KeyCode::Tab), true);
+        assert!(panels.right_active, "nothing to Tab to");
+        let rows = painted(&mut panels);
+        assert!(!rows[0].starts_with('\u{2554}'), "the left half is the shell's: {:?}", rows[0]);
+        panels.key(ctrl_f(2), true);
+        assert!(!panels.right.visible && !panels.left.visible);
+        // showing one when the other is hidden makes it active
+        panels.key(ctrl_f(1), true);
+        assert!(panels.left.visible && !panels.right_active);
+        panels.key(ctrl_f(2), true);
+        assert!(panels.right.visible && !panels.right_active, "the other was shown: the active stays");
+        // Ctrl+N switches the active panel to short names and back
+        panels.key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL), true);
+        assert!(panels.left.short_names);
+        assert_eq!(panels.states()[0], (Kind::Files, true, false), "the menu: long names unchecked");
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

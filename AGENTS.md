@@ -94,6 +94,18 @@ over the shell screen.
   profiles or saved settings (those buttons are disabled), zip cannot be
   written with LZMA or Deflate64 nor 7z with Deflate64 (an error says so),
   Shift+F2 cannot "Go to target directory".
+- The Left/Right menus are Far's (config.cpp's LeftMenu): all ten view
+  modes (Ctrl+1..9, 0: config.cpp's InitialModes, see `ViewMode`), Info
+  panel (Ctrl+L, `src/infopanel.rs`: infolist.cpp's sections), Quick view
+  (Ctrl+Q, `src/qview.rs`: qview.cpp, a folder counted as GetDirInfo does,
+  in the background), Show long names (Ctrl+N: the 8.3 names from
+  FILE_ID_BOTH_DIR_INFO), Panel On/Off (Ctrl+F1/F2, with Far's rules for
+  which panel becomes active). Ctrl+L/Q turn the passive panel (the active
+  one if it is that kind already), again a file panel. No Tree panel: Far's
+  Tree.TurnOffCompletely is on by default, its menu item is hidden and
+  Ctrl+T does nothing. Known differences: the info panel has no computer
+  or user description lines, no plugin (archive) section, and the folder
+  description is shown as text, not in a scrollable viewer.
 - Enter on a link: a junction or symlink is entered by its own path; one
   that denies listing itself (Windows' compatibility junctions `My Documents`,
   `Application Data`, `Start Menu`...) is followed to its target, as Far does.

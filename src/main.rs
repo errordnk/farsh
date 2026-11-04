@@ -10,12 +10,14 @@ mod drives;
 mod editor;
 mod fileops;
 mod grid;
+mod infopanel;
 mod keys;
 mod listing;
 mod menu;
 mod mouse;
 mod palette;
 mod panels;
+mod qview;
 mod shell;
 mod sorting;
 mod sortmenu;
@@ -157,10 +159,11 @@ impl App {
                 out.flush()?;
                 dirty = false;
             }
-            // A copy in progress redraws as it goes.
-            let wait = if matches!(self.overlay, Overlay::Job(..)) { 50 } else { 10 };
+            // A copy in progress, or a folder the quick view is counting, redraws as it goes.
+            let busy = matches!(self.overlay, Overlay::Job(..)) || (self.panels_visible && self.panels.busy());
+            let wait = if busy { 50 } else { 10 };
             if !event::poll(Duration::from_millis(wait))? {
-                dirty |= matches!(self.overlay, Overlay::Job(..));
+                dirty |= busy;
                 continue;
             }
             match event::read()? {
@@ -487,7 +490,7 @@ impl App {
             }
             Request::Menu => {
                 let side = if self.panels.right_active() { 4 } else { 0 };
-                self.overlay = Overlay::Menu(Menu::new(self.last_menu.unwrap_or(side), self.panels.view_modes()));
+                self.overlay = Overlay::Menu(Menu::new(self.last_menu.unwrap_or(side), self.panels.view_modes(), self.panels.states()));
             }
         }
     }
@@ -515,6 +518,12 @@ impl App {
                 if let Key::Ask(request) = self.panels.attributes_request() {
                     self.request(request);
                 }
+            }
+            menu::Command::Info { right } => self.panels.set_kind(right, panels::Kind::Info),
+            menu::Command::QuickView { right } => self.panels.set_kind(right, panels::Kind::QuickView),
+            menu::Command::LongNames { right } => self.panels.toggle_short_names(right),
+            menu::Command::PanelOnOff { right } => {
+                self.panels.toggle_visible(right);
             }
             menu::Command::Reread => self.panels.refresh(None),
             menu::Command::SwapPanels => self.panels.swap(),
