@@ -36,6 +36,8 @@ pub enum Command {
     SortModes { right: bool },
     /// Ctrl+A over the active panel.
     Attributes,
+    /// Alt+Del over the active panel.
+    Wipe,
 }
 
 struct Item {
@@ -109,7 +111,7 @@ fn titles(modes: [u8; 2]) -> Vec<Title> {
                 item("Lin&k", "Alt+F6", None),
                 item("&Make folder", "F7", Some(Command::FKey(7))),
                 item("&Delete", "F8", Some(Command::FKey(8))),
-                item("Wipe", "Alt+Del", None),
+                item("&Wipe", "Alt+Del", Some(Command::Wipe)),
                 SEPARATOR,
                 item("Add &to archive", "Shift+F1", None),
                 item("E&xtract files", "Shift+F2", None),

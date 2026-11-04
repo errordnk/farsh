@@ -526,6 +526,8 @@ pub enum Request {
     Move(Vec<PathBuf>, PathBuf),
     MkDir,
     Delete(Vec<PathBuf>),
+    /// Alt+Del.
+    Wipe(Vec<PathBuf>),
     Quit,
     /// F9: the menu bar.
     Menu,
@@ -744,6 +746,8 @@ impl Panels {
                 self.set_view(right, c as u8 - b'0');
             }
             KeyCode::F(12) if ctrl_only => return Key::Ask(Request::SortMenu),
+            // Far's Alt+Del: Wipe
+            KeyCode::Delete if key.modifiers == KeyModifiers::ALT => return self.wipe_request(),
             // Far's Ctrl+A, whatever is typed
             KeyCode::Char('a') if ctrl_only => return self.attributes_request(),
             KeyCode::F(n) if ctrl_only && SortMode::by_key(n).is_some() => {
@@ -826,6 +830,12 @@ impl Panels {
             _ => return Key::Pass,
         }
         Key::Taken
+    }
+
+    /// Alt+Del: wipe the selection, or the entry under the cursor (not `..`).
+    pub fn wipe_request(&mut self) -> Key {
+        let sources = self.active_ref().sources();
+        if sources.is_empty() { Key::Taken } else { Key::Ask(Request::Wipe(sources)) }
     }
 
     /// Ctrl+A: the selection's attributes, or the entry's under the cursor (not `..`).

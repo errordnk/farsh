@@ -28,6 +28,8 @@ pub enum Action {
     Move(Vec<PathBuf>),
     MkDir,
     Delete(Vec<PathBuf>),
+    /// Alt+Del.
+    Wipe(Vec<PathBuf>),
     /// Ctrl+A: what it opened with and what the user did since.
     Attributes(Box<crate::attributes::Setup>),
     Quit,
@@ -322,9 +324,63 @@ impl Dialog {
             items.push(Item::Text { text: name, align, highlight: !single });
         }
         items.push(Item::Separator(None));
-        items.push(Item::Buttons(vec![button("Delete", "ok", true), button("Cancel", "cancel", false)]));
+        // delete.cpp's show_confirmation: Wipe has its own title and button
+        let verb = if matches!(action, Action::Wipe(_)) { "Wipe" } else { "Delete" };
+        items.push(Item::Buttons(vec![button(verb, "ok", true), button("Cancel", "cancel", false)]));
         let focus = items.len() - 1;
-        Self { title: "Delete".into(), style: Style::Warning, layout: Layout::Builder, items, focus, button: 0, places: vec![], hook: None, sub: None, action }
+        Self { title: verb.into(), style: Style::Warning, layout: Layout::Builder, items, focus, button: 0, places: vec![], hook: None, sub: None, action }
+    }
+
+    /// Delete/Wipe meets a folder with something in it (delete.cpp's
+    /// Message: "Delete folder", the folder, Delete/All/Skip/Cancel).
+    pub fn folder_not_empty(path: &std::path::Path, wipe: bool) -> Self {
+        let (title, line, first) = if wipe {
+            ("Wipe folder", "The following folder will be wiped:", "&Wipe")
+        } else {
+            ("Delete folder", "The following folder will be deleted:", "&Delete")
+        };
+        let buttons = vec![button(first, "proceed", true), button("&All", "all", false), button("&Skip", "skip", false), button("&Cancel", "cancel", false)];
+        Self::warning(title, vec![line.into(), path.display().to_string()], buttons)
+    }
+
+    /// Delete/Wipe meets a read-only file (ConfirmDeleteReadOnlyFile).
+    pub fn read_only(path: &std::path::Path, wipe: bool) -> Self {
+        let (ask, first) = if wipe { ("Do you wish to wipe it?", "&Wipe") } else { ("Do you wish to delete it?", "&Delete") };
+        let buttons = vec![
+            button(first, "proceed", true),
+            button("&All", "all", false),
+            button("&Skip", "skip", false),
+            button("S&kip all", "skipall", false),
+            button("&Cancel", "cancel", false),
+        ];
+        Self::warning("Warning", vec!["The file is read only".into(), path.display().to_string(), ask.into()], buttons)
+    }
+
+    /// Wipe meets a file with other names (confirm_erase_file_with_hardlinks).
+    pub fn hard_links(path: &std::path::Path) -> Self {
+        let lines = vec![
+            path.display().to_string(),
+            "Several hard links link to this file.".into(),
+            "Wiping this file will void all files linking to it.".into(),
+            "Do you wish to wipe this file?".into(),
+        ];
+        let buttons = vec![
+            button("&Wipe", "proceed", true),
+            button("&All", "all", false),
+            button("&Skip", "skip", false),
+            button("S&kip all", "skipall", false),
+            button("&Cancel", "cancel", false),
+        ];
+        Self::warning("Error", lines, buttons)
+    }
+
+    /// Far's Message(MSG_WARNING): the lines centered, a separator, the buttons.
+    fn warning(title: &str, lines: Vec<String>, buttons: Vec<Button>) -> Self {
+        let mut items: Vec<Item> = lines.into_iter().map(centered).collect();
+        items.push(Item::Separator(None));
+        items.push(Item::Buttons(buttons));
+        let focus = items.len() - 1;
+        Self { title: title.into(), style: Style::Warning, layout: Layout::Message, items, focus, button: 0, places: vec![], hook: None, sub: None, action: Action::Conflict }
     }
 
     /// A question with Yes and No (Far's Message with no hot keys).
@@ -1462,8 +1518,54 @@ fn masked_key(mask: &[char], text: &mut [char], cursor: &mut usize, unchanged: &
 
 // ---------------------------------------------------------------- progress
 
-/// The progress box of a running copy, move or delete.
+/// Far's delete_progress (delete.cpp, DlgW 76): "Deleting/Wiping the file or
+/// folder", the name, for a wipe the file's bar, a separator, the files
+/// done (Far's DelShowTotal is off: no total bar).
+fn paint_delete_progress(job: &Job, grid: &mut Grid) {
+    const DLG_W: u16 = 76;
+    let wipe = job.kind == Kind::Wipe;
+    let p = Style::Normal.palette();
+    let progress = &job.progress;
+    // DlgH 10, a row less without the wipe bar, another without the total bar
+    let h = if wipe { 9 } else { 8 };
+    let frame = Frame::new((grid.cols, grid.rows), DLG_W, h, false);
+    frame.draw(grid, job.kind.title(), &p);
+    let x = frame.x + 5;
+    let width = (DLG_W - 10) as usize;
+    let y = |row: u16| frame.y + row;
+    grid.put(x, y(2), if wipe { "Wiping the file or folder" } else { "Deleting the file or folder" }, p.fg, p.bg);
+    grid.put(x, y(3), &progress.from.chars().take(width).collect::<String>(), p.fg, p.bg);
+    let mut row = 4;
+    if wipe {
+        let percent = if progress.file_size == 0 { 0 } else { progress.file_done * 100 / progress.file_size };
+        grid.put(x, y(row), &progressbar(width, percent as usize), p.fg, p.bg);
+        row += 1;
+    }
+    frame.separator(grid, y(row), None, &p);
+    grid.put(x, y(row + 1), &counter("Files:", "Bytes:", progress.files_done as u64, width - 5), p.fg, p.bg);
+}
+
+/// Far's make_progressbar with the percent: `█` done, `░` to do, ` NN%`.
+fn progressbar(size: usize, percent: usize) -> String {
+    let percent_text = format!(" {percent:3}%");
+    let size = size.saturating_sub(percent_text.len());
+    let done = percent.min(100) * size / 100;
+    format!("{}{}{percent_text}", "\u{2588}".repeat(done), "\u{2591}".repeat(size - done))
+}
+
+/// Far's copy_progress::FormatCounter without a total: the label padded to
+/// the longer of the two, the number right-aligned to `max_width`.
+fn counter(label: &str, other: &str, value: u64, max_width: usize) -> String {
+    let padded = label.len().max(other.len()) + 1;
+    let value = group(value);
+    format!("{label:<padded$}{value:>width$}", width = max_width.saturating_sub(padded))
+}
+
+/// The progress box of a running copy, move, delete or wipe.
 pub fn paint_progress(job: &Job, grid: &mut Grid) {
+    if matches!(job.kind, Kind::Delete | Kind::Wipe) {
+        return paint_delete_progress(job, grid);
+    }
     let p = Style::Normal.palette();
     let progress = &job.progress;
     let copying = job.kind != Kind::Delete;
@@ -1487,7 +1589,7 @@ pub fn paint_progress(job: &Job, grid: &mut Grid) {
     let verb = match job.kind {
         Kind::Copy => "Copying the file",
         Kind::Move => "Moving the file",
-        Kind::Delete => "Deleting the file",
+        Kind::Delete | Kind::Wipe => "Deleting the file",
     };
     line(grid, verb);
     line(grid, &fit(&progress.from));
@@ -1893,5 +1995,29 @@ mod tests {
         assert_eq!(setup.current[14], 1, "Pinned, set in More, is kept");
         assert!(!screen(&dialog).iter().any(|row| row.contains("Integrity stream")), "More is closed");
         std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn the_wipe_progress_box_is_fars_delete_progress() {
+        let mut job = crate::fileops::start(Kind::Wipe, vec![], crate::fileops::Options::default());
+        job.progress.from = "C:\\x\\big.iso".into();
+        job.progress.file_size = 200;
+        job.progress.file_done = 100;
+        job.progress.files_done = 1234;
+        let mut grid = Grid::new(80, 25);
+        paint_progress(&job, &mut grid);
+        let rows: Vec<String> = (0..25).map(|row| grid.row(row).iter().map(|cell| cell.text.clone()).collect()).collect();
+        // 76 by 9, centered: the box at column 2, row 8
+        let row = |y: usize| rows[8 + y].clone();
+        assert_eq!(at_col(&row(1), 5, 1), "\u{2554}");
+        assert_eq!(at_col(&row(1), 37, 6), " Wipe ", "centered on the double frame");
+        assert_eq!(at_col(&row(2), 7, 25), "Wiping the file or folder");
+        assert_eq!(at_col(&row(3), 7, 12), "C:\\x\\big.iso");
+        let bar = at_col(&row(4), 7, 66);
+        assert_eq!(bar.chars().filter(|&c| c == '\u{2588}').count(), 30, "Far: 50 * 61 / 100: {bar}");
+        assert!(bar.ends_with("  50%"), "{bar}");
+        assert_eq!(at_col(&row(5), 5, 1), "\u{255F}");
+        assert_eq!(at_col(&row(6), 7, 61), format!("Files: {:>54}", "1 234"));
+        assert_eq!(at_col(&row(7), 5, 1), "\u{255A}");
     }
 }

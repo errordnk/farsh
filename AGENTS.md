@@ -60,6 +60,15 @@ over the shell screen.
   differences: a link's target is shown but not editable, several hard
   links are not listed. On Linux/macOS only Read only (the write bits),
   the modification/access times and the owner can be set.
+- F8 and Alt+Del (Wipe) go as delete.cpp goes: the same confirmation (Wipe
+  has its own title and button), then every folder with something in it is
+  asked about ("The following folder will be deleted/wiped:", Delete/All/
+  Skip/Cancel) until All, a read-only file too (Warning, with Skip all),
+  and for a wipe a file with other hard links (Error). Wipe is Far's
+  EraseFile: zeros (WipeSymbol 0) written through to the end, the file cut
+  to nothing, renamed to `F3T*.tmp` and removed; a folder is renamed, then
+  removed. The progress box is Far's delete_progress (76 wide, the wipe
+  bar, "Files:", no total bar: DelShowTotal is off by default).
 - Enter on a link: a junction or symlink is entered by its own path; one
   that denies listing itself (Windows' compatibility junctions `My Documents`,
   `Application Data`, `Start Menu`...) is followed to its target, as Far does.

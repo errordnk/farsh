@@ -15,6 +15,8 @@ pub enum Kind {
     Copy,
     Move,
     Delete,
+    /// Alt+Del: each file is overwritten, cut to nothing, renamed, then removed.
+    Wipe,
 }
 
 impl Kind {
@@ -24,6 +26,7 @@ impl Kind {
             Kind::Copy => "Copy",
             Kind::Move => "Move",
             Kind::Delete => "Delete",
+            Kind::Wipe => "Wipe",
         }
     }
 }
@@ -86,16 +89,34 @@ pub struct Conflict {
     pub old_modified: Option<SystemTime>,
 }
 
+/// What the worker stops to ask (Far's messages during a copy or a delete).
+#[derive(Clone, Debug)]
+pub enum Question {
+    Conflict(Conflict),
+    /// Delete/Wipe: "The following folder will be deleted:" (it has something in it).
+    FolderNotEmpty(PathBuf),
+    /// Delete/Wipe: "The file is read only".
+    ReadOnly(PathBuf),
+    /// Wipe: "Several hard links link to this file."
+    HardLinks(PathBuf),
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Answer {
     Overwrite { remember: bool },
     Skip { remember: bool },
+    /// Delete/Wipe: this one (Far's first button).
+    Proceed,
+    /// Delete/Wipe: this one and every other like it.
+    All,
+    /// Delete/Wipe: skip this one and every other like it.
+    SkipAll,
     Cancel,
 }
 
 enum Event {
     Progress(Progress),
-    Conflict(Conflict),
+    Ask(Question),
     Done(Result<(), String>),
 }
 
@@ -106,7 +127,7 @@ pub struct Job {
     /// Set when the worker is finished: `Ok`, or what went wrong (cancelling is an error).
     pub result: Option<Result<(), String>>,
     /// A question the worker is waiting on.
-    pub conflict: Option<Conflict>,
+    pub question: Option<Question>,
     events: Receiver<Event>,
     answers: Sender<Answer>,
     cancel: Arc<AtomicBool>,
@@ -118,14 +139,14 @@ impl Job {
         while let Ok(event) = self.events.try_recv() {
             match event {
                 Event::Progress(progress) => self.progress = progress,
-                Event::Conflict(conflict) => self.conflict = Some(conflict),
+                Event::Ask(question) => self.question = Some(question),
                 Event::Done(result) => self.result = Some(result),
             }
         }
     }
 
     pub fn answer(&mut self, answer: Answer) {
-        self.conflict = None;
+        self.question = None;
         let _ = self.answers.send(answer);
     }
 
@@ -148,7 +169,7 @@ pub fn start(kind: Kind, items: Vec<(PathBuf, PathBuf)>, options: Options) -> Jo
         let result = Worker::new(kind, options, sender.clone(), answer_receiver, worker_cancel).run(&items);
         let _ = sender.send(Event::Done(result.map_err(|e| e.to_string())));
     });
-    Job { kind, progress: Progress::default(), started: Instant::now(), result: None, conflict: None, events, answers, cancel }
+    Job { kind, progress: Progress::default(), started: Instant::now(), result: None, question: None, events, answers, cancel }
 }
 
 /// Where each of `sources` goes when the user typed `typed` in the Copy/Move
@@ -231,6 +252,14 @@ struct Worker {
     last_sent: Instant,
     /// What "remember" turned the policy into.
     existing: Existing,
+    /// Delete/Wipe: "All" was the answer about a folder with something in it.
+    delete_folders: bool,
+    /// Delete/Wipe: "All" (`Some(true)`) or "Skip all" about a read-only file.
+    read_only: Option<bool>,
+    /// Delete/Wipe: something was skipped, so the folders holding it stay.
+    kept: bool,
+    /// Wipe: "All" (`Some(true)`) or "Skip all" about a file with hard links.
+    hard_links: Option<bool>,
     /// Sources a copy skipped: a move must not delete them.
     skipped: HashSet<PathBuf>,
 }
@@ -240,6 +269,10 @@ impl Worker {
         Self {
             kind,
             existing: options.existing,
+            delete_folders: false,
+            read_only: None,
+            kept: false,
+            hard_links: None,
             options,
             events,
             answers,
@@ -272,11 +305,12 @@ impl Worker {
                 self.copy_all(&plan)
             }
             Kind::Move => self.move_all(items),
-            Kind::Delete => {
-                let sources: Vec<_> = items.iter().map(|(src, _)| (src.clone(), src.clone())).collect();
-                let plan = plan(&sources, false)?;
-                self.start_totals(&plan);
-                self.delete_all(&plan)
+            Kind::Delete | Kind::Wipe => {
+                for (src, _) in items {
+                    self.remove(src)?;
+                }
+                self.send(true);
+                Ok(())
             }
         }
     }
@@ -320,7 +354,7 @@ impl Worker {
                     old_size: old.len(),
                     old_modified: old.modified().ok(),
                 };
-                let _ = self.events.send(Event::Conflict(conflict));
+                let _ = self.events.send(Event::Ask(Question::Conflict(conflict)));
                 // The worker waits here for the user; cancelling answers too.
                 match self.answers.recv() {
                     Ok(Answer::Overwrite { remember }) => {
@@ -335,7 +369,7 @@ impl Worker {
                         }
                         Existing::Skip
                     }
-                    Ok(Answer::Cancel) | Err(_) => return Err(std::io::Error::other("Cancelled")),
+                    Ok(_) | Err(_) => return Err(std::io::Error::other("Cancelled")),
                 }
             }
             other => other,
@@ -422,6 +456,142 @@ impl Worker {
         Ok(())
     }
 
+    /// Asks the user and waits for the answer (cancelling answers too).
+    fn ask(&mut self, question: Question) -> std::io::Result<Answer> {
+        let _ = self.events.send(Event::Ask(question));
+        match self.answers.recv() {
+            Ok(Answer::Cancel) | Err(_) => Err(std::io::Error::other("Cancelled")),
+            Ok(answer) => Ok(answer),
+        }
+    }
+
+    /// Delete/Wipe of `path` and everything in it, as Far's ShellDelete
+    /// goes: a folder with something in it is asked about (until "All"),
+    /// a read-only file too; the folder goes after what was in it.
+    fn remove(&mut self, path: &Path) -> std::io::Result<()> {
+        self.check_cancel()?;
+        let meta = fs::symlink_metadata(path)?;
+        if meta.is_dir() {
+            let has_something = fs::read_dir(path)?.next().is_some();
+            if has_something && !self.delete_folders {
+                match self.ask(Question::FolderNotEmpty(path.to_path_buf()))? {
+                    Answer::All => self.delete_folders = true,
+                    Answer::Skip { .. } | Answer::SkipAll => {
+                        self.kept = true;
+                        return Ok(());
+                    }
+                    _ => {}
+                }
+            }
+            let mut children: Vec<_> = fs::read_dir(path)?.collect::<Result<_, _>>()?;
+            children.sort_by_key(|child| child.file_name());
+            for child in children {
+                self.remove(&child.path())?;
+            }
+            self.progress.from = path.display().to_string();
+            self.send(false);
+            let removed = if self.kind == Kind::Wipe { erase_dir(path) } else { fs::remove_dir(path) };
+            return match removed {
+                Err(_) if self.kept => Ok(()),
+                other => other,
+            };
+        }
+        if is_read_only(&meta) {
+            let go = match self.read_only {
+                Some(all) => all,
+                None => match self.ask(Question::ReadOnly(path.to_path_buf()))? {
+                    Answer::All => {
+                        self.read_only = Some(true);
+                        true
+                    }
+                    Answer::SkipAll => {
+                        self.read_only = Some(false);
+                        false
+                    }
+                    Answer::Skip { .. } => false,
+                    _ => true,
+                },
+            };
+            if !go {
+                self.kept = true;
+                return Ok(());
+            }
+            let mut permissions = meta.permissions();
+            #[allow(clippy::permissions_set_readonly_false)]
+            permissions.set_readonly(false);
+            fs::set_permissions(path, permissions)?;
+        }
+        self.progress.from = path.display().to_string();
+        self.progress.file_size = meta.len();
+        self.progress.file_done = 0;
+        self.send(false);
+        // Far's confirm_erase_file_with_hardlinks: wiping voids every other name of it
+        if self.kind == Kind::Wipe && !meta.file_type().is_symlink() && link_count(path) > 1 {
+            let go = match self.hard_links {
+                Some(all) => all,
+                None => match self.ask(Question::HardLinks(path.to_path_buf()))? {
+                    Answer::All => {
+                        self.hard_links = Some(true);
+                        true
+                    }
+                    Answer::SkipAll => {
+                        self.hard_links = Some(false);
+                        false
+                    }
+                    Answer::Skip { .. } => false,
+                    _ => true,
+                },
+            };
+            if !go {
+                self.kept = true;
+                return Ok(());
+            }
+        }
+        if is_dir_link(&meta) {
+            fs::remove_dir(path)?;
+        } else if self.kind == Kind::Wipe && !meta.file_type().is_symlink() {
+            self.erase_file(path)?;
+        } else {
+            fs::remove_file(path)?;
+        }
+        self.progress.files_done += 1;
+        self.send(false);
+        Ok(())
+    }
+
+    /// Far's EraseFile: the data overwritten with zeros (Far's WipeSymbol)
+    /// to the end, written through, the file cut to nothing, renamed to a
+    /// temporary name and removed.
+    fn erase_file(&mut self, path: &Path) -> std::io::Result<()> {
+        let mut options = fs::OpenOptions::new();
+        options.read(true).write(true);
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+            const FILE_FLAG_WRITE_THROUGH: u32 = 0x8000_0000;
+            const FILE_FLAG_SEQUENTIAL_SCAN: u32 = 0x0800_0000;
+            options.custom_flags(FILE_FLAG_WRITE_THROUGH | FILE_FLAG_SEQUENTIAL_SCAN);
+        }
+        let mut file = options.open(path)?;
+        let size = file.metadata()?.len();
+        let zeros = vec![0u8; 65536];
+        let mut done = 0u64;
+        while done < size {
+            self.check_cancel()?;
+            let chunk = (size - done).min(zeros.len() as u64) as usize;
+            file.write_all(&zeros[..chunk])?;
+            done += chunk as u64;
+            self.progress.file_done = done;
+            self.send(false);
+        }
+        file.sync_all()?;
+        file.set_len(0)?;
+        drop(file);
+        let temp = temp_name(path);
+        fs::rename(path, &temp)?;
+        fs::remove_file(&temp)
+    }
+
     /// Removes the files, then the folders, the deepest first; what a copy
     /// skipped stays (and so do the folders holding it).
     fn delete_all(&mut self, plan: &[Entry]) -> std::io::Result<()> {
@@ -445,6 +615,63 @@ impl Worker {
         }
         self.send(true);
         Ok(())
+    }
+}
+
+/// Far's EraseDirectory: the folder renamed to a temporary name, then removed.
+fn erase_dir(path: &Path) -> std::io::Result<()> {
+    let temp = temp_name(path);
+    fs::rename(path, &temp)?;
+    fs::remove_dir(&temp)
+}
+
+/// A name nobody has, next to `path` (Far's MakeTemp: `F3T` and hex digits).
+fn temp_name(path: &Path) -> PathBuf {
+    let dir = path.parent().unwrap_or(Path::new(""));
+    let seed = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.subsec_nanos()) ^ std::process::id();
+    (0u32..)
+        .map(|n| dir.join(format!("F3T{:05X}.tmp", seed.wrapping_add(n) & 0xF_FFFF)))
+        .find(|candidate| fs::symlink_metadata(candidate).is_err())
+        .unwrap_or_else(|| dir.join("F3T.tmp"))
+}
+
+/// How many names the file has (hard links).
+fn link_count(path: &Path) -> u32 {
+    #[cfg(windows)]
+    {
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::Storage::FileSystem::{BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle};
+        let Ok(file) = fs::File::open(path) else { return 1 };
+        // SAFETY: plain data, filled in by the call.
+        let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
+        // SAFETY: `file` is open for the call.
+        if unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut info) } == 0 {
+            return 1;
+        }
+        info.nNumberOfLinks
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        fs::metadata(path).map_or(1, |m| m.nlink() as u32)
+    }
+}
+
+fn is_read_only(meta: &fs::Metadata) -> bool {
+    meta.permissions().readonly() && !meta.file_type().is_symlink()
+}
+
+/// A link to a folder (a junction or a directory symlink): removed as a folder on Windows.
+fn is_dir_link(meta: &fs::Metadata) -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        meta.file_type().is_symlink() && meta.file_attributes() & 0x10 != 0
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = meta;
+        false
     }
 }
 
@@ -556,7 +783,7 @@ mod tests {
         while job.result.is_none() && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(10));
             job.poll();
-            if job.conflict.is_some() {
+            if job.question.is_some() {
                 job.answer(answers[asked.min(answers.len() - 1)]);
                 asked += 1;
             }
@@ -587,7 +814,7 @@ mod tests {
         fs::write(dir.join("keep.txt"), "mine").unwrap();
         let mut job = start(Kind::Copy, vec![(dir.join("a").join("x.txt"), dir.join("keep.txt"))], Options::default());
         let deadline = Instant::now() + Duration::from_secs(20);
-        while job.conflict.is_none() && Instant::now() < deadline {
+        while job.question.is_none() && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(10));
             job.poll();
         }
@@ -621,11 +848,90 @@ mod tests {
         fs::remove_dir_all(dir).unwrap();
     }
 
+    /// Runs `job`, answering its questions in turn with `answers`; what was asked.
+    fn answering(mut job: Job, answers: &[Answer]) -> (Result<(), String>, Vec<String>) {
+        let mut asked = Vec::new();
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while job.result.is_none() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(5));
+            job.poll();
+            if let Some(question) = job.question.clone() {
+                asked.push(match question {
+                    Question::Conflict(c) => format!("conflict {}", c.dst.display()),
+                    Question::FolderNotEmpty(path) => format!("folder {}", path.file_name().unwrap().to_string_lossy()),
+                    Question::ReadOnly(path) => format!("read only {}", path.file_name().unwrap().to_string_lossy()),
+                    Question::HardLinks(path) => format!("hard links {}", path.file_name().unwrap().to_string_lossy()),
+                });
+                job.answer(answers.get(asked.len() - 1).copied().unwrap_or(Answer::Cancel));
+            }
+        }
+        (job.result.expect("the job finished"), asked)
+    }
+
     #[test]
-    fn deleting_removes_files_and_folders() {
+    fn deleting_asks_about_each_folder_with_something_in_it_until_all() {
         let dir = scratch("delete");
-        wait(start(Kind::Delete, vec![(dir.join("a"), dir.join("a"))], Options::default())).unwrap();
+        let (result, asked) = answering(start(Kind::Delete, vec![(dir.join("a"), dir.join("a"))], Options::default()), &[Answer::Proceed, Answer::Proceed]);
+        result.unwrap();
+        assert_eq!(asked, ["folder a", "folder sub"]);
         assert!(!dir.join("a").exists());
+
+        let dir = scratch("deleteall");
+        let (result, asked) = answering(start(Kind::Delete, vec![(dir.join("a"), dir.join("a"))], Options::default()), &[Answer::All]);
+        result.unwrap();
+        assert_eq!(asked, ["folder a"], "All: no more questions");
+        assert!(!dir.join("a").exists());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_skipped_folder_stays_and_so_does_the_folder_holding_it() {
+        let dir = scratch("skipfolder");
+        let (result, asked) = answering(start(Kind::Delete, vec![(dir.join("a"), dir.join("a"))], Options::default()), &[Answer::Proceed, Answer::Skip { remember: false }]);
+        result.unwrap();
+        assert_eq!(asked, ["folder a", "folder sub"]);
+        assert!(!dir.join("a").join("x.txt").exists());
+        assert!(dir.join("a").join("sub").join("y.txt").exists());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_read_only_file_is_asked_about_and_skip_all_keeps_them() {
+        let dir = scratch("readonly");
+        for name in ["x.txt", "sub/y.txt"] {
+            let path = dir.join("a").join(name);
+            let mut permissions = fs::metadata(&path).unwrap().permissions();
+            permissions.set_readonly(true);
+            fs::set_permissions(&path, permissions).unwrap();
+        }
+        let (result, asked) = answering(start(Kind::Delete, vec![(dir.join("a"), dir.join("a"))], Options::default()), &[Answer::All, Answer::SkipAll]);
+        result.unwrap();
+        assert_eq!(asked, ["folder a", "read only y.txt"], "sub comes first; Skip all asks no more");
+        assert!(dir.join("a").join("x.txt").exists() && dir.join("a").join("sub").join("y.txt").exists());
+        for name in ["x.txt", "sub/y.txt"] {
+            let path = dir.join("a").join(name);
+            let mut permissions = fs::metadata(&path).unwrap().permissions();
+            #[allow(clippy::permissions_set_readonly_false)]
+            permissions.set_readonly(false);
+            fs::set_permissions(&path, permissions).unwrap();
+        }
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn wiping_overwrites_the_data_and_leaves_nothing_behind() {
+        let dir = scratch("wipe");
+        let file = dir.join("a").join("sub").join("y.txt");
+        // what the wipe writes is in the file before it goes: watch it through a hard link
+        let witness = dir.join("witness");
+        fs::hard_link(&file, &witness).unwrap();
+        let (result, asked) = answering(start(Kind::Wipe, vec![(dir.join("a"), dir.join("a"))], Options::default()), &[Answer::All, Answer::Proceed]);
+        result.unwrap();
+        assert_eq!(asked, ["folder a", "hard links y.txt"]);
+        assert!(!dir.join("a").exists());
+        assert_eq!(fs::metadata(&witness).unwrap().len(), 0, "the data is cut to nothing");
+        let left: Vec<_> = fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name()).collect();
+        assert_eq!(left, [std::ffi::OsString::from("witness")], "no temporary names left");
         fs::remove_dir_all(dir).unwrap();
     }
 

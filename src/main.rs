@@ -225,8 +225,14 @@ impl App {
         let Overlay::Job(job, question) = &mut self.overlay else { return false };
         job.poll();
         if question.is_none() {
-            if let Some(conflict) = &job.conflict {
-                *question = Some(Dialog::conflict(conflict));
+            if let Some(asked) = &job.question {
+                let wipe = job.kind == Kind::Wipe;
+                *question = Some(match asked {
+                    fileops::Question::Conflict(conflict) => Dialog::conflict(conflict),
+                    fileops::Question::FolderNotEmpty(path) => Dialog::folder_not_empty(path, wipe),
+                    fileops::Question::ReadOnly(path) => Dialog::read_only(path, wipe),
+                    fileops::Question::HardLinks(path) => Dialog::hard_links(path),
+                });
                 return true;
             }
         }
@@ -427,9 +433,14 @@ impl App {
             }
             Request::MkDir => self.overlay = Overlay::Dialog(Dialog::mkdir()),
             Request::Delete(sources) => {
-                let (question, names) = delete_question(&sources);
+                let (question, names) = delete_question(&sources, "delete");
                 let single = sources.len() == 1;
                 self.overlay = Overlay::Dialog(Dialog::delete(question, names, single, Action::Delete(sources)));
+            }
+            Request::Wipe(sources) => {
+                let (question, names) = delete_question(&sources, "wipe");
+                let single = sources.len() == 1;
+                self.overlay = Overlay::Dialog(Dialog::delete(question, names, single, Action::Wipe(sources)));
             }
             Request::Quit => {
                 self.overlay = Overlay::Dialog(Dialog::confirm("Quit", "Do you want to quit farsh?", Action::Quit));
@@ -459,6 +470,11 @@ impl App {
         match command {
             menu::Command::FKey(n) => {
                 if let Key::Ask(request) = self.panels.function_key(n) {
+                    self.request(request);
+                }
+            }
+            menu::Command::Wipe => {
+                if let Key::Ask(request) = self.panels.wipe_request() {
                     self.request(request);
                 }
             }
@@ -526,6 +542,10 @@ impl App {
             Action::Delete(sources) => {
                 let items = sources.into_iter().map(|path| (path.clone(), path)).collect();
                 self.overlay = Overlay::Job(fileops::start(Kind::Delete, items, Options::default()), None);
+            }
+            Action::Wipe(sources) => {
+                let items = sources.into_iter().map(|path| (path.clone(), path)).collect();
+                self.overlay = Overlay::Job(fileops::start(Kind::Wipe, items, Options::default()), None);
             }
             Action::MkDir => {
                 let typed = values.text("name");
@@ -596,6 +616,9 @@ fn answer(job: &mut Job, dialog: Dialog, outcome: dialog::Outcome) -> Option<Dia
             job.answer(match id {
                 "overwrite" => Answer::Overwrite { remember },
                 "skip" => Answer::Skip { remember },
+                "proceed" => Answer::Proceed,
+                "all" => Answer::All,
+                "skipall" => Answer::SkipAll,
                 _ => Answer::Cancel,
             });
             None
@@ -643,7 +666,7 @@ fn default_dest(sources: &[PathBuf], other: &Path) -> String {
 /// Delete's question and the names under it (delete.cpp): "the file" or
 /// "the folder" and its name, and where a link points; for several items
 /// the first ten names and "…and N more".
-fn delete_question(sources: &[PathBuf]) -> (String, Vec<String>) {
+fn delete_question(sources: &[PathBuf], verb: &str) -> (String, Vec<String>) {
     const SHOWN: usize = 10;
     match sources {
         [one] => {
@@ -658,7 +681,7 @@ fn delete_question(sources: &[PathBuf]) -> (String, Vec<String>) {
                     names.push(target);
                 }
             }
-            (format!("Do you wish to delete {what}?"), names)
+            (format!("Do you wish to {verb} {what}?"), names)
         }
         many => {
             let shown = if many.len() > SHOWN + 1 { SHOWN } else { many.len() };
@@ -666,7 +689,7 @@ fn delete_question(sources: &[PathBuf]) -> (String, Vec<String>) {
             if shown < many.len() {
                 names.push(format!("\u{2026}and {} more", many.len() - shown));
             }
-            ("Do you wish to delete the objects?".into(), names)
+            (format!("Do you wish to {verb} the objects?"), names)
         }
     }
 }
