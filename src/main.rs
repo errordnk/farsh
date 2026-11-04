@@ -3,14 +3,20 @@
 
 mod arcdialog;
 mod archive;
+mod assoc;
 mod attributes;
+mod commands;
 mod cwd;
 mod dialog;
 mod diz;
 mod drives;
 mod editor;
 mod fileops;
+mod filter;
+mod findfile;
 mod grid;
+mod history;
+mod hotplug;
 mod infopanel;
 mod keys;
 mod links;
@@ -20,11 +26,15 @@ mod menu;
 mod mouse;
 mod palette;
 mod panels;
+mod profile;
 mod qview;
 mod shell;
+mod shortcuts;
 mod sorting;
 mod sortmenu;
 mod subst;
+mod tasklist;
+mod usermenu;
 mod viewer;
 mod vmenu;
 
@@ -87,6 +97,10 @@ enum Overlay {
     Job(Job, Option<Dialog>),
     /// Shift+F3: arclite's menu for these archives.
     ArcMenu(vmenu::VMenu, Vec<panels::ArchivePick>),
+    /// A list of the Commands menu (a history, the user menu, the filters...).
+    List(Box<commands::List>),
+    /// Alt+F7's results.
+    Find(Box<findfile::Results>),
 }
 
 struct App {
@@ -109,6 +123,22 @@ struct App {
     /// The last mask of Select group (Far's static strPrevMask) and the last applied command.
     last_mask: String,
     last_command: String,
+    /// What a dialog or viewer on top was opened over (a list, Find's
+    /// results): it comes back when that closes.
+    under: Vec<Overlay>,
+    /// Far's command, view/edit and folder histories.
+    commands: history::History,
+    views: history::History,
+    folders: history::History,
+    /// The active panel's folder when it was last put into the folder history.
+    last_folder: PathBuf,
+    /// Find file's last question, and whether the drive menu was opened from it.
+    find_options: findfile::Options,
+    find_after_drive: bool,
+    /// Alt+F9.
+    maximized: bool,
+    /// Viewers sent to the background (F12, the screens list).
+    screens: Vec<Viewer>,
 }
 
 /// A file being edited in the shell (F4), started at the shell's prompt
@@ -136,6 +166,15 @@ impl App {
             done_message: None,
             last_mask: "*.*".into(),
             last_command: String::new(),
+            under: Vec::new(),
+            commands: history::History::load(history::Which::Commands),
+            views: history::History::load(history::Which::Views),
+            folders: history::History::load(history::Which::Folders),
+            last_folder: PathBuf::new(),
+            find_options: findfile::Options::default(),
+            find_after_drive: false,
+            maximized: false,
+            screens: Vec::new(),
         })
     }
 
@@ -169,6 +208,12 @@ impl App {
             if self.poll_job() {
                 dirty = true;
             }
+            if let Overlay::Find(results) = &mut self.overlay
+                && results.poll()
+            {
+                dirty = true;
+            }
+            self.after_event();
             if dirty {
                 frame.clear();
                 let cursor = self.paint(&mut frame);
@@ -177,7 +222,9 @@ impl App {
                 dirty = false;
             }
             // A copy in progress, or a folder the quick view is counting, redraws as it goes.
-            let busy = matches!(self.overlay, Overlay::Job(..)) || (self.panels_visible && self.panels.busy());
+            let busy = matches!(self.overlay, Overlay::Job(..))
+                || matches!(&self.overlay, Overlay::Find(results) if results.busy())
+                || (self.panels_visible && self.panels.busy());
             let wait = if busy { 50 } else { 10 };
             if !event::poll(Duration::from_millis(wait))? {
                 dirty |= busy;
@@ -241,6 +288,14 @@ impl App {
                 menu.paint(frame);
                 cursor = None;
             }
+            Overlay::List(list) => {
+                list.paint(frame);
+                cursor = None;
+            }
+            Overlay::Find(results) => {
+                results.paint(frame);
+                cursor = None;
+            }
             Overlay::Job(job, question) => {
                 dialog::paint_progress(job, frame);
                 cursor = question.as_ref().and_then(|dialog| dialog.paint(frame));
@@ -285,10 +340,17 @@ impl App {
                 dialog::Outcome::Closed => {}
                 dialog::Outcome::Pressed(action, id, values) => self.accept(action, id, &values),
             },
+            // F12 in a viewer: the screens list (Far's manager key)
+            Overlay::Viewer(viewer) if key.code == KeyCode::F(12) && key.modifiers.is_empty() => self.screens_from_viewer(viewer),
             Overlay::Viewer(mut viewer) => {
                 if matches!(viewer.key(key), viewer::Outcome::Open) {
                     self.overlay = Overlay::Viewer(viewer);
                 }
+            }
+            Overlay::List(list) => self.list_key(*list, key),
+            Overlay::Find(mut results) => {
+                let outcome = results.key(key);
+                self.find_outcome(results, outcome);
             }
             Overlay::Menu(mut menu) => {
                 let outcome = menu.key(key);
@@ -303,7 +365,7 @@ impl App {
                 self.after_sort(menu, outcome);
             }
             Overlay::ArcMenu(mut menu, picks) => match menu.key(key) {
-                vmenu::Outcome::Open => self.overlay = Overlay::ArcMenu(menu, picks),
+                vmenu::Outcome::Open | vmenu::Outcome::Key(_) => self.overlay = Overlay::ArcMenu(menu, picks),
                 vmenu::Outcome::Closed => {}
                 vmenu::Outcome::Chosen(_) => self.test_archives(picks),
             },
@@ -345,6 +407,11 @@ impl App {
                 viewer.mouse(event);
                 self.overlay = Overlay::Viewer(viewer);
             }
+            Overlay::List(list) => self.list_click(*list, event),
+            Overlay::Find(mut results) => {
+                let outcome = results.click(event);
+                self.find_outcome(results, outcome);
+            }
             Overlay::Menu(mut menu) => {
                 let outcome = menu.click(event, self.size.0);
                 self.after_menu(menu, outcome);
@@ -358,7 +425,7 @@ impl App {
                 self.after_sort(menu, outcome);
             }
             Overlay::ArcMenu(mut menu, picks) => match menu.click(event) {
-                vmenu::Outcome::Open => self.overlay = Overlay::ArcMenu(menu, picks),
+                vmenu::Outcome::Open | vmenu::Outcome::Key(_) => self.overlay = Overlay::ArcMenu(menu, picks),
                 vmenu::Outcome::Closed => {}
                 vmenu::Outcome::Chosen(_) => self.test_archives(picks),
             },
@@ -425,6 +492,9 @@ impl App {
             }
             return;
         }
+        if self.panels_visible && self.command_key(key) {
+            return;
+        }
         if self.panels_visible {
             let dir_before = self.panels.active_dir().to_path_buf();
             match self.panels.key(key, self.shell.command_line_is_empty()) {
@@ -442,6 +512,10 @@ impl App {
         }
         if let Some(bytes) = keys::encode(panels::to_shell(key)) {
             let runs = key.code == KeyCode::Enter;
+            // Far's command history: what Enter runs from the prompt
+            if runs && let Some(typed) = self.shell.typed() {
+                self.commands.add(&typed, history::Kind::Plain);
+            }
             self.shell.write(&bytes, runs);
             if runs {
                 // the command's output is the shell's to show
@@ -453,12 +527,14 @@ impl App {
     fn request(&mut self, request: Request) {
         match request {
             Request::View(path) => {
+                self.views.add(&path.display().to_string(), history::Kind::View);
                 self.overlay = match Viewer::open(&path) {
                     Ok(viewer) => Overlay::Viewer(viewer),
                     Err(error) => Overlay::Dialog(Dialog::error(&format!("{}: {error}", path.display()))),
                 };
             }
             Request::Edit(path) => {
+                self.views.add(&path.display().to_string(), history::Kind::Edit);
                 // Whatever was typed gives way to the editor, as with any F-key.
                 self.shell.clear_line();
                 let line = editor::command_line(&editor::editor(), self.shell.kind(), &path);
@@ -545,6 +621,7 @@ impl App {
             Request::ArchiveCommands(picks) => {
                 self.overlay = Overlay::ArcMenu(vmenu::VMenu::new("ArcLite", vec!["Test archive files".into()]), picks);
             }
+            Request::Command(cmd) => self.run_command(cmd),
             Request::Menu => {
                 let side = if self.panels.right_active() { 4 } else { 0 };
                 self.overlay = Overlay::Menu(Menu::new(self.last_menu.unwrap_or(side), self.panels.view_modes(), self.panels.states()));
@@ -601,6 +678,7 @@ impl App {
                     self.request(request);
                 }
             }
+            menu::Command::Do(cmd) => self.run_command(cmd),
             menu::Command::ChangeDrive { right } => self.request(Request::ChangeDrive { right }),
             menu::Command::View { right, mode } => self.panels.set_view(right, mode),
             menu::Command::SortModes { right } => {
@@ -621,7 +699,7 @@ impl App {
 
     fn after_drives(&mut self, list: drives::DriveMenu, outcome: drives::Outcome) {
         match outcome {
-            drives::Outcome::Open => self.overlay = Overlay::Drives(list),
+            drives::Outcome::Open => return self.overlay = Overlay::Drives(list),
             drives::Outcome::Closed => {}
             drives::Outcome::Chosen(dir) => {
                 self.panels.open_dir(list.right, dir);
@@ -629,6 +707,10 @@ impl App {
                     self.shell.cd(self.panels.active_dir());
                 }
             }
+        }
+        // Find file's Drive: the question again, on the new drive
+        if std::mem::take(&mut self.find_after_drive) && matches!(self.overlay, Overlay::None) {
+            self.overlay = Overlay::Dialog(findfile::dialog(&self.find_options, self.panels.active_dir()));
         }
     }
 
@@ -796,6 +878,25 @@ impl App {
             }
             Action::Quit => self.quit = true,
             Action::Conflict | Action::Info => {}
+            other => self.accept_command(other, id, values),
+        }
+    }
+
+    /// After every turn of the loop: a folder the active panel came to goes
+    /// into the folders history; what a closed dialog or viewer was opened
+    /// over comes back (not while an editor runs in the shell).
+    fn after_event(&mut self) {
+        let dir = self.panels.active_dir();
+        if dir != self.last_folder {
+            self.last_folder = dir.to_path_buf();
+            let name = dir.display().to_string();
+            self.folders.add(&name, history::Kind::Plain);
+        }
+        if matches!(self.overlay, Overlay::None)
+            && self.editing.is_none()
+            && let Some(under) = self.under.pop()
+        {
+            self.overlay = under;
         }
     }
 

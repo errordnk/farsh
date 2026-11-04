@@ -54,6 +54,11 @@ impl Viewer {
         }
     }
 
+    /// The file's name, as the screens list shows it.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
     fn scroll(&mut self, rows: isize) {
         let last = self.lines.len().saturating_sub(1) as isize;
         self.top = (self.top as isize + rows).clamp(0, last) as usize;

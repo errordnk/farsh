@@ -177,6 +177,16 @@ impl Shell {
         self.parser.screen().cursor_position().0
     }
 
+    /// What is typed after the bare prompt, when the cursor line is one
+    /// (the command Enter is about to run, for Far's command history).
+    pub fn typed(&self) -> Option<String> {
+        if self.prompt_line.is_empty() || self.kind == Kind::Other {
+            return None;
+        }
+        let line = self.cursor_line().0;
+        line.strip_prefix(&self.prompt_line).map(|typed| typed.trim().to_string()).filter(|typed| !typed.is_empty())
+    }
+
     /// Whether nothing is typed after the prompt.
     pub fn command_line_is_empty(&self) -> bool {
         self.cursor_line().0 == self.prompt_line

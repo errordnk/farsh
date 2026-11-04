@@ -23,7 +23,7 @@ const CURSOR_BG: Color = palette::bg(palette::CYAN);
 const BLACK: Color = palette::fg(palette::BLACK);
 
 const KEY_BAR: [&str; 12] =
-    ["Help", "UserMn", "View", "Edit", "Copy", "RenMov", "MkFold", "Delete", "ConfMn", "Quit", "", ""];
+    ["Help", "UserMn", "View", "Edit", "Copy", "RenMov", "MkFold", "Delete", "ConfMn", "Quit", "Plugin", "Screen"];
 
 /// Far's ten view modes (config.cpp's InitialModes): Ctrl+1..Ctrl+9, Ctrl+0.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -325,6 +325,9 @@ pub struct Panel {
     area: (u16, u16, u16, u16),
     /// Screen columns of each stripe at the last paint (first, last).
     stripe_cols: Vec<(u16, u16)>,
+    /// Which filter marks apply (Far's panel_left / panel_right): the
+    /// panel keeps them when the panels swap places.
+    pub filter_area: usize,
 }
 
 impl Panel {
@@ -346,6 +349,7 @@ impl Panel {
             stripes: 1,
             area: (0, 0, 0, 0),
             stripe_cols: Vec::new(),
+            filter_area: 0,
         };
         panel.reload(None);
         panel
@@ -380,6 +384,14 @@ impl Panel {
             return;
         }
         let mut entries = listing::read(&self.dir);
+        // Ctrl+I: what the panel's filter marks hide
+        let area = self.filter_area;
+        crate::filter::with(|filters| {
+            if filters.enabled(area) {
+                let now = std::time::SystemTime::now();
+                entries.retain(|entry| filters.shows(entry, area, now));
+            }
+        });
         if self.dir.parent().is_some() {
             let modified = std::fs::metadata(&self.dir).and_then(|m| m.modified()).ok();
             entries.insert(0, Entry::up(modified));
@@ -905,6 +917,8 @@ pub enum Request {
     Describe(PathBuf, Vec<String>),
     /// Shift+F3: arclite's menu for these archives (or the items picked in one).
     ArchiveCommands(Vec<ArchivePick>),
+    /// F2, F11, F12 (also from the key bar): the user menu, the plugins, the screens.
+    Command(crate::menu::Cmd),
 }
 
 /// Where the link at `path` points, as an ordinary path: a relative target
@@ -944,7 +958,101 @@ pub struct Panels {
 
 impl Panels {
     pub fn new(dir: PathBuf) -> Self {
-        Self { left: Panel::new(dir.clone()), right: Panel::new(dir), right_active: false, info: None, qview: None, screen: (0, 0), key_ends: Vec::new() }
+        let mut right = Panel::new(dir.clone());
+        right.filter_area = 1;
+        right.reload(None);
+        Self { left: Panel::new(dir), right, right_active: false, info: None, qview: None, screen: (0, 0), key_ends: Vec::new() }
+    }
+
+    /// The file under the active panel's cursor (not a folder, not in an archive).
+    pub fn current_file(&self) -> Option<PathBuf> {
+        let panel = self.active_ref();
+        if panel.kind != Kind::Files || !panel.visible || panel.archive.is_some() {
+            return None;
+        }
+        panel.current().filter(|e| !e.is_dir).map(|e| panel.dir.join(&e.name))
+    }
+
+    /// The active panel's filter marks (Ctrl+I), and its names for the file type items.
+    pub fn filter_area(&self) -> usize {
+        self.active_ref().filter_area
+    }
+
+    pub fn names(&self) -> Vec<(String, bool)> {
+        self.active_ref().entries.iter().map(|e| (e.name.clone(), e.is_dir)).collect()
+    }
+
+    /// The marks changed (Ctrl+I): both panels read again.
+    pub fn refilter(&mut self) {
+        self.refresh(None);
+    }
+
+    /// Find file's "Selected folders": the folders marked (or under the cursor).
+    pub fn selected_dirs(&self) -> Vec<PathBuf> {
+        self.active_ref().sources().into_iter().filter(|p| p.is_dir()).collect()
+    }
+
+    /// Takes the active panel to `dir`, the cursor on `select` (Find file's
+    /// Go to, a history's folder).
+    pub fn open_at(&mut self, dir: PathBuf, select: Option<&str>) {
+        let panel = self.active();
+        if panel.kind != Kind::Files {
+            panel.kind = Kind::Files;
+        }
+        panel.visible = true;
+        panel.dir = dir;
+        panel.archive = None;
+        panel.reload(select);
+    }
+
+    /// Takes the passive panel to `dir` (Ctrl+Shift+Enter in the folders history).
+    pub fn open_passive(&mut self, dir: PathBuf) {
+        let panel = if self.right_active { &mut self.left } else { &mut self.right };
+        panel.dir = dir;
+        panel.archive = None;
+        panel.reload(None);
+    }
+
+    /// Commands > Compare folders (FileList::CompareDir): every file of both
+    /// panels is marked, then a file with the same name in the other panel
+    /// unmarks the older one (both when they are the same, unless the sizes
+    /// differ). None when the other panel is not a file panel shown; else
+    /// whether nothing stayed marked ("The folders contents seems to be identical").
+    pub fn compare_folders(&mut self) -> Option<bool> {
+        let both = [&self.left, &self.right].iter().all(|p| p.visible && p.kind == Kind::Files);
+        if !both {
+            return None;
+        }
+        for panel in [&mut self.left, &mut self.right] {
+            panel.marked = panel.entries.iter().filter(|e| !e.is_dir && !e.is_up()).map(|e| e.name.clone()).collect();
+        }
+        let (left, right) = (&mut self.left, &mut self.right);
+        let (this, that) = if self.right_active { (right, left) } else { (left, right) };
+        let others: Vec<(String, Option<std::time::SystemTime>, u64)> =
+            that.entries.iter().filter(|e| !e.is_dir && !e.is_up()).map(|e| (e.name.clone(), e.modified, e.size)).collect();
+        for entry in this.entries.iter().filter(|e| !e.is_dir && !e.is_up()) {
+            if !this.marked.contains(&entry.name) {
+                continue;
+            }
+            let Some((name, modified, size)) = others.iter().find(|(n, _, _)| n.eq_ignore_ascii_case(&entry.name) && that.marked.contains(n)) else { continue };
+            let order = entry.modified.cmp(modified);
+            if order.is_eq() && entry.size != *size {
+                continue;
+            }
+            if order.is_le() {
+                this.marked.remove(&entry.name);
+            }
+            if order.is_ge() {
+                that.marked.remove(name);
+            }
+        }
+        let identical = this.marked.is_empty() && that.marked.is_empty();
+        for panel in [&mut self.left, &mut self.right] {
+            if panel.sorting.selected_first {
+                panel.resort();
+            }
+        }
+        Some(identical)
     }
 
     pub fn active_dir(&self) -> &Path {
@@ -1516,6 +1624,8 @@ impl Panels {
                 7 => Some(Request::CreateDirInArchive(pick.view)),
                 9 => Some(Request::Menu),
                 10 => Some(Request::Quit),
+                11 => Some(Request::Command(crate::menu::Cmd::PluginCommands)),
+                12 => Some(Request::Command(crate::menu::Cmd::ScreensList)),
                 _ => None,
             };
             return request.map_or(Key::Taken, Key::Ask);
@@ -1546,6 +1656,9 @@ impl Panels {
             8 => (!sources.is_empty()).then(|| Request::Delete(sources)),
             9 => Some(Request::Menu),
             10 => Some(Request::Quit),
+            2 => Some(Request::Command(crate::menu::Cmd::UserMenu)),
+            11 => Some(Request::Command(crate::menu::Cmd::PluginCommands)),
+            12 => Some(Request::Command(crate::menu::Cmd::ScreensList)),
             _ => None,
         };
         request.map_or(Key::Taken, Key::Ask)

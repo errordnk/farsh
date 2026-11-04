@@ -52,6 +52,29 @@ pub enum Command {
     RestoreSelection,
     /// What that key asks of the active panel.
     Ask(Asked),
+    /// A Commands menu item.
+    Do(Cmd),
+}
+
+/// The Commands menu's items (each also has its key, if it shows one).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Cmd {
+    FindFile,
+    History,
+    VideoMode,
+    ViewHistory,
+    FoldersHistory,
+    CompareFolders,
+    EditUserMenu,
+    FileAssociations,
+    FolderShortcuts,
+    Filter,
+    PluginCommands,
+    ScreensList,
+    TaskList,
+    Hotplug,
+    /// F2 (not in the menu): the user menu itself.
+    UserMenu,
 }
 
 /// The Files menu items that ask the active panel as their key does.
@@ -165,25 +188,25 @@ fn titles(modes: [u8; 2], states: [(Kind, bool, bool); 2]) -> Vec<Title> {
         Title {
             label: "&Commands",
             items: vec![
-                item("&Find file", "Alt+F7", None),
-                item("&History", "Alt+F8", None),
-                item("&Video mode", "Alt+F9", None),
-                item("File vie&w history", "Alt+F11", None),
-                item("F&olders history", "Alt+F12", None),
+                item("&Find file", "Alt+F7", Some(Command::Do(Cmd::FindFile))),
+                item("&History", "Alt+F8", Some(Command::Do(Cmd::History))),
+                item("&Video mode", "Alt+F9", Some(Command::Do(Cmd::VideoMode))),
+                item("File vie&w history", "Alt+F11", Some(Command::Do(Cmd::ViewHistory))),
+                item("F&olders history", "Alt+F12", Some(Command::Do(Cmd::FoldersHistory))),
                 SEPARATOR,
                 item("&Swap panels", "Ctrl+U", Some(Command::SwapPanels)),
                 item("&Panels On/Off", "Ctrl+O", Some(Command::TogglePanels)),
-                item("&Compare folders", "", None),
+                item("&Compare folders", "", Some(Command::Do(Cmd::CompareFolders))),
                 SEPARATOR,
-                item("Edit user &menu", "", None),
-                item("File &associations", "", None),
-                item("Fol&der shortcuts", "", None),
-                item("File panel f&ilter", "Ctrl+I", None),
+                item("Edit user &menu", "", Some(Command::Do(Cmd::EditUserMenu))),
+                item("File &associations", "", Some(Command::Do(Cmd::FileAssociations))),
+                item("Fol&der shortcuts", "", Some(Command::Do(Cmd::FolderShortcuts))),
+                item("File panel f&ilter", "Ctrl+I", Some(Command::Do(Cmd::Filter))),
                 SEPARATOR,
-                item("Pl&ugin commands", "F11", None),
-                item("Sc&reens list", "F12", None),
-                item("Task &list", "Ctrl+W", None),
-                item("Ho&tplug devices list", "", None),
+                item("Pl&ugin commands", "F11", Some(Command::Do(Cmd::PluginCommands))),
+                item("Sc&reens list", "F12", Some(Command::Do(Cmd::ScreensList))),
+                item("Task &list", "Ctrl+W", Some(Command::Do(Cmd::TaskList))),
+                item("Ho&tplug devices list", "", Some(Command::Do(Cmd::Hotplug))),
             ],
         },
         Title {
@@ -514,7 +537,7 @@ mod tests {
         menu.key(key(KeyCode::Right));
         assert_eq!(menu.current(), 2);
         assert_eq!(menu.key(key(KeyCode::Char('s'))), Outcome::Chosen(Command::SwapPanels));
-        assert_eq!(menu.key(key(KeyCode::Char('f'))), Outcome::Open, "Find file is grey");
+        assert_eq!(menu.key(key(KeyCode::Char('f'))), Outcome::Chosen(Command::Do(Cmd::FindFile)));
         assert_eq!(
             menu.key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::ALT)),
             Outcome::Open,

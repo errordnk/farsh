@@ -128,6 +128,43 @@ over the shell screen.
   (select/unselect all), the read-only Descript.ion question is an error.
 - A left click on the top row (the panels' frame) opens the menu bar, on
   the title under the mouse, as in Far with the menu bar hidden.
+- The Commands menu is whole. Its lists are Far's VMenu (`src/vmenu.rs`:
+  centered, MaxHeight, scroll bar, `&` and AssignHighlights hot keys, a
+  bottom title, keys it does not use go back to the caller); a dialog a
+  list opens is drawn over it and the list comes back (`App::under`,
+  `src/commands.rs`). What Far keeps in its profile is in farsh's
+  (`src/profile.rs`: `%APPDATA%\farsh`, `~/.config/farsh`).
+  - Alt+F8 / Alt+F11 / Alt+F12 (`src/history.rs`, history.cpp): the
+    commands Enter ran from the prompt (`Shell::typed`), the files F3/F4
+    opened, the folders the active panel visited; a date separator a day,
+    Ins locks, Shift+Del deletes one, Del clears (asked), Ctrl+R forgets
+    what is gone, Ctrl+Enter puts it on the command line, Ctrl+Shift+Enter
+    a folder into the passive panel.
+  - Alt+F9 (Video mode) is Far's maximize/restore as xterm's `CSI 9;1t` /
+    `CSI 9;0t`: only a terminal that does window operations follows it.
+  - Compare folders is FileList::CompareDir. Edit user menu and F2 are
+    usermenu.cpp with Far's own `FarMenu.ini` format (`src/usermenu.rs`);
+    there is no global menu in the program folder, the main one is the
+    profile's ("Main menu (User)"). File associations are filetype.cpp
+    (`src/assoc.rs`): Enter, Ctrl+PgDn, F3, Alt+F3, F4, Alt+F4 on a file
+    run their command in the shell (several: "Select association").
+  - Folder shortcuts (`src/shortcuts.rs`): Far's RightCtrl+0..9 cannot be
+    told from the left Ctrl in a terminal, so they are Ctrl+Alt+0..9;
+    Ctrl+Shift+0..9 sets one; a key has one folder, not a list.
+  - Ctrl+I (the filters, `src/filter.rs`: filefilter.cpp, the dialog of
+    filefilterparams.cpp without the highlighting part) is often sent as
+    Tab by terminals: then the menu is the way. Each panel keeps its marks
+    across Ctrl+U (Far swaps them). Ctrl+W (task list, `src/tasklist.rs`,
+    plist.cpp) is readline's while something is typed. Hotplug devices
+    (`src/hotplug.rs`) is Windows only; the confirmation does not list the
+    drive letters.
+  - F11 is the plugins menu with arclite only (Open, Create, Extract,
+    Test; Convert into SFX says it cannot), F12 the screens: the panels
+    and the viewers sent to the background by F12.
+  - Alt+F7 (`src/findfile.rs`): FindAskDlg and the results window. Not
+    done: hex search, code pages other than UTF-8/UTF-16LE, fuzzy search,
+    archives, alternate streams, Advanced, the Panel button (Far's
+    temporary panel); those are disabled. Filter opens the Find file marks.
 - Enter on a link: a junction or symlink is entered by its own path; one
   that denies listing itself (Windows' compatibility junctions `My Documents`,
   `Application Data`, `Start Menu`...) is followed to its target, as Far does.

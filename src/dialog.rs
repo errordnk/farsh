@@ -48,6 +48,29 @@ pub enum Action {
     ApplyCommand(Vec<String>),
     /// Ctrl+Z: the description of `names[0]`, then the rest in turn.
     Describe(PathBuf, Vec<String>),
+    /// Folder shortcuts, F4: the title and path of shortcut N.
+    Shortcut(usize),
+    /// File associations: F4 on N, or (`new`) a new one before N.
+    Assoc { index: usize, new: bool },
+    DeleteAssoc(usize),
+    /// A history menu's Del: "Clear history".
+    ClearHistory,
+    /// Ctrl+W's Del: kill this process.
+    KillTask(u32),
+    /// Hotplug's Del: remove device N.
+    Eject(usize),
+    /// User menu: Ins's "command or menu", F4's edit, Del's question; Edit
+    /// user menu's "Main or Local".
+    UserMenuInsert,
+    UserMenuEdit { new: bool, submenu: bool },
+    UserMenuDelete,
+    UserMenuChoose,
+    /// Ctrl+I: F4 on filter N, or a new one at N (Ins, F5); the attribute
+    /// states the "..." dialog set (0 off, 1 on, 2 any).
+    Filter { index: usize, new: bool, attributes: Vec<u8> },
+    DeleteFilter(usize),
+    /// Alt+F7.
+    FindFile,
     Quit,
     /// The answer to a file that already exists.
     Conflict,
@@ -164,11 +187,11 @@ pub struct Place {
     pub y2: u16,
 }
 
-const fn at(x: i16, y: u16) -> Place {
+pub(crate) const fn at(x: i16, y: u16) -> Place {
     Place { x, y, x2: 0, y2: 0 }
 }
 
-const fn span(x: i16, y: u16, x2: u16) -> Place {
+pub(crate) const fn span(x: i16, y: u16, x2: u16) -> Place {
     Place { x, y, x2, y2: 0 }
 }
 
@@ -219,6 +242,11 @@ impl Values {
     pub fn choice(&self, id: &str) -> usize {
         self.choices.iter().find(|(k, _)| *k == id).map_or(0, |(_, v)| *v)
     }
+
+    /// Whether the dialog had a choice control `id`.
+    pub fn has_choice(&self, id: &str) -> bool {
+        self.choices.iter().any(|(k, _)| *k == id)
+    }
 }
 
 pub struct Dialog {
@@ -254,22 +282,29 @@ pub enum Outcome {
 
 // ---------------------------------------------------------------- building
 
-fn text(text: impl Into<String>) -> Item {
+pub(crate) fn text(text: impl Into<String>) -> Item {
     Item::Text { text: text.into(), align: Align::Left, highlight: false }
 }
 
-fn centered(text: impl Into<String>) -> Item {
+pub(crate) fn centered(text: impl Into<String>) -> Item {
     Item::Text { text: text.into(), align: Align::Center, highlight: false }
 }
 
-fn edit(id: &'static str, value: &str) -> Item {
+pub(crate) fn edit(id: &'static str, value: &str) -> Item {
     let text: Vec<char> = value.chars().collect();
     let cursor = text.len();
     let unchanged = !text.is_empty();
     Item::Edit { id, label: None, x: 5, text, cursor, unchanged, enabled: true, history: true, secret: false }
 }
 
-fn button(label: &'static str, id: &'static str, default: bool) -> Button {
+/// An input line for a dialog laid out by hand (its place gives the columns).
+pub(crate) fn line(id: &'static str, value: &str, history: bool) -> Item {
+    let text: Vec<char> = value.chars().collect();
+    let cursor = text.len();
+    Item::Edit { id, label: None, x: 0, text, cursor, unchanged: !value.is_empty(), enabled: true, history, secret: false }
+}
+
+pub(crate) fn button(label: &'static str, id: &'static str, default: bool) -> Button {
     Button { label, id, default, enabled: true, stay: false }
 }
 
@@ -413,6 +448,18 @@ impl Dialog {
         items.push(Item::Buttons(buttons));
         let focus = items.len() - 1;
         Self { title: title.into(), style: Style::Warning, layout: Layout::Message, items, focus, button: 0, places: vec![], disabled: vec![], hidden: vec![], hook: None, sub: None, closing: None, action: Action::Conflict }
+    }
+
+    /// Far's Message with these buttons (`warning`: MSG_WARNING's red): the
+    /// first button is the default, `cancel` closes it.
+    pub fn message(title: &str, lines: &[String], buttons: &[(&'static str, &'static str)], warning: bool, action: Action) -> Self {
+        let buttons = buttons.iter().enumerate().map(|(i, (label, id))| button(label, id, i == 0)).collect();
+        let mut dialog = Self::warning(title, lines.to_vec(), buttons);
+        if !warning {
+            dialog.style = Style::Normal;
+        }
+        dialog.action = action;
+        dialog
     }
 
     /// Far::message(... FMSG_MB_OKCANCEL) as arclite asks it: the first line is the title.
@@ -592,7 +639,7 @@ impl Dialog {
     }
 
     /// The index of the item with `id`.
-    fn index_of(&self, id: &str) -> Option<usize> {
+    pub(crate) fn index_of(&self, id: &str) -> Option<usize> {
         self.items.iter().position(|item| match item {
             Item::Edit { id: i, .. }
             | Item::Radio { id: i, .. }
@@ -636,6 +683,35 @@ impl Dialog {
     /// From the hook: close the dialog as if `id` was pressed.
     pub(crate) fn close_with(&mut self, id: &'static str) {
         self.closing = Some(id);
+    }
+
+    /// From the hook: a dialog over this one; the hook hears how it closed.
+    pub(crate) fn open_sub(&mut self, sub: Dialog) {
+        self.sub = Some(Box::new(sub));
+    }
+
+    /// A DialogBuilder dialog (as wide as its content, centered).
+    pub(crate) fn builder(title: &str, items: Vec<Item>, focus: usize, hook: Option<fn(&mut Dialog, Event)>, action: Action) -> Self {
+        Self { title: title.into(), style: Style::Normal, layout: Layout::Builder, items, focus, button: 0, places: vec![], disabled: vec![], hidden: vec![], hook, sub: None, closing: None, action }
+    }
+
+    /// DM_ENABLE of a button in a row of buttons.
+    pub(crate) fn enable_button(&mut self, id: &str, on: bool) {
+        for item in &mut self.items {
+            if let Item::Buttons(buttons) = item {
+                for button in buttons.iter_mut().filter(|b| b.id == id) {
+                    button.enabled = on;
+                }
+            }
+        }
+    }
+
+    pub(crate) fn set_check(&mut self, index: usize, on: bool) {
+        match self.items.get_mut(index) {
+            Some(Item::Check { checked, .. }) => *checked = on,
+            Some(Item::Check3 { state, .. }) => *state = u8::from(on),
+            _ => {}
+        }
     }
 
     pub(crate) fn is_disabled(&self, index: usize) -> bool {
@@ -699,7 +775,7 @@ impl Dialog {
     }
 
     /// Sets the text of the input line or masked field `id` (fitted to its mask).
-    fn set_text(&mut self, id: &str, value: &str, make_unchanged: bool) {
+    pub(crate) fn set_text(&mut self, id: &str, value: &str, make_unchanged: bool) {
         let Some(index) = self.index_of(id) else { return };
         match &mut self.items[index] {
             Item::Edit { text, cursor, unchanged, .. } => {
@@ -732,7 +808,7 @@ impl Dialog {
         }
     }
 
-    fn focus_on(&mut self, id: &str) {
+    pub(crate) fn focus_on(&mut self, id: &str) {
         if let Some(index) = self.index_of(id) {
             self.focus = index;
         }
@@ -753,11 +829,11 @@ const TIME_LABELS: [&str; 4] = ["&write:", "crea&tion:", "&access:", "chan&ge:"]
 /// The date and time fields of the four times, in Far's TimeMap order.
 pub const TIME_IDS: [(&str, &str); 4] = [("wdate", "wtime"), ("cdate", "ctime"), ("adate", "atime"), ("xdate", "xtime")];
 
-fn stay_button(label: &'static str, id: &'static str, enabled: bool) -> Button {
+pub(crate) fn stay_button(label: &'static str, id: &'static str, enabled: bool) -> Button {
     Button { label, id, default: false, enabled, stay: true }
 }
 
-fn masked(id: &'static str, mask: &str, value: &str) -> Item {
+pub(crate) fn masked(id: &'static str, mask: &str, value: &str) -> Item {
     let mask: Vec<char> = mask.chars().collect();
     let text = fit_mask(&mask, value);
     let unchanged = text.iter().any(char::is_ascii_digit);

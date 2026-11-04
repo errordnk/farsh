@@ -35,6 +35,11 @@ fn extension(name: &str) -> &str {
     name_ext(name).1.trim_start_matches('.')
 }
 
+/// The extension of `name` without its dot ("" when it has none).
+pub fn extension_of(name: &str) -> &str {
+    extension(name)
+}
+
 fn with_slash(dir: &Path) -> String {
     let mut text = dir.display().to_string();
     if !text.ends_with(['\\', '/']) {
