@@ -70,11 +70,16 @@ pub struct Options {
     /// A symbolic link is copied as the file it points to, not as a link.
     pub follow_links: bool,
     pub access: Access,
+    /// Delete: to the Recycle Bin (System settings, Windows).
+    pub recycle: bool,
+    /// Confirmations: "Delete non-empty folders", "Overwrite and delete R/O files".
+    pub confirm_folders: bool,
+    pub confirm_read_only: bool,
 }
 
 impl Default for Options {
     fn default() -> Self {
-        Self { existing: Existing::Ask, timestamps: false, follow_links: false, access: Access::Default }
+        Self { existing: Existing::Ask, timestamps: false, follow_links: false, access: Access::Default, recycle: false, confirm_folders: true, confirm_read_only: true }
     }
 }
 
@@ -365,8 +370,16 @@ impl Worker {
             Kind::Move => self.move_all(items),
             Kind::Pack | Kind::Unpack | Kind::Update | Kind::Test => Ok(()),
             Kind::Delete | Kind::Wipe => {
+                self.delete_folders |= !self.options.confirm_folders;
+                if !self.options.confirm_read_only {
+                    self.read_only = Some(true);
+                }
                 for (src, _) in items {
-                    self.remove(src)?;
+                    if self.kind == Kind::Delete && self.options.recycle {
+                        self.recycle(src)?;
+                    } else {
+                        self.remove(src)?;
+                    }
                 }
                 self.send(true);
                 Ok(())
@@ -524,6 +537,26 @@ impl Worker {
         }
     }
 
+    /// Delete to the Recycle Bin: the same questions first, then the shell
+    /// takes it all at once (Far's RemoveToRecycleBin).
+    fn recycle(&mut self, path: &Path) -> std::io::Result<()> {
+        self.check_cancel()?;
+        let meta = fs::symlink_metadata(path)?;
+        if meta.is_dir() && !self.delete_folders && fs::read_dir(path)?.next().is_some() {
+            match self.ask(Question::FolderNotEmpty(path.to_path_buf()))? {
+                Answer::All => self.delete_folders = true,
+                Answer::Skip { .. } | Answer::SkipAll => return Ok(()),
+                _ => {}
+            }
+        }
+        self.progress.from = path.display().to_string();
+        self.send(false);
+        recycle_bin(path)?;
+        self.progress.files_done += 1;
+        self.send(false);
+        Ok(())
+    }
+
     /// Delete/Wipe of `path` and everything in it, as Far's ShellDelete
     /// goes: a folder with something in it is asked about (until "All"),
     /// a read-only file too; the folder goes after what was in it.
@@ -675,6 +708,28 @@ impl Worker {
         self.send(true);
         Ok(())
     }
+}
+
+/// SHFileOperation(FO_DELETE, FOF_ALLOWUNDO): into the Recycle Bin.
+#[cfg(windows)]
+fn recycle_bin(path: &Path) -> std::io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::UI::Shell::{SHFileOperationW, FOF_ALLOWUNDO, FOF_NOCONFIRMATION, FOF_NOERRORUI, FOF_SILENT, FO_DELETE, SHFILEOPSTRUCTW};
+    let from: Vec<u16> = path.as_os_str().encode_wide().chain([0, 0]).collect();
+    let mut op: SHFILEOPSTRUCTW = unsafe { std::mem::zeroed() };
+    op.wFunc = FO_DELETE;
+    op.pFrom = from.as_ptr();
+    op.fFlags = (FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_SILENT) as u16;
+    let result = unsafe { SHFileOperationW(&mut op) };
+    if result != 0 || op.fAnyOperationsAborted != 0 {
+        return Err(std::io::Error::other(format!("{}: cannot move to the Recycle Bin ({result:#x})", path.display())));
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn recycle_bin(path: &Path) -> std::io::Result<()> {
+    if fs::symlink_metadata(path)?.is_dir() { fs::remove_dir_all(path) } else { fs::remove_file(path) }
 }
 
 /// Far's EraseDirectory: the folder renamed to a temporary name, then removed.

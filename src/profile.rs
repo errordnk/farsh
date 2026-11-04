@@ -1,7 +1,7 @@
-//! farsh's own settings folder (Far's profile): the histories, folder
+//! farsh's own settings folder (Far's profile): `~/.config/farsh` on every
+//! system (the user's rule), with `settings.json` and the histories, folder
 //! shortcuts, file associations, filters and the main user menu, each a
-//! small text file. Windows: `%APPDATA%\farsh`; elsewhere
-//! `$XDG_CONFIG_HOME/farsh` or `~/.config/farsh`.
+//! small text file.
 
 use std::path::PathBuf;
 
@@ -9,13 +9,19 @@ pub fn dir() -> PathBuf {
     if let Ok(dir) = std::env::var("FARSH_PROFILE") {
         return PathBuf::from(dir);
     }
+    // Windows: USERPROFILE (a Git Bash HOME may be `/c/Users/...`)
+    let home = if cfg!(windows) { std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")) } else { std::env::var_os("HOME") };
+    let home = home.map(PathBuf::from).unwrap_or_else(std::env::temp_dir);
+    let dir = home.join(".config").join("farsh");
+    // farsh kept them in %APPDATA%\farsh at first: they move here once
     #[cfg(windows)]
-    let base = std::env::var_os("APPDATA").map(PathBuf::from);
-    #[cfg(not(windows))]
-    let base = std::env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")));
-    base.unwrap_or_else(std::env::temp_dir).join("farsh")
+    if !dir.exists()
+        && let Some(old) = std::env::var_os("APPDATA").map(|a| PathBuf::from(a).join("farsh")).filter(|p| p.is_dir())
+    {
+        let _ = std::fs::create_dir_all(dir.parent().unwrap_or(&home));
+        let _ = std::fs::rename(old, &dir);
+    }
+    dir
 }
 
 pub fn path(name: &str) -> PathBuf {

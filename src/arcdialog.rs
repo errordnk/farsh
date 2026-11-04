@@ -788,7 +788,7 @@ mod tests {
 
     fn screen(dialog: &Dialog, cols: u16, rows: u16) -> Vec<String> {
         let mut grid = Grid::new(cols, rows);
-        dialog.paint(&mut grid);
+        dialog.draw(&mut grid);
         (0..rows).map(|row| grid.row(row).iter().map(|cell| cell.text.clone()).collect()).collect()
     }
 

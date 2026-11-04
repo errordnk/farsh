@@ -12,13 +12,34 @@ use crate::palette;
 
 // Far's COL_MENU*: white on cyan, the bar black on cyan, yellow hotkeys,
 // the selection white on black, what farsh does not do yet dark gray
-const BG: Color = palette::bg(palette::CYAN);
-const TEXT: Color = palette::fg(palette::WHITE);
-const HOT: Color = palette::fg(palette::YELLOW);
-const DISABLED: Color = palette::fg(palette::DARK_GRAY);
-const BAR_TEXT: Color = palette::fg(palette::BLACK);
-const SELECTED_BG: Color = palette::bg(palette::BLACK);
-const SELECTED_TEXT: Color = palette::fg(palette::WHITE);
+#[allow(non_snake_case)]
+fn BG() -> Color {
+    crate::colors::bg("Menu.Text")
+}
+#[allow(non_snake_case)]
+fn TEXT() -> Color {
+    crate::colors::fg("Menu.Text")
+}
+#[allow(non_snake_case)]
+fn HOT() -> Color {
+    crate::colors::fg("Menu.Highlight")
+}
+#[allow(non_snake_case)]
+fn DISABLED() -> Color {
+    crate::colors::fg("Menu.Text.Disabled")
+}
+#[allow(non_snake_case)]
+fn BAR_TEXT() -> Color {
+    crate::colors::fg("HMenu.Text")
+}
+#[allow(non_snake_case)]
+fn SELECTED_BG() -> Color {
+    crate::colors::bg("Menu.Text.Selected")
+}
+#[allow(non_snake_case)]
+fn SELECTED_TEXT() -> Color {
+    crate::colors::fg("Menu.Text.Selected")
+}
 
 /// What a menu item does.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -54,6 +75,8 @@ pub enum Command {
     Ask(Asked),
     /// A Commands menu item.
     Do(Cmd),
+    /// An Options menu item.
+    Set(Opt),
 }
 
 /// The Commands menu's items (each also has its key, if it shows one).
@@ -75,6 +98,30 @@ pub enum Cmd {
     Hotplug,
     /// F2 (not in the menu): the user menu itself.
     UserMenu,
+}
+
+/// The Options menu's items.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Opt {
+    System,
+    Panel,
+    Interface,
+    Languages,
+    Dialog,
+    Menu,
+    Cmdline,
+    AutoComplete,
+    InfoPanel,
+    MaskGroups,
+    Confirmations,
+    PanelModes,
+    Descriptions,
+    FolderInfo,
+    Viewer,
+    CodePages,
+    Colors,
+    Highlighting,
+    SaveSetup,
 }
 
 /// The Files menu items that ask the active panel as their key does.
@@ -212,36 +259,47 @@ fn titles(modes: [u8; 2], states: [(Kind, bool, bool); 2]) -> Vec<Title> {
         Title {
             label: "&Options",
             items: vec![
-                item("S&ystem settings", "", None),
-                item("&Panel settings", "", None),
-                item("&Interface settings", "", None),
-                item("Lan&guages", "", None),
+                item("S&ystem settings", "", Some(Command::Set(Opt::System))),
+                item("&Panel settings", "", Some(Command::Set(Opt::Panel))),
+                item("&Interface settings", "", Some(Command::Set(Opt::Interface))),
+                item("Lan&guages", "", Some(Command::Set(Opt::Languages))),
+                // the plugins will be Lua; the editor is external
                 item("Pl&ugins configuration", "", None),
                 item("Plugins manage&r settings", "", None),
-                item("Di&alog settings", "", None),
-                item("Menu settings", "", None),
-                item("&Command line settings", "", None),
-                item("Au&toComplete settings", "", None),
-                item("Inf&oPanel settings", "", None),
-                item("Groups of file mas&ks", "", None),
+                item("Di&alog settings", "", Some(Command::Set(Opt::Dialog))),
+                item("Menu settings", "", Some(Command::Set(Opt::Menu))),
+                item("&Command line settings", "", Some(Command::Set(Opt::Cmdline))),
+                item("Au&toComplete settings", "", Some(Command::Set(Opt::AutoComplete))),
+                item("Inf&oPanel settings", "", Some(Command::Set(Opt::InfoPanel))),
+                item("Groups of file mas&ks", "", Some(Command::Set(Opt::MaskGroups))),
                 SEPARATOR,
-                item("Co&nfirmations", "", None),
-                item("File panel &modes", "", None),
-                item("File &descriptions", "", None),
-                item("&Folder description files", "", None),
+                item("Co&nfirmations", "", Some(Command::Set(Opt::Confirmations))),
+                item("File panel &modes", "", Some(Command::Set(Opt::PanelModes))),
+                item("File &descriptions", "", Some(Command::Set(Opt::Descriptions))),
+                item("&Folder description files", "", Some(Command::Set(Opt::FolderInfo))),
                 SEPARATOR,
-                item("&Viewer settings", "", None),
+                item("&Viewer settings", "", Some(Command::Set(Opt::Viewer))),
                 item("&Editor settings", "", None),
-                item("Code pages", "", None),
+                item("Code pages", "", Some(Command::Set(Opt::CodePages))),
                 SEPARATOR,
-                item("Co&lors", "", None),
-                item("Files &highlighting and sort groups", "", None),
+                item("Co&lors", "", Some(Command::Set(Opt::Colors))),
+                item("Files &highlighting and sort groups", "", Some(Command::Set(Opt::Highlighting))),
                 SEPARATOR,
-                item("&Save setup", "Shift+F9", None),
+                item("&Save setup", "Shift+F9", Some(Command::Set(Opt::SaveSetup))),
             ],
         },
         panel_menu("&Right", 2, modes[1], states[1]),
     ]
+}
+
+/// The menu bar alone (Interface settings' "Always show the menu bar").
+pub fn paint_bar(grid: &mut Grid) {
+    let menu = Menu { titles: titles([2, 2], [(Kind::Files, true, true); 2]), current: usize::MAX, item: 0, dropped: false };
+    let cols = grid.cols;
+    grid.fill_with(0, 0, cols, 1, BAR_TEXT(), BG());
+    for (title, (col, _)) in menu.titles.iter().zip(menu.title_spans()) {
+        put_label(grid, col + 2, 0, crate::lang::tr(title.label), BAR_TEXT(), BG(), HOT());
+    }
 }
 
 fn plain(label: &str) -> String {
@@ -290,7 +348,15 @@ impl Menu {
     /// left and right panels' views (1 Brief .. 4 Wide).
     /// `states`: each panel's kind, whether it is shown, whether it shows long names.
     pub fn new(current: usize, modes: [u8; 2], states: [(Kind, bool, bool); 2]) -> Self {
-        let mut menu = Self { titles: titles(modes, states), current: 0, item: 0, dropped: false };
+        let mut titles = titles(modes, states);
+        // the interface language (Far's own texts)
+        for title in &mut titles {
+            title.label = crate::lang::tr(title.label);
+            for item in &mut title.items {
+                item.label = crate::lang::tr(item.label);
+            }
+        }
+        let mut menu = Self { titles, current: 0, item: 0, dropped: false };
         menu.open(current);
         menu
     }
@@ -417,13 +483,13 @@ impl Menu {
 
     pub fn paint(&self, grid: &mut Grid) {
         let cols = grid.cols;
-        grid.fill_with(0, 0, cols, 1, BAR_TEXT, BG);
+        grid.fill_with(0, 0, cols, 1, BAR_TEXT(), BG());
         for (index, (title, (col, width))) in self.titles.iter().zip(self.title_spans()).enumerate() {
             if index == self.current {
-                grid.fill_with(col, 0, width, 1, SELECTED_TEXT, SELECTED_BG);
-                put_label(grid, col + 2, 0, title.label, SELECTED_TEXT, SELECTED_BG, HOT);
+                grid.fill_with(col, 0, width, 1, SELECTED_TEXT(), SELECTED_BG());
+                put_label(grid, col + 2, 0, title.label, SELECTED_TEXT(), SELECTED_BG(), HOT());
             } else {
-                put_label(grid, col + 2, 0, title.label, BAR_TEXT, BG, HOT);
+                put_label(grid, col + 2, 0, title.label, BAR_TEXT(), BG(), HOT());
             }
         }
 
@@ -432,26 +498,26 @@ impl Menu {
         }
         let (x, y, w, h) = self.drop_down(cols);
         // the shadow, then the frame (no margin: it hangs from the bar)
-        grid.fill_with(x, y, w, h, TEXT, BG);
+        grid.fill_with(x, y, w, h, TEXT(), BG());
         palette::drop_shadow(grid, x, y, w, h);
         let line = "\u{2550}".repeat(w.saturating_sub(2) as usize);
-        grid.put(x, y, &format!("\u{2554}{line}\u{2557}"), TEXT, BG);
-        grid.put(x, y + h - 1, &format!("\u{255A}{line}\u{255D}"), TEXT, BG);
+        grid.put(x, y, &format!("\u{2554}{line}\u{2557}"), TEXT(), BG());
+        grid.put(x, y + h - 1, &format!("\u{255A}{line}\u{255D}"), TEXT(), BG());
         let shortcut_col = x + w - 2 - self.items().iter().map(|i| i.shortcut.chars().count()).max().unwrap_or(0) as u16;
         for (index, item) in self.items().iter().enumerate() {
             let row = y + 1 + index as u16;
             if item.label == "-" {
                 let thin = "\u{2500}".repeat(w.saturating_sub(2) as usize);
-                grid.put(x, row, &format!("\u{255F}{thin}\u{2562}"), TEXT, BG);
+                grid.put(x, row, &format!("\u{255F}{thin}\u{2562}"), TEXT(), BG());
                 continue;
             }
-            grid.put(x, row, "\u{2551}", TEXT, BG);
-            grid.put(x + w - 1, row, "\u{2551}", TEXT, BG);
+            grid.put(x, row, "\u{2551}", TEXT(), BG());
+            grid.put(x + w - 1, row, "\u{2551}", TEXT(), BG());
             let selected = index == self.item;
             let (fg, bg, hot) = match (selected, item.command.is_some()) {
-                (true, _) => (SELECTED_TEXT, SELECTED_BG, HOT),
-                (false, true) => (TEXT, BG, HOT),
-                (false, false) => (DISABLED, BG, DISABLED),
+                (true, _) => (SELECTED_TEXT(), SELECTED_BG(), HOT()),
+                (false, true) => (TEXT(), BG(), HOT()),
+                (false, false) => (DISABLED(), BG(), DISABLED()),
             };
             if selected {
                 grid.fill_with(x + 1, row, w - 2, 1, fg, bg);

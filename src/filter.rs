@@ -206,7 +206,7 @@ impl Filter {
         (point(&self.after), point(&self.before))
     }
 
-    fn to_line(&self) -> String {
+    pub(crate) fn to_line(&self) -> String {
         let b = |on: bool| if on { "1" } else { "0" };
         let attributes: String = self.attributes.iter().map(|s| char::from(b'0' + s)).collect();
         let flags: String = self.flags.iter().map(|f| f.unwrap_or('.')).collect();
@@ -233,7 +233,7 @@ impl Filter {
         ])
     }
 
-    fn from_fields(f: &[String]) -> Option<Self> {
+    pub(crate) fn from_fields(f: &[String]) -> Option<Self> {
         if f.len() != 18 || f[0] != "F" {
             return None;
         }
@@ -457,6 +457,24 @@ fn menu_string(name: &str, hotkey: Option<char>, panel_type: bool, filter: &Filt
     let name = if hotkey.is_some() || crate::vmenu::strip_hot(name).chars().count() > width { shown } else { name.to_string() };
     let mask = if filter.mask_on { crate::dialog::escape_ampersands(filter.mask.trim_end()) } else { String::new() };
     format!("{hot}{name}{} \u{2502} {} {other} \u{2502} {mask}", " ".repeat(pad), attributes_string(set, clear))
+}
+
+/// MenuString with bHighlightType: `mark │ name │ attributes flags │ mask`.
+pub fn highlight_string(group: &crate::highlight::Group) -> String {
+    let filter = &group.filter;
+    let (set, clear) = filter.attr_masks();
+    let other: String = [
+        if filter.size_on { 'S' } else { '.' },
+        if filter.date_on { if filter.relative { 'R' } else { 'D' } } else { '.' },
+        if filter.hardlinks { 'H' } else { '.' },
+        if group.continue_processing { '\u{2193}' } else { '.' },
+    ]
+    .iter()
+    .collect();
+    let mark: String = crate::dialog::escape_ampersands(&group.mark).chars().take(4).collect();
+    let name: String = filter.title.chars().take(21).collect();
+    let mask = if filter.mask_on { crate::dialog::escape_ampersands(filter.mask.trim_end()) } else { String::new() };
+    format!("{mark:<4} \u{2502} {name:<21} \u{2502} {} {other} \u{2502} {mask}", attributes_string(set, clear))
 }
 
 /// What a row of the filters menu is.
@@ -687,6 +705,26 @@ const ID_ATTR_BUTTON: usize = 27;
 
 /// FileFilterConfig without the highlighting part: 80 by 15.
 pub fn dialog(filter: &Filter, index: usize, new: bool) -> Dialog {
+    build(filter, index, new, None)
+}
+
+/// Options > Files highlighting: FileFilterConfig with its colors part (80 by 24).
+pub fn highlight_dialog(group: &crate::highlight::Group, index: usize, new: bool) -> Dialog {
+    build(&group.filter, index, new, Some(group))
+}
+
+/// The labels of the colors part (NameLabels, padded to the longest and one).
+const NAME_LABELS: [&str; 4] = ["&1. Normal file name", "&3. Selected file name", "&5. File name under cursor", "&7. File name selected under cursor"];
+const MARK_LABELS: [&str; 4] = ["&2. Marking", "&4. Marking", "&6. Marking", "&8. Marking"];
+const NAME_IDS: [&str; 4] = ["~name0", "~name1", "~name2", "~name3"];
+const MARK_IDS: [&str; 4] = ["~mark0", "~mark1", "~mark2", "~mark3"];
+
+/// Which color a colors part button sets (0..3 the name's, 4..7 the mark's).
+pub fn color_slot(id: &str) -> Option<usize> {
+    NAME_IDS.iter().position(|i| *i == id).or_else(|| MARK_IDS.iter().position(|i| *i == id).map(|i| i + 4))
+}
+
+fn build(filter: &Filter, index: usize, new: bool, highlight: Option<&crate::highlight::Group>) -> Dialog {
     let format = Format::system();
     let (date_mask, _) = format.date_mask();
     let (time_mask, _) = format.time_mask();
@@ -729,12 +767,50 @@ pub fn dialog(filter: &Filter, index: usize, new: bool) -> Dialog {
         (check("attr_on", "Attri&butes", filter.attr_on), dialog::at(5, 10)),
         (Item::Buttons(vec![dialog::stay_button("&...", "attributes", true)]), dialog::span(20, 10, 26)),
         (check("hardlinks", "Has more than one hardlin&k", filter.hardlinks), dialog::at(41, 10)),
-        (Item::Separator(None), dialog::at(-1, 11)),
-        (Item::Buttons(vec![dialog::button("OK", "ok", true), dialog::stay_button("&Reset", "reset", true), dialog::button("Cancel", "cancel", false)]), dialog::at(-1, 12)),
     ];
+    let mut items_places = items_places;
+    let (size, title, action) = match highlight {
+        None => {
+            items_places.push((Item::Separator(None), dialog::at(-1, 11)));
+            items_places.push((
+                Item::Buttons(vec![dialog::button("OK", "ok", true), dialog::stay_button("&Reset", "reset", true), dialog::button("Cancel", "cancel", false)]),
+                dialog::at(-1, 12),
+            ));
+            ((80, 15), "Filter", Action::Filter { index, new, attributes: filter.attributes.clone() })
+        }
+        Some(group) => {
+            let column = NAME_LABELS.iter().map(|l| l.chars().count()).max().unwrap_or(0) + 1;
+            items_places.push((Item::Separator(Some("File name colors (\"black on black\" - default color)")), dialog::at(-1, 12)));
+            items_places.push((dialog::line("mark", &group.mark, false), dialog::span(5, 13, 8)));
+            items_places.push((Item::Label("Markin&g,".into()), dialog::at(10, 13)));
+            items_places.push((check("inherit", "In&herit", group.inherit_mark), dialog::at(19, 13)));
+            for i in 0..4 {
+                let y = 14 + i as u16;
+                let name: &'static str = Box::leak(format!("{:<column$}", crate::lang::tr(NAME_LABELS[i])).into_boxed_str());
+                let width = crate::vmenu::strip_hot(name).chars().count() as u16;
+                let mark_x = 5 + width + 1;
+                let marking = crate::lang::tr(MARK_LABELS[i]);
+                let bare = |label: &'static str, id: &'static str| dialog::Button { label, id, default: false, enabled: true, stay: false };
+                items_places.push((Item::Buttons(vec![bare(name, NAME_IDS[i])]), dialog::span(5, y, 5 + width - 1)));
+                let mark_w = crate::vmenu::strip_hot(marking).chars().count() as u16;
+                items_places.push((Item::Buttons(vec![bare(marking, MARK_IDS[i])]), dialog::span(mark_x as i16, y, mark_x + mark_w - 1)));
+            }
+            items_places.push((check("continue", "C&ontinue processing", group.continue_processing), dialog::at(5, 19)));
+            items_places.push((Item::Separator(None), dialog::at(-1, 20)));
+            items_places.push((
+                Item::Buttons(vec![
+                    dialog::button("OK", "ok", true),
+                    dialog::stay_button("&Reset", "reset", true),
+                    dialog::stay_button("Make &transparent", "transparent", true),
+                    dialog::button("Cancel", "cancel", false),
+                ]),
+                dialog::at(-1, 21),
+            ));
+            ((80, 24), "Files highlighting", Action::Highlight { index, new, attributes: filter.attributes.clone(), colors: group.colors })
+        }
+    };
     let (items, places): (Vec<Item>, Vec<Place>) = items_places.into_iter().unzip();
-    let action = Action::Filter { index, new, attributes: filter.attributes.clone() };
-    let mut dialog = Dialog::placed("Filter".into(), (80, 15), items, places, 1, Some(hook), action);
+    let mut dialog = Dialog::placed(title.into(), size, items, places, 1, Some(hook), action);
     dialog.enable(ID_MASK, filter.mask_on);
     for i in ID_SIZE {
         dialog.enable(i, filter.size_on);
@@ -805,7 +881,7 @@ fn hook(dialog: &mut Dialog, event: Event) {
             for id in ["before_date", "before_days", "before_time", "after_date", "after_days", "after_time"] {
                 dialog.set_text(id, "", false);
             }
-            if let Action::Filter { attributes, .. } = dialog.action_mut() {
+            if let Action::Filter { attributes, .. } | Action::Highlight { attributes, .. } = dialog.action_mut() {
                 *attributes = Filter::default().attributes;
             }
             relative_items(dialog, false);
@@ -820,7 +896,7 @@ fn hook(dialog: &mut Dialog, event: Event) {
         }
         Event::Button("attributes") => {
             let states = match dialog.action_mut() {
-                Action::Filter { attributes, .. } => attributes.clone(),
+                Action::Filter { attributes, .. } | Action::Highlight { attributes, .. } => attributes.clone(),
                 _ => return,
             };
             let mut items: Vec<Item> =
@@ -830,8 +906,13 @@ fn hook(dialog: &mut Dialog, event: Event) {
             dialog.open_sub(Dialog::builder("Attributes", items, 0, None, Action::Info));
         }
         Event::SubClosed(Some(("ok", values))) if values.has_choice(ATTRIBUTE_IDS[0]) => {
-            if let Action::Filter { attributes, .. } = dialog.action_mut() {
+            if let Action::Filter { attributes, .. } | Action::Highlight { attributes, .. } = dialog.action_mut() {
                 *attributes = ATTRIBUTE_IDS.iter().map(|id| values.choice(id) as u8).collect();
+            }
+        }
+        Event::Button("transparent") => {
+            if let Action::Highlight { colors, .. } = dialog.action_mut() {
+                *colors = [None; 8];
             }
         }
         Event::Closing("ok") => {

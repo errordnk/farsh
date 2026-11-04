@@ -33,6 +33,19 @@ pub enum List {
     Screens(VMenu, Option<usize>),
     Tasks(VMenu, Vec<tasklist::Task>, bool),
     Hotplug(VMenu, Vec<hotplug::Device>),
+    /// Options > Languages: the main language's menu, then the help's.
+    Languages(VMenu, bool),
+    /// Options > Groups of file masks: the groups listed, whether F7 filtered them.
+    MaskGroups(VMenu, Vec<String>, bool),
+    CodePages(crate::codepages::CodePagesMenu),
+    /// Options > File panel modes.
+    PanelModes(VMenu),
+    /// Options > Colors: the groups, a group's items (where its menu is), Themes.
+    ColorGroups(VMenu),
+    ColorItems(VMenu, &'static [crate::colordata::Item], (u16, u16)),
+    Themes(VMenu),
+    /// Options > Files highlighting and sort groups: what each row is.
+    Highlight(VMenu, Vec<crate::optmenu::HiRow>),
 }
 
 impl List {
@@ -45,7 +58,22 @@ impl List {
             List::History(h) => &mut h.menu,
             List::UserMenu(u) => &mut u.menu,
             List::Filters(f) => &mut f.menu,
-            List::Shortcuts(m) | List::Assocs(m) | List::SelectAssoc(m, _) | List::Plugins(m) | List::ArcLite(m) | List::Screens(m, _) | List::Tasks(m, _, _) | List::Hotplug(m, _) => m,
+            List::CodePages(c) => &mut c.menu,
+            List::Shortcuts(m)
+            | List::Assocs(m)
+            | List::SelectAssoc(m, _)
+            | List::Plugins(m)
+            | List::ArcLite(m)
+            | List::Screens(m, _)
+            | List::Tasks(m, _, _)
+            | List::Hotplug(m, _)
+            | List::Languages(m, _)
+            | List::PanelModes(m)
+            | List::ColorGroups(m)
+            | List::ColorItems(m, _, _)
+            | List::Themes(m)
+            | List::Highlight(m, _)
+            | List::MaskGroups(m, _, _) => m,
         }
     }
 }
@@ -143,6 +171,10 @@ impl App {
             KeyCode::F(9) if alt => Some(Cmd::VideoMode),
             KeyCode::F(11) if alt => Some(Cmd::ViewHistory),
             KeyCode::F(12) if alt => Some(Cmd::FoldersHistory),
+            KeyCode::F(9) if m == KeyModifiers::SHIFT => {
+                self.run_option(crate::menu::Opt::SaveSetup);
+                return true;
+            }
             // Ctrl+W is readline's: only while nothing is typed
             KeyCode::Char('w') if m == KeyModifiers::CONTROL && self.shell.command_line_is_empty() => Some(Cmd::TaskList),
             KeyCode::Char('i') if m == KeyModifiers::CONTROL => Some(Cmd::Filter),
@@ -175,8 +207,18 @@ impl App {
             KeyCode::F(4) if alt => Some(assoc::Mode::AltEdit),
             _ => None,
         };
-        if let (Some(mode), Some(file)) = (mode, self.panels.current_file()) {
-            return self.run_association(&file, mode);
+        if let (Some(mode), Some(file)) = (mode, self.panels.current_file())
+            && self.run_association(&file, mode)
+        {
+            return true;
+        }
+        // Alt+F3 without an association: the other viewer
+        if key.code == KeyCode::F(3)
+            && alt
+            && let Some(file) = self.panels.current_file()
+        {
+            self.alt_view(&file);
+            return true;
         }
         false
     }
@@ -289,12 +331,36 @@ impl App {
     /// A key over a list.
     pub(crate) fn list_key(&mut self, list: List, key: KeyEvent) {
         match list {
+            List::Languages(menu, help) => self.languages_key(menu, help, key),
+            List::MaskGroups(menu, names, filtered) => self.mask_groups_key(menu, names, filtered, key),
+            List::CodePages(menu) => self.code_pages_key(menu, key),
+            List::PanelModes(menu) => self.panel_modes_key(menu, key),
+            List::ColorGroups(menu) => self.color_groups_key(menu, key),
+            List::Highlight(menu, rows) => self.highlight_key(menu, rows, key),
+            List::ColorItems(menu, items, at) => self.color_items_key(menu, items, at, key),
+            List::Themes(mut menu) => match menu.key(key) {
+                Outcome::Chosen(_) => {
+                    crate::colors::reset_all();
+                }
+                Outcome::Closed => {}
+                _ => self.overlay = Overlay::List(Box::new(List::Themes(menu))),
+            },
             List::History(mut menu) => {
                 let which = menu.which;
                 let outcome = menu.key(key, self.history_of(which));
                 match outcome {
                     history::MenuOutcome::Open => self.overlay = Overlay::List(Box::new(List::History(menu))),
                     history::MenuOutcome::Closed => {}
+                    history::MenuOutcome::AskClear if !crate::settings::bool("Confirmations.HistoryClear") => {
+                        self.history_of(which).clear();
+                        let history = match which {
+                            Which::Commands => &self.commands,
+                            Which::Views => &self.views,
+                            Which::Folders => &self.folders,
+                        };
+                        menu.refill(history);
+                        self.overlay = Overlay::List(Box::new(List::History(menu)));
+                    }
                     history::MenuOutcome::AskClear => {
                         let title = which.title();
                         let buttons = [("&Clear history", "ok"), ("Cancel", "cancel")];
@@ -445,6 +511,11 @@ impl App {
             },
             List::Hotplug(mut menu, devices) => match menu.key(key) {
                 Outcome::Closed => {}
+                Outcome::Key(k) if k.code == KeyCode::Delete && !devices.is_empty() && !crate::settings::bool("Confirmations.RemoveHotPlug") => {
+                    let index = menu.selected();
+                    self.under.push(Overlay::List(Box::new(List::Hotplug(menu, devices))));
+                    self.accept_command(Action::Eject(index), "ok", &Values::default());
+                }
                 Outcome::Key(k) if k.code == KeyCode::Delete && !devices.is_empty() => {
                     let index = menu.selected();
                     let device = &devices[index];
@@ -746,7 +817,7 @@ impl App {
                     }
                 }
             }
-            _ => {}
+            other => self.accept_option(other, id, values),
         }
     }
 

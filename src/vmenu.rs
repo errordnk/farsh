@@ -13,11 +13,26 @@ use crossterm::style::Color;
 use crate::grid::Grid;
 use crate::palette;
 
-const BG: Color = palette::bg(palette::CYAN);
-const TEXT: Color = palette::fg(palette::WHITE);
-const HOT: Color = palette::fg(palette::YELLOW);
-const GREY: Color = palette::fg(palette::DARK_GRAY);
-const SELECTED_BG: Color = palette::bg(palette::BLACK);
+#[allow(non_snake_case)]
+fn BG() -> Color {
+    crate::colors::bg("Menu.Text")
+}
+#[allow(non_snake_case)]
+fn TEXT() -> Color {
+    crate::colors::fg("Menu.Text")
+}
+#[allow(non_snake_case)]
+fn HOT() -> Color {
+    crate::colors::fg("Menu.Highlight")
+}
+#[allow(non_snake_case)]
+fn GREY() -> Color {
+    crate::colors::fg("Menu.Text.Disabled")
+}
+#[allow(non_snake_case)]
+fn SELECTED_BG() -> Color {
+    crate::colors::bg("Menu.Text.Selected")
+}
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Outcome {
@@ -69,6 +84,8 @@ pub struct VMenu {
     pub show_ampersand: bool,
     /// VMENU_AUTOHIGHLIGHT / AssignHighlights.
     pub auto_highlight: bool,
+    /// SetPosition with a left and top (else centered).
+    pub at: Option<(u16, u16)>,
     /// left, top, right, bottom at the last paint
     frame: (u16, u16, u16, u16),
     /// The visible rows at the last paint.
@@ -91,6 +108,7 @@ impl VMenu {
             max_height_margin: None,
             show_ampersand: false,
             auto_highlight: false,
+            at: None,
             frame: (0, 0, 0, 0),
             rows: 0,
         };
@@ -262,6 +280,7 @@ impl VMenu {
                 return Outcome::Open;
             }
             MouseEventKind::Down(MouseButton::Left) => {}
+            MouseEventKind::Down(button) => return self.outside_click(button, col, row),
             _ => return Outcome::Open,
         }
         if col > left && col < right && row > top && row < bottom {
@@ -286,7 +305,26 @@ impl VMenu {
             }
             return Outcome::Open;
         }
-        if col + 2 < left || col > right + 2 || row + 1 < top || row > bottom + 1 { Outcome::Closed } else { Outcome::Open }
+        if col + 2 < left || col > right + 2 || row + 1 < top || row > bottom + 1 { self.outside_click(MouseButton::Left, col, row) } else { Outcome::Open }
+    }
+
+    /// Menu settings: a click outside the menu cancels it, executes the
+    /// selected item or does nothing (a right or middle click inside does nothing).
+    fn outside_click(&mut self, button: MouseButton, col: u16, row: u16) -> Outcome {
+        let (left, top, right, bottom) = self.frame;
+        if col + 2 >= left && col <= right + 2 && row + 1 >= top && row <= bottom + 1 {
+            return Outcome::Open;
+        }
+        let key = match button {
+            MouseButton::Left => "VMenu.LBtnClick",
+            MouseButton::Right => "VMenu.RBtnClick",
+            MouseButton::Middle => "VMenu.MBtnClick",
+        };
+        match crate::settings::int(key) {
+            1 => Outcome::Chosen(self.selected),
+            2 => Outcome::Open,
+            _ => Outcome::Closed,
+        }
     }
 
     pub fn paint(&mut self, grid: &mut Grid) {
@@ -302,13 +340,13 @@ impl VMenu {
         let submenus = self.entries.iter().any(|e| e.submenu);
         let service = 5 + u16::from(submenus);
         let menu_width = service + longest.min(scr_x.saturating_sub(service));
-        let left = (scr_x.saturating_sub(menu_width) / 2).max(2);
+        let left = self.at.map_or((scr_x.saturating_sub(menu_width) / 2).max(2), |(x, _)| x.max(2));
         let right = (left + menu_width).min(scr_x.saturating_sub(2));
         let max_height = self.max_height_margin.map(|m| scr_y.saturating_sub(m) as usize).filter(|&m| m > 0);
         let visible = max_height.map_or(n, |m| n.min(m)).max(1);
-        let mut top = (scr_y as usize).saturating_sub(visible + 2) as u16 / 2;
+        let mut top = self.at.map_or((scr_y as usize).saturating_sub(visible + 2) as u16 / 2, |(_, y)| y);
         let mut bottom = (top + visible as u16 + 1).min(scr_y);
-        if top < 3 && bottom > scr_y.saturating_sub(3) {
+        if self.at.is_none() && top < 3 && bottom > scr_y.saturating_sub(3) {
             top = 2;
             bottom = scr_y.saturating_sub(2).max(top + 2);
         }
@@ -323,28 +361,29 @@ impl VMenu {
         let margin_left = left.saturating_sub(2);
         let margin_top = top.saturating_sub(1);
         let (margin_w, margin_h) = ((right + 3).min(grid.cols) - margin_left, (bottom + 2).min(grid.rows) - margin_top);
-        grid.fill_with(margin_left, margin_top, margin_w, margin_h, TEXT, BG);
+        grid.fill_with(margin_left, margin_top, margin_w, margin_h, TEXT(), BG());
         let horizontal = "\u{2550}".repeat(inner);
-        grid.put(left, top, &format!("\u{2554}{horizontal}\u{2557}"), TEXT, BG);
-        grid.put(left, bottom, &format!("\u{255A}{horizontal}\u{255D}"), TEXT, BG);
-        for (title, y) in [(&self.title, top), (&self.bottom, bottom)] {
+        grid.put(left, top, &format!("\u{2554}{horizontal}\u{2557}"), TEXT(), BG());
+        grid.put(left, bottom, &format!("\u{255A}{horizontal}\u{255D}"), TEXT(), BG());
+        let (title_shown, bottom_shown) = (crate::lang::trs(&self.title), self.bottom.clone());
+        for (title, y) in [(&title_shown, top), (&bottom_shown, bottom)] {
             if title.is_empty() {
                 continue;
             }
             let shown: String = title.chars().take(inner.saturating_sub(2)).collect();
             let x = left + 1 + (inner.saturating_sub(shown.chars().count() + 2) / 2) as u16;
-            grid.put(x, y, &format!(" {shown} "), TEXT, BG);
+            grid.put(x, y, &format!(" {shown} "), TEXT(), BG());
         }
         let hot = self.hot_keys();
         let text_x = left + 3;
         let text_w = (right - 1 - u16::from(submenus)).saturating_sub(text_x) as usize;
         for row in 0..self.rows {
             let y = top + 1 + row as u16;
-            grid.put(left, y, "\u{2551}", TEXT, BG);
-            grid.put(right, y, "\u{2551}", TEXT, BG);
+            grid.put(left, y, "\u{2551}", TEXT(), BG());
+            grid.put(right, y, "\u{2551}", TEXT(), BG());
             let index = self.top + row;
             let Some(entry) = self.entries.get(index) else {
-                grid.fill_with(left + 1, y, inner as u16, 1, TEXT, BG);
+                grid.fill_with(left + 1, y, inner as u16, 1, TEXT(), BG());
                 continue;
             };
             if entry.separator {
@@ -356,12 +395,12 @@ impl VMenu {
                     line[at..at + label.len()].copy_from_slice(&label);
                 }
                 let line: String = line.into_iter().collect();
-                grid.put(left, y, &format!("\u{255F}{line}\u{2562}"), TEXT, BG);
+                grid.put(left, y, &format!("\u{255F}{line}\u{2562}"), TEXT(), BG());
                 continue;
             }
             let selected = index == self.selected;
-            let bg = if selected { SELECTED_BG } else { BG };
-            let fg = if entry.disabled { GREY } else { TEXT };
+            let bg = if selected { SELECTED_BG() } else { BG() };
+            let fg = if entry.disabled { GREY() } else { TEXT() };
             grid.fill_with(left + 1, y, inner as u16, 1, fg, bg);
             if let Some(mark) = entry.check {
                 grid.put(left + 1, y, &mark.to_string(), fg, bg);
@@ -369,7 +408,7 @@ impl VMenu {
             let shown: Vec<char> = self.shown(&entry.text).chars().collect();
             for (i, c) in shown.iter().take(text_w).enumerate() {
                 let is_hot = !entry.disabled && hot[index].is_some_and(|(_, at)| at == i);
-                grid.put(text_x + i as u16, y, &c.to_string(), if is_hot { HOT } else { fg }, bg);
+                grid.put(text_x + i as u16, y, &c.to_string(), if is_hot { HOT() } else { fg }, bg);
             }
             if shown.len() > text_w {
                 grid.put(right - 1 - u16::from(submenus), y, "\u{00BB}", fg, bg);
@@ -381,7 +420,7 @@ impl VMenu {
         if self.rows < n && self.rows >= 2 {
             let bar = scroll_bar(self.rows, self.top, self.top + self.rows, n);
             for (i, c) in bar.chars().enumerate() {
-                grid.put(right, top + 1 + i as u16, &c.to_string(), TEXT, BG);
+                grid.put(right, top + 1 + i as u16, &c.to_string(), TEXT(), BG());
             }
         }
         palette::drop_shadow(grid, margin_left, margin_top, margin_w, margin_h);
@@ -389,7 +428,7 @@ impl VMenu {
 }
 
 /// Far's MakeScrollBarEx: ▲, the track with the slider, ▼.
-fn scroll_bar(length: usize, start: usize, end: usize, size: usize) -> String {
+pub fn scroll_bar(length: usize, start: usize, end: usize, size: usize) -> String {
     let mut bar = vec!['\u{2591}'; length];
     bar[0] = '\u{25B2}';
     bar[length - 1] = '\u{25BC}';

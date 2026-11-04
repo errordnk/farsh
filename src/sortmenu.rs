@@ -9,10 +9,22 @@ use crate::grid::Grid;
 use crate::palette;
 use crate::sorting::{SortMode, Sorting};
 
-const BG: Color = palette::bg(palette::CYAN);
-const TEXT: Color = palette::fg(palette::WHITE);
-const HOT: Color = palette::fg(palette::YELLOW);
-const SELECTED_BG: Color = palette::bg(palette::BLACK);
+#[allow(non_snake_case)]
+fn BG() -> Color {
+    crate::colors::bg("Menu.Text")
+}
+#[allow(non_snake_case)]
+fn TEXT() -> Color {
+    crate::colors::fg("Menu.Text")
+}
+#[allow(non_snake_case)]
+fn HOT() -> Color {
+    crate::colors::fg("Menu.Highlight")
+}
+#[allow(non_snake_case)]
+fn SELECTED_BG() -> Color {
+    crate::colors::bg("Menu.Text.Selected")
+}
 
 const TITLE: &str = "Sort by";
 const BOTTOM: &str = "+ - * F4";
@@ -86,7 +98,7 @@ impl SortMenu {
         let mut lines: Vec<Line> = SortMode::MENU
             .iter()
             .map(|&mode| Line {
-                label: mode.label(),
+                label: crate::lang::tr(mode.label()),
                 accel: accel(mode),
                 check: (mode == sorting.mode).then_some(if sorting.reverse { '\u{25BC}' } else { '\u{25B2}' }),
                 choice: Some(Choice::Mode(mode)),
@@ -214,26 +226,26 @@ impl SortMenu {
         self.frame = (left, top, right, bottom);
 
         let margin_left = left.saturating_sub(2);
-        grid.fill_with(margin_left, top.saturating_sub(1), right + 3 - margin_left, height + 2, TEXT, BG);
+        grid.fill_with(margin_left, top.saturating_sub(1), right + 3 - margin_left, height + 2, TEXT(), BG());
         let horizontal = "\u{2550}".repeat(inner);
-        grid.put(left, top, &format!("\u{2554}{horizontal}\u{2557}"), TEXT, BG);
-        grid.put(left, bottom, &format!("\u{255A}{horizontal}\u{255D}"), TEXT, BG);
-        for (title, y) in [(TITLE, top), (BOTTOM, bottom)] {
+        grid.put(left, top, &format!("\u{2554}{horizontal}\u{2557}"), TEXT(), BG());
+        grid.put(left, bottom, &format!("\u{255A}{horizontal}\u{255D}"), TEXT(), BG());
+        for (title, y) in [(crate::lang::tr(TITLE), top), (BOTTOM, bottom)] {
             let title = format!(" {title} ");
             let x = left + 1 + (inner.saturating_sub(title.chars().count()) / 2) as u16;
-            grid.put(x, y, &title, TEXT, BG);
+            grid.put(x, y, &title, TEXT(), BG());
         }
         for row in 0..shown {
             let y = top + 1 + row as u16;
             let index = self.top + row;
             let line = &self.lines[index];
-            grid.put(left, y, "\u{2551}", TEXT, BG);
-            grid.put(right, y, "\u{2551}", TEXT, BG);
+            grid.put(left, y, "\u{2551}", TEXT(), BG());
+            grid.put(right, y, "\u{2551}", TEXT(), BG());
             if line.choice.is_none() {
-                grid.put(left, y, &format!("\u{255F}{}\u{2562}", "\u{2500}".repeat(inner)), TEXT, BG);
+                grid.put(left, y, &format!("\u{255F}{}\u{2562}", "\u{2500}".repeat(inner)), TEXT(), BG());
                 continue;
             }
-            let bg = if index == self.selected { SELECTED_BG } else { BG };
+            let bg = if index == self.selected { SELECTED_BG() } else { BG() };
             let (label, hot) = plain(line.label);
             let text = format!(
                 "{} {label:<text_width$}  {:<accel_width$} ",
@@ -242,16 +254,16 @@ impl SortMenu {
                 text_width = text_width,
                 accel_width = accel_width
             );
-            grid.put(left + 1, y, &text, TEXT, bg);
+            grid.put(left + 1, y, &text, TEXT(), bg);
             if let Some(h) = hot {
                 let c: String = label.chars().nth(h).into_iter().collect();
-                grid.put(left + 3 + h as u16, y, &c, HOT, bg);
+                grid.put(left + 3 + h as u16, y, &c, HOT(), bg);
             }
         }
         if shown < self.lines.len() {
             let bar = scroll_bar(shown, self.top, self.lines.len());
             for (i, c) in bar.chars().enumerate() {
-                grid.put(right, top + 1 + i as u16, &c.to_string(), TEXT, BG);
+                grid.put(right, top + 1 + i as u16, &c.to_string(), TEXT(), BG());
             }
         }
         let margin_top = top.saturating_sub(1);

@@ -24,9 +24,10 @@ impl Diz {
     pub fn read(dir: &Path) -> Self {
         let found = std::fs::read_dir(dir).ok().and_then(|listing| {
             let names: Vec<String> = listing.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
-            LIST_NAMES.iter().find_map(|wanted| names.iter().find(|n| n.eq_ignore_ascii_case(wanted)).cloned())
+            list_names().iter().find_map(|wanted| names.iter().find(|n| n.eq_ignore_ascii_case(wanted)).cloned())
         });
-        let mut diz = Self { path: dir.join(found.clone().unwrap_or_else(|| LIST_NAMES[0].into())), exists: found.is_some(), records: Vec::new(), bom: false };
+        let first = list_names().into_iter().next().unwrap_or_else(|| LIST_NAMES[0].to_string());
+        let mut diz = Self { path: dir.join(found.clone().unwrap_or(first)), exists: found.is_some(), records: Vec::new(), bom: false };
         let Some(bytes) = found.and_then(|name| std::fs::read(dir.join(name)).ok()) else { return diz };
         let text = match bytes.strip_prefix(b"\xEF\xBB\xBF") {
             Some(rest) => {
@@ -110,16 +111,37 @@ impl Diz {
             bytes.extend_from_slice(b"\xEF\xBB\xBF");
         }
         bytes.extend_from_slice(text.as_bytes());
-        // a hidden file cannot be opened for a rewrite on Windows: show it first
+        // a hidden file cannot be opened for a rewrite on Windows: show it
+        // first; a new list is hidden if File descriptions says so
+        let hide = if self.exists { is_hidden(&self.path) } else { crate::settings::bool("Descriptions.SetHidden") };
         set_hidden(&self.path, false);
         std::fs::write(&self.path, bytes).map_err(fail)?;
-        set_hidden(&self.path, true);
+        set_hidden(&self.path, hide);
         self.exists = true;
         Ok(())
     }
 }
 
 #[cfg(windows)]
+/// Options > File descriptions: the description list names.
+pub fn list_names() -> Vec<String> {
+    crate::settings::string("Descriptions.ListNames").split(',').map(|n| n.trim().to_string()).filter(|n| !n.is_empty()).collect()
+}
+
+#[cfg(windows)]
+fn is_hidden(path: &Path) -> bool {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{FILE_ATTRIBUTE_HIDDEN, GetFileAttributesW, INVALID_FILE_ATTRIBUTES};
+    let wide: Vec<u16> = path.as_os_str().encode_wide().chain([0]).collect();
+    let attributes = unsafe { GetFileAttributesW(wide.as_ptr()) };
+    attributes != INVALID_FILE_ATTRIBUTES && attributes & FILE_ATTRIBUTE_HIDDEN != 0
+}
+
+#[cfg(not(windows))]
+fn is_hidden(_: &Path) -> bool {
+    false
+}
+
 fn set_hidden(path: &Path, hidden: bool) {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Storage::FileSystem::{FILE_ATTRIBUTE_HIDDEN, GetFileAttributesW, INVALID_FILE_ATTRIBUTES, SetFileAttributesW};

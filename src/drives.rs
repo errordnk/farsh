@@ -13,11 +13,26 @@ use crate::palette;
 
 
 // Far's menu colors: white on cyan, yellow hotkeys, the selection on black
-const BG: Color = palette::bg(palette::CYAN);
-const TEXT: Color = palette::fg(palette::WHITE);
-const HOT: Color = palette::fg(palette::YELLOW);
-const SELECTED_BG: Color = palette::bg(palette::BLACK);
-const SELECTED_TEXT: Color = palette::fg(palette::WHITE);
+#[allow(non_snake_case)]
+fn BG() -> Color {
+    crate::colors::bg("Menu.Text")
+}
+#[allow(non_snake_case)]
+fn TEXT() -> Color {
+    crate::colors::fg("Menu.Text")
+}
+#[allow(non_snake_case)]
+fn HOT() -> Color {
+    crate::colors::fg("Menu.Highlight")
+}
+#[allow(non_snake_case)]
+fn SELECTED_BG() -> Color {
+    crate::colors::bg("Menu.Text.Selected")
+}
+#[allow(non_snake_case)]
+fn SELECTED_TEXT() -> Color {
+    crate::colors::fg("Menu.Text.Selected")
+}
 
 /// How long the sizes may take: a dead network share must not hang the panel.
 const SIZE_TIMEOUT: Duration = Duration::from_millis(500);
@@ -192,6 +207,11 @@ fn sort_mounts(drives: &mut [Drive]) {
 }
 
 /// Far's sizes: three significant digits, `866 G`, `57,3 G`, `1,82 T`.
+/// The free space where `path` is (the panel's "free" in the bottom border).
+pub fn free_space(path: &Path) -> Option<u64> {
+    space(path).map(|(_, free)| free)
+}
+
 pub fn size(bytes: u64) -> String {
     const UNITS: [&str; 6] = ["B", "K", "M", "G", "T", "P"];
     let mut value = bytes as f64;
@@ -309,7 +329,7 @@ impl DriveMenu {
         let (name_w, kind_w, size_w) = self.widths();
         // the box around the frame (a menu's: 2 columns, 1 row), and its shadow
         let (bx, by, bw, bh) = (x.saturating_sub(2), y.saturating_sub(1), w + 4, h + 2);
-        grid.fill_with(bx, by, bw, bh, TEXT, BG);
+        grid.fill_with(bx, by, bw, bh, TEXT(), BG());
         palette::drop_shadow(grid, bx, by, bw, bh);
 
         let first = 2 + 1 + name_w + 1 + kind_w + 1;
@@ -324,17 +344,17 @@ impl DriveMenu {
             }
             format!("{left}{}{right}", line.into_iter().collect::<String>())
         };
-        grid.put(x, y, &border('\u{2554}', '\u{2557}', '\u{2550}'), TEXT, BG);
-        grid.put(x, y + h - 1, &border('\u{255A}', '\u{255D}', '\u{2567}'), TEXT, BG);
+        grid.put(x, y, &border('\u{2554}', '\u{2557}', '\u{2550}'), TEXT(), BG());
+        grid.put(x, y + h - 1, &border('\u{255A}', '\u{255D}', '\u{2567}'), TEXT(), BG());
         let title = " Change drive ";
-        grid.put(x + w.saturating_sub(title.chars().count() as u16) / 2, y, title, TEXT, BG);
+        grid.put(x + w.saturating_sub(title.chars().count() as u16) / 2, y, title, TEXT(), BG());
 
         for (index, drive) in self.drives.iter().enumerate().take(h.saturating_sub(2) as usize) {
             let row = y + 1 + index as u16;
             let selected = index == self.selected;
-            let (fg, bg) = if selected { (SELECTED_TEXT, SELECTED_BG) } else { (TEXT, BG) };
-            grid.put(x, row, "\u{2551}", TEXT, BG);
-            grid.put(x + w - 1, row, "\u{2551}", TEXT, BG);
+            let (fg, bg) = if selected { (SELECTED_TEXT(), SELECTED_BG()) } else { (TEXT(), BG()) };
+            grid.put(x, row, "\u{2551}", TEXT(), BG());
+            grid.put(x + w - 1, row, "\u{2551}", TEXT(), BG());
             grid.fill_with(x + 1, row, w - 2, 1, fg, bg);
             let name: String = drive.name.chars().take(name_w).collect();
             let shown = |n: Option<u64>| n.map(size).unwrap_or_default();
@@ -348,7 +368,7 @@ impl DriveMenu {
             grid.put(x + 1, row, &text, fg, bg);
             // the drive letter is its hot key, yellow on the selection too
             if drive.name.len() == 2 && drive.name.ends_with(':') {
-                grid.put(x + 3, row, &drive.name[..1], HOT, bg);
+                grid.put(x + 3, row, &drive.name[..1], HOT(), bg);
             }
         }
     }

@@ -1,0 +1,1394 @@
+MYes	Yes	Да
+MNo	No	Нет
+MHYes	&Yes	&Да
+MHNo	&No	&Нет
+MCancel	Cancel	Отмена
+MReset	&Reset	&Сбросить
+MRetry	Retry	Повторить
+MSkip	Skip	Пропустить
+MAbort	Abort	Прервать
+MIgnore	Ignore	Игнорировать
+MDelete	Delete	Удалить
+MHCancel	&Cancel	&Отмена
+MHRetry	&Retry	&Повторить
+MHSkip	&Skip	П&ропустить
+MHSkipAll	S&kip all	Пропустить &все
+MHAbort	&Abort	Прер&вать
+MHIgnore	&Ignore	&Игнорировать
+MHDelete	&Delete	&Удалить
+MHRemove	R&emove	&Удалить
+MHSplit	Sp&lit	Раз&делить
+MWarning	Warning	Предупреждение
+MError	Error	Ошибка
+MQuit	Quit	Выход
+MAskQuit	Do you want to quit Far?	Вы хотите завершить работу в Far?
+MF1	Help	Помощь
+MF2	UserMn	ПользМ
+MF3	View	Просм
+MF4	Edit	Редакт
+MF5	Copy	Копир
+MF6	RenMov	Перен
+MF7	MkFold	Папка
+MF9	ConfMn	КонфМн
+MF11	Plugin	Плагины
+MF12	Screen	Экраны
+MShiftF1	Add	Добавл
+MShiftF2	Extrct	Распак
+MShiftF3	ArcCmd	АрхКом
+MShiftF4	Edit…	Редак…
+MShiftF6	Rename	Переим
+MShiftF9	Save	Сохран
+MShiftF10	Last	Послдн
+MShiftF11	Group	Группы
+MShiftF12	SelUp	Выбран
+MAltF1	Left	Левая
+MAltF2	Right	Правая
+MAltF3	View…	Смотр…
+MAltF5	Print	Печать
+MAltF6	MkLink	Ссылка
+MAltF7	Find	Искать
+MAltF8	Histry	Истор
+MAltF9	Video	Видео
+MAltF10	Tree	Дерево
+MAltF11	ViewHs	ИстПр
+MAltF12	FoldHs	ИстПап
+MCtrlF3	Name	Имя
+MCtrlF4	Extens	Расшир
+MCtrlF5	Write	Запись
+MCtrlF6	Size	Размер
+MCtrlF7	Unsort	Несорт
+MCtrlF8	Creatn	Создан
+MCtrlF9	Access	Доступ
+MCtrlF10	Descr	Описан
+MCtrlF11	Owner	Владел
+MCtrlF12	Sort	Сорт
+MAltShiftF9	ConfPl	КонфПл
+MHistoryTitle	History	История команд
+MHistoryInfoTitle	Information	Информация
+MHistoryInfoFolder	Folder:	Папка:
+MFolderHistoryTitle	Folders history	История папок
+MViewHistoryTitle	File view and edit history	История просмотра и редактирования
+MViewHistoryIsCreate	Create the file?	Создать файл?
+MHistoryExt	Ext.	Внешний
+MHistoryClear	All records in the history will be deleted. Continue?	История будет полностью очищена. Продолжить?
+MClear	&Clear history	&Очистить
+MConfigSystemTitle	System settings	Системные параметры
+MConfigRecycleBin	&Delete to Recycle Bin	Удалять в &Корзину
+MConfigSystemCopy	Use sys&tem copy routine	Использовать систе&мную функцию копирования
+MConfigCopySharing	Copy files opened for &writing	Копировать открытые для &записи файлы
+MConfigScanJunction	Scan s&ymbolic links	Ск&анировать символические ссылки
+MConfigSmartFolderMonitor	&Update panels only when Far is active	Обновление панелей только если Far активен
+MConfigSaveHistory	Save commands &history	Сохранять &историю команд
+MConfigSaveFoldersHistory	Save &folders history	Сохра&нять историю папок
+MConfigSaveViewHistory	Save &view and edit history	Сохранять историю п&росмотра и редактора
+MConfigRegisteredTypes	Use Windows re&gistered types	Использовать стандартные &типы файлов
+MConfigUpdateEnvironment	Automatic update of &environment variables	Автообновл&ение переменных окружения
+MConfigElevation	Request administrator rights:	Запрос прав администратора:
+MConfigElevationModify	For &modification	Д&ля изменения
+MConfigElevationRead	For &reading	Для &чтения
+MConfigElevationUsePrivileges	Use additional &privileges	Исп&ользовать дополнительные привилегии
+MConfigSortingCollation	Sorti&ng collation:	Сортировочное сравнение:
+MConfigSortingOrdinal	ordinal	порядковое
+MConfigSortingInvariant	invariant	инвариантное
+MConfigSortingLinguistic	linguistic	лингвистическое
+MConfigSortingDigitsAsNumbers	Treat digits &as numbers	Трактовать цифры как числа
+MConfigSortingCase	&Case sensitive	&Учитывать регистр
+MConfigAutoSave	Auto &save setup	Автозапись кон&фигурации
+MConfigTreeTitle	Tree settings	Настройки дерева папок
+MConfigTreeAutoChange	&Auto change folder	&Автосмена папки
+MConfigTreeLabelMinFolder	&Minimum number of folders:	&Минимальное количество папок:
+MConfigTreeLabel1	Store a file with folder structure for:	Хранить файл структуры папок для:
+MConfigTreeLabelLocalDisk	local drives	локальных дисков
+MConfigTreeLabelNetDisk	network drives	сетевых дисков
+MConfigTreeLabelNetPath	network paths	сетевых путей
+MConfigTreeLabelRemovableDisk	removable drives	сменных дисков
+MConfigTreeLabelCDDisk	optical drives	оптических дисков
+MConfigTreeLabelExceptPath	Don't create the file for following drives and paths:	Не создавать файл для следующих дисков и путей:
+MConfigTreeLabelSaveLocalPath	Path for local, removale and optical drives:	Путь для локальных, сменных и оптических дисков:
+MConfigTreeLabelSaveNetPath	Path for network drives and paths:	Путь для сетевых дисков и путей:
+MConfigPanelTitle	Panel settings	Настройки панели
+MConfigHidden	Show &hidden and system files	Показывать скр&ытые и системные файлы
+MConfigHighlight	Hi&ghlight files	&Раскраска файлов
+MConfigSelectFolders	Select &folders	Пометка &папок
+MConfigRightClickSelect	Right clic&k selects files	Правый клик помечает файлы
+MConfigSortFolderExt	Sort folder names by e&xtension	Сортировать имена папок по рас&ширению
+MConfigAllowReverseSort	Allow re&verse sort modes	Разрешить &обратную сортировку
+MConfigAutoUpdateLimit	&Disable automatic panel update	Отключать автооб&новление панелей,
+MConfigAutoUpdateLimit2	if ob&ject count exceeds	если объектов больше
+MConfigAutoUpdateRemoteDrive	Network drives autor&efresh	Автообновление с&етевых дисков
+MConfigShowColumns	Show &column titles	Показывать &заголовки колонок
+MConfigShowStatus	Show &status line	Показывать &строку статуса
+MConfigDetailedJunction	Detect volume mount &points	Определять точки монтирования &диска
+MConfigShowTotal	Show files &total information	Показывать су&ммарную информацию
+MConfigShowFree	Show f&ree size	Показывать с&вободное место
+MConfigShowScrollbar	Show scroll&bar	Показывать по&лосу прокрутки
+MConfigShowScreensNumber	Show background screens &number	Показывать количество &фоновых экранов
+MConfigShowSortMode	Show sort &mode letter	Показывать букву режима сор&тировки
+MConfigShowDotsInRoot	Show "&.." in root folders	Показывать ".." в корневых каталогах
+MConfigInterfaceTitle	Interface settings	Настройки интерфейса
+MConfigClock	&Clock	&Часы
+MConfigMouse	M&ouse	Мы&шь
+MConfigKeyBar	Show &key bar	Показывать &линейку клавиш
+MConfigMenuBar	Always show the &menu bar	Всегда показывать &меню
+MConfigSaver	&Screen saver	Экранная за&ставка
+MConfigSaverMinutes	mi&nutes	минут
+MConfigCopyTotal	Show &total copy progress indicator	Показывать &общий индикатор копирования
+MConfigCopyTimeRule	Show cop&ying time information	Показывать информацию о времени &копирования
+MConfigDeleteTotal	Show total &delete progress indicator	Показывать общий индикатор &удаления
+MConfigPgUpChangeDisk	Use Ctrl+Pg&Up to change drive	Использовать Ctrl+PgUp для в&ыбора диска
+MConfigUseVirtualTerminalForRendering	Use &Virtual Terminal for rendering	Использовать Virtual Terminal для рендеринга
+MConfigClearType	Cl&earType-friendly redraw (can be slow)	Перер&исовка с поддержкой ClearType (может быть медленной)
+MConfigSetConsoleIcon	Console &icon:	Иконка консоли:
+MConfigSetAdminConsoleIcon	Alternate for &Administrator	Альтернативная для администратора
+MConfigTitleAddons	Far &window title addons:	Дополнительная информация для &заголовка окна:
+MConfigDlgSetsTitle	Dialog settings	Настройки диалогов
+MConfigDialogsEditHistory	&History in dialog edit controls	&История в строках ввода диалогов
+MConfigDialogsEditBlock	&Persistent blocks in edit controls	&Постоянные блоки в строках ввода
+MConfigDialogsDelRemovesBlocks	&Del removes blocks in edit controls	Del удаляет б&локи в строках ввода
+MConfigDialogsAutoComplete	&AutoComplete in edit controls	&Автозавершение в строках ввода
+MConfigDialogsEULBsClear	&Backspace deletes unchanged text	Backspace &удаляет неизмененный текст
+MConfigDialogsMouseButton	Mouse click &outside a dialog closes it	Клик мыши &вне диалога закрывает диалог
+MConfigVMenuTitle	Menu settings	Настройки меню
+MConfigVMenuLBtnClick	&Left mouse click outside a menu	Клик левой кнопки мыши вне меню
+MConfigVMenuRBtnClick	&Right mouse click outside a menu	Клик правой кнопки мыши вне меню
+MConfigVMenuMBtnClick	&Middle mouse click outside a menu	Клик средней кнопки мыши вне меню
+MConfigVMenuClickCancel	Cancel menu	Закрыть с отменой
+MConfigVMenuClickApply	Execute selected item	Выполнить текущий пункт
+MConfigVMenuClickIgnore	Do nothing	Ничего не делать
+MConfigCmdlineTitle	Command line settings	Настройки командной строки
+MConfigCmdlineEditBlock	&Persistent blocks	&Постоянные блоки
+MConfigCmdlineDelRemovesBlocks	&Del removes blocks	Del удаляет б&локи
+MConfigCmdlineAutoComplete	&AutoComplete	&Автозавершение
+MConfigCmdlineUsePromptFormat	Set command line prompt &format	Установить &формат командной строки
+MConfigCmdlineUseHomeDir	Use &home dir	Использовать &домашний каталог
+MConfigCmdlinePromptFormatAdmin	Administrator	Администратор
+MConfigAutoCompleteTitle	AutoComplete settings	Настройка автозавершения
+MConfigAutoCompleteShowList	&Show a list	Показывать &список
+MConfigAutoCompleteModalList	&Modal mode	&Модальный режим
+MConfigAutoCompleteAutoAppend	&Append the first matched item	&Подставлять первый подходящий вариант
+MConfigInfoPanelTitle	InfoPanel settings	Настройка информационной панели
+MConfigInfoPanelCNTitle	Computer &name format	Форма&т вывода имени компьютера
+MConfigInfoPanelCNPhysicalNetBIOS	Physical NetBIOS	Физическое NetBIOS
+MConfigInfoPanelCNPhysicalDnsHostname	Physical DNS hostname	Физическое имя хоста DNS
+MConfigInfoPanelCNPhysicalDnsDomain	Physical DNS domain	Физическое имя домена DNS
+MConfigInfoPanelCNPhysicalDnsFullyQualified	Physical DNS fully-qualified (FQDN)	Физическое полное DNS имя (FQDN)
+MConfigInfoPanelCNDnsHostname	DNS hostname	Имя хоста DNS
+MConfigInfoPanelCNDnsDomain	DNS domain	Имя домена DNS
+MConfigInfoPanelCNDnsFullyQualified	DNS fully-qualified (FQDN)	Полное DNS имя (FQDN)
+MConfigInfoPanelUNTitle	&User name format	Формат вывода имени &пользователя
+MConfigInfoPanelUNLogon	Logon name	Имя для входа
+MConfigInfoPanelUNFullyQualifiedDN	Fully Qualified Domain Name (FQDN)	Полностью определённое имя домена (FQDN)
+MConfigInfoPanelUNSamCompatible	Sam Compatible	Совместимое с Sam
+MConfigInfoPanelUNDisplay	Display Name	Отображаемое имя
+MConfigInfoPanelUNUniqueId	Unique Id	Уникальный идентификатор
+MConfigInfoPanelUNCanonical	Canonical Name	Каноническое имя
+MConfigInfoPanelUNUserPrincipal	User Principial Name	Основное имя пользователя
+MConfigInfoPanelUNServicePrincipal	Service Principal	Субъект-служба
+MConfigInfoPanelUNGivenName	Given name	Собственное имя
+MConfigInfoPanelUNSurname	Surname	Фамилия
+MConfigInfoPanelShowPowerStatus	Show &power status	Показывать состояние п&итания
+MConfigInfoPanelShowCDInfo	Show &CD drive parameters	Показывать параметры &компакт-дисков
+MMenuInfoShowModeTitle	Show Info	Показать информацию
+MMenuInfoShowModeDisk	&Disk	&Диск
+MMenuInfoShowModeMemory	&Memory	&Память
+MMenuInfoShowModeDirDiz	&Description	&Описание папки
+MMenuInfoShowModePluginDiz	Plu&gin panel	Пла&гиновая панель
+MMenuInfoShowModePower	&Power status	Состояние п&итания
+MViewConfigTitle	Viewer	Программа просмотра
+MViewConfigExternalF3	Use external viewer for F&3 instead of Alt+F3	Запускать внешнюю программу просмотра по F&3 вместо Alt+F3
+MViewConfigExternalCommand	&Viewer command:	&Команда просмотра:
+MViewConfigInternal	Internal viewer	Встроенная программа просмотра
+MViewConfigSavePos	&Save file position	&Сохранять позицию файла
+MViewConfigSaveShortPos	Save &bookmarks	Сохранять &закладки
+MViewConfigSaveCodepage	Save file &code page	Сохранять ко&довую страницу файла
+MViewConfigSaveWrapMode	Save w&rap mode	Сохранять &режим переноса
+MViewConfigSaveViewMode	Save vi&ew mode	Сохранять р&ежим просмотра
+MViewConfigDetectDumpMode	Detect d&ump view mode	Автов&ыбор дамп-режима просмотра
+MViewAutoDetectCodePage	&Autodetect code page	&Автоопределение кодовой страницы
+MViewConfigTabSize	&Tab size	Размер &табуляции
+MViewConfigScrollbar	Show scro&llbar	Показывать &полосу прокрутки
+MViewConfigArrows	Show scrolling arro&ws	Показывать стре&лки сдвига
+MViewConfigPersistentSelection	&Persistent selection	Постоянное &выделение
+MViewConfigDefaultCodePage	&Default code page:	Кодовая стран&ица по умолчанию:
+MViewConfigMaxLineSize	&Maximum line width	&Максимальная ширина строки
+MViewConfigVisible0x00	Visible '\&0'	Показывать '\&0'
+MEditConfigTitle	Editor	Редактор
+MEditConfigEditorF4	Use external editor for F&4 instead of Alt+F4	Запускать внешний редактор по F&4 вместо Alt+F4
+MEditConfigEditorCommand	&Editor command:	&Команда редактирования:
+MEditConfigInternal	Internal editor	Встроенный редактор
+MEditConfigExpandTabsTitle	Expand &tabs:	Преобразовывать &табуляцию:
+MEditConfigDoNotExpandTabs	Do not expand tabs	Не преобразовывать табуляцию
+MEditConfigExpandTabs	Expand newly entered tabs to spaces	Преобразовывать новые символы табуляции в пробелы
+MEditConfigConvertAllTabsToSpaces	Expand all tabs to spaces	Преобразовывать все символы табуляции в пробелы
+MEditConfigAutoIndent	Auto &indent	Авто&отступ
+MEditCursorBeyondEnd	&Cursor beyond end of line	Ку&рсор за пределами строки
+MEditShareWrite	Allow editing files ope&ned for writing	Разрешить редактирование открытых для записи &файлов
+MEditLockROFileModification	Lock editing of read-only &files	Блокировать р&едактирование файлов с атрибутом R/O
+MEditWarningBeforeOpenROFile	&Warn when opening read-only files	Пре&дупреждать при открытии файлов с атрибутом R/O
+MEditConfigTabSize	Tab si&ze	Раз&мер табуляции
+MEditConfigScrollbar	S&how scrollbar	Показ&ывать полосу прокрутки
+MEditShowWhiteSpace	Sh&ow white space	Пробел&ьные символы
+MEditConfigSelFound	Se&lect found	&Выделять найденное
+MEditConfigCursorAtEnd	Cu&rsor at the end	Курсор в ко&нце
+MEditConfigDefaultCodePage	Default code pa&ge:	Кодовая стран&ица по умолчанию:
+MConfigEditor	Configuration editor	Редактор конфигурации
+MSaveSetupTitle	Save setup	Конфигурация
+MSaveSetupAsk1	Do you wish to save	Вы хотите сохранить
+MSaveSetupAsk2	current setup?	текущую конфигурацию?
+MMoveDlgTitle	Rename/Move	Переименование/Перенос
+MLinkDlgTitle	Link	Ссылка
+MCopySecurity	&Access rights:	П&рава доступа:
+MCopySecurityDefault	Defau&lt	По умол&чанию
+MCopySecurityCopy	Co&py	Копироват&ь
+MCopySecurityInherit	&Inherit	Нас&ледовать
+MCopyIfFileExist	Already e&xisting files:	Уже су&ществующие файлы:
+MCopyAsk	&Ask	&Запрос действия
+MCopyAskRO	Also ask on &R/O files	Запрос подтверждения для &R/O файлов
+MCopyOnlyNewerFiles	Only ne&wer file(s)	Только &новые/обновлённые файлы
+MLinkType	Link t&ype:	&Тип ссылки:
+MLinkTypeJunction	directory &junction	&связь каталогов
+MLinkTypeHardlink	&hard link	&жёсткая ссылка
+MLinkTypeSymlink	&symbolic link	си&мволическая ссылка
+MLinkTypeSymlinkFile	symbolic link (&file)	символическая ссылка (&файл)
+MLinkTypeSymlinkDirectory	symbolic link (fol&der)	символическая ссылка (&папка)
+MCopyPreserveAllTimestamps	Preserve all timestamps	Сохранять все метки времени
+MCopySymLinkContents	Cop&y contents of symbolic links	Копировать содерж&имое символических ссылок
+MCopyMultiActions	Process &multiple destinations	Обр&абатывать несколько имён файлов
+MCopyDlgCopy	&Copy	&Копировать
+MCopyDlgTree	F10-&Tree	F10-&Дерево
+MCopyDlgCancel	Ca&ncel	&Отменить
+MCopyDlgRename	&Rename	&Переименовать
+MCopyDlgLink	Create &link	&Создать ссылку
+MCopyDlgTotal	Total	Всего
+MCopyPrepareSecury	Applying access rights…	Применение прав доступа…
+MCopyUseFilter	&Use filter	Исполь&зовать фильтр
+MCopySetFilter	Filt&er	&Фильтр
+MCopyFile	Copy {0} {1}:	Копировать {0} {1}:
+MMoveFile	Rename or move {0} {1}:	Переименовать или перенести {0} {1}:
+MLinkFile	Create link to {0} {1}:	Создать ссылку на {0} {1}:
+MCopyFiles	Copy {0} item{1} {2}:	Копировать {0} элемент{1} {2}:
+MMoveFiles	Rename or move {0} item{1} {2}:	Переименовать или перенести {0} элемент{1} {2}:
+MLinkFiles	Create links to {0} item{1} {2}:	Создать ссылки на {0} элемент{1} {2}:
+MCMLTargetTO	t&o	&в
+MCMLTargetIN	&in	&в
+MCMLItemsA	s	а
+MCopyIncorrectTargetList	Incorrect target list	Указан некорректный список целей
+MCopyCopyingTitle	Copying	Копирование
+MCopyMovingTitle	Moving	Перенос
+MCopyCannotFind	Cannot find the file	Файл не найден
+MCannotCopyFolderToItself1	Cannot copy the folder	Нельзя копировать папку
+MCannotCopyFolderToItself2	onto itself	в саму себя
+MCopyCannotCreateFolder	Cannot create the folder	Ошибка создания папки
+MCopyCannotRenameFolder	Cannot rename the folder	Невозможно переименовать папку
+MCopyIgnoreAll	Ignore &All	Игнорировать &все
+MCopyDecrypt	&Decrypt	Рас&шифровать
+MCopyDecryptAll	Decrypt &all	&Все
+MCopyCannotCreateLink	Cannot create the link	Ошибка создания ссылки
+MCopyFolderNotEmpty	Target folder must be empty	Папка назначения должна быть пустой
+MCopyCannotCreateJunctionToFile	Cannot create junction. The file already exists:	Невозможно создать связь. Файл уже существует:
+MCopyCannotCreateVolMount	Volume mount points error	Ошибка монтирования диска
+MCopyMountVolFailed	Attempt to volume mount '{0}'	Ошибка при монтировании диска '{0}'
+MCopyMountVolFailed2	at '{0}' failed	на '{0}'
+MCannotCopyFileToItself1	Cannot copy the file	Нельзя копировать файл
+MCopyStream1	The source file contains more than one data stream,	Исходный файл содержит более одного потока данных,
+MCopyStream2	but you're not using the system copy routine.	но вы не используете системную функцию копирования.
+MCopyStream3	but the destination volume does not support this feature.	но том назначения не поддерживает этой возможности.
+MCopyStream4	Some data will not be preserved.	Часть сведений не будет сохранена.
+MCopyDirectoryOrFile	Does it specify a folder name or file name?	Подразумевается имя папки или файла?
+MCopyDirectoryOrFileDirectory	Folder	Папка
+MCopyDirectoryOrFileFile	File	Файл
+MCopyFileExist	File already exists	Файл уже существует
+MCopySource	&New	&Новый
+MCopyDest	E&xisting	Су&ществующий
+MCopyOverwrite	&Overwrite	В&место
+MCopyAppend	A&ppend	&Добавить
+MCopyRename	R&ename	&Имя
+MCopyRememberChoice	&Remember choice	&Запомнить выбор
+MCopyRenameText	&New name:	&Новое имя:
+MCopyFileRO	The file is read only	Файл имеет атрибут "Только для чтения"
+MCopyAskDelete	Do you wish to delete it?	Вы хотите удалить его?
+MCopyDeleteAllRO	&All	&Все
+MCannotCopy	Cannot copy	Ошибка копирования
+MCannotMove	Cannot move	Ошибка переноса
+MCannotLink	Cannot link	Ошибка создания ссылки
+MCannotCopyTo	to	в
+MCopyEncryptWarn1	The file	Файл
+MCopyEncryptWarn2	cannot be copied or moved without losing its encryption.	нельзя скопировать или переместить, не потеряв его шифрование.
+MCopyReadError	Cannot read data from	Ошибка чтения данных из
+MCopyWriteError	Cannot write data to	Ошибка записи данных в
+MCopyCannotReserveSpace	Error reserving disk space	Ошибка резервирования места на диске
+MCopyFilesTotalInfo	Files:	Файлов:
+MCopyBytesTotalInfo	Bytes:	Байт:
+MCopyMoving	Moving the file	Перенос файла
+MCopyCopying	Copying the file	Копирование файла
+MAskDelete	Do you wish to delete {0}?	Вы хотите удалить {0}?
+MAskDeleteRecycle	Do you wish to move {0} to the Recycle Bin?	Вы хотите переместить {0} в Корзину?
+MDeleteWipeTitle	Wipe	Уничтожение
+MAskWipe	Do you wish to wipe {0}?	Вы хотите уничтожить {0}?
+MAskDeleteFolder	the folder	папку
+MAskDeleteFile	the file	файл
+MAskDeleteObjects	the objects	объекты
+MAskDeleteLink	a link to	cсылка на
+MAskDeleteAndMore	…and {0} more	…и ещё {0}
+MDeleteFolderTitle	Delete folder	Удаление папки
+MWipeFolderTitle	Wipe folder	Уничтожение папки
+MDeleteFilesTitle	Delete files	Удаление файлов
+MWipeFilesTitle	Wipe files	Уничтожение файлов
+MDeleteFolderConfirm	The following folder will be deleted:	Данная папка будет удалена:
+MWipeFolderConfirm	The following folder will be wiped:	Данная папка будет уничтожена:
+MRecycleFolderConfirm	The following folder will be moved to the Recycle Bin:	Данная папка будет перемещена в корзину:
+MRecycleFolderConfirmDeleteLink1	Folder contains symbolic links.	Папка содержит символические ссылки.
+MRecycleFolderConfirmDeleteLink2	To prevent the loss of their content when clearing Recyle Bin	Для предотвращения потери их содержимого при очистке корзины
+MRecycleFolderConfirmDeleteLink3	those links will be broken now.	эти ссылки сейчас будут разорваны.
+MRecycleFolderConfirmDeleteLink4	It would be impossible to restore them later.	Впоследствии восстановить их будет невозможно.
+MDeleteRecycle	Move	Переместить
+MDeleteFileWipe	&Wipe	&Уничтожить
+MDeletingTitle	Deleting	Удаление
+MDeleting	Deleting the file or folder	Удаление файла или папки
+MDeletingWiping	Wiping the file or folder	Уничтожение файла или папки
+MAskWipeRO	Do you wish to wipe it?	Вы хотите уничтожить его?
+MDeleteHardLink1	Several hard links link to this file.	Файл имеет несколько жёстких ссылок
+MDeleteHardLink2	Wiping this file will void all files linking to it.	Уничтожение файла приведёт к обнулению всех ссылающихся на него файлов.
+MDeleteHardLink3	Do you wish to wipe this file?	Уничтожать файл?
+MCannotDeleteFile	Cannot delete the file	Ошибка удаления файла
+MCannotDeleteFolder	Cannot delete the folder	Ошибка удаления папки
+MCannotRecycleFile	Cannot move file to the Recycle Bin	Не удалось переместить файл в Корзину
+MCannotRecycleFolder	Cannot move folder to the Recycle Bin	Не удалось переместить папку в Корзину
+MTryToDeletePermanently	Try to delete it permanently?	Попробовать удалить окончательно?
+MCannotGetSecurity	Cannot get file access rights for	Ошибка получения прав доступа к файлу
+MCannotSetSecurity	Cannot set file access rights for	Ошибка установки прав доступа к файлу
+MSearchReplaceSearchTitle	Search	Поиск
+MSearchReplaceReplaceTitle	Replace	Замена
+MSearchReplaceText	&Text	&Текст
+MSearchReplaceHex	&Hex	16-ричный &код
+MSearchReplacePickWord	W&ord	&Слово
+MSearchReplacePickSelection	Se&lection	&Выделение
+MSearchReplaceSearchFor	&Search for	&Искать
+MSearchReplaceReplaceWith	&Replace with	&Заменить на
+MSearchReplaceWholeWords	&Whole words	Только &целые слова
+MSearchReplaceFuzzy	Fu&zzy search	Нестроги&й поиск
+MSearchReplaceRegexp	R&egular expressions	&Регулярные выражения
+MSearchReplacePreserveStyle	&Preserve style	&Сохранять стиль
+MSearchReplaceFindNext	Find next	Искать следующий
+MSearchReplaceFindPrev	Find pre&vious	Искать &предыдущий
+MSearchReplaceReplaceNext	Replace next	Заменить следующий
+MSearchReplaceReplacePrev	Replace pre&vious	Заменить &предыдущий
+MAskReload	already loaded. How to open this file?	уже загружен. Как открыть этот файл?
+MCurrent	&Current	&Текущий
+MReload	R&eload	Пере&грузить
+MNewOpen	&New instance	&Новая копия
+MEditCannotOpen	Cannot open the file	Ошибка открытия файла
+MEditReading	Reading the file {0}	Чтение файла {0}
+MEditAskSave	File has been modified. Save?	Файл был изменён. Сохранить?
+MEditAskSaveExt	The file was changed by an external program. Save?	Файл был изменён внешней программой. Сохранить?
+MEditBtnSaveAs	Save &as…	Сохр&анить как…
+MEditRO	is a read-only file	имеет атрибут "Только для чтения"
+MEditExists	already exists	уже существует
+MEditOvr	Do you wish to overwrite it?	Вы хотите перезаписать его?
+MEditSaving	Saving the file {0}	Сохранение файла {0}
+MEditStatusLine	Ln	Стр
+MEditStatusCol	Col	Кол
+MEditStatusChar	Ch	С
+MEditFileGetSizeError	File size could not be determined.	Не удалось определить размер.
+MEditFileLong	has the size of {0},	имеет размер {0},
+MEditFileLong2	which exceeds the configured maximum size of {0}.	что превышает заданное ограничение в {0}.
+MEditROOpen	Do you wish to edit it?	Вы хотите редактировать его?
+MEditCanNotEditDirectory	It is impossible to edit the folder	Невозможно редактировать папку
+MEditSearchingFor	Searching for {0}	Искать {0}
+MEditSearchStatistics	Occurrences: {0}, lines: {1}	Вхождений: {0}, строк: {1}
+MEditNotFound	Could not find the string	Строка не найдена
+MEditAskReplaceWith	with	на
+MEditReplace	&Replace	&Заменить
+MEditOpenCreateLabel	&Open/create file:	&Открыть/создать файл:
+MEditOpenAutoDetect	Automatic detection	Автоматическое определение
+MDefaultCP	Default	По умолчанию
+MGoTo	Go to	Перейти
+MGoToHex	&Hex value	16-ричное &значение
+MFolderShortcutsTitle	Folder shortcuts	Ссылки на папки
+MShortcutNone	<none>	<отсутствует>
+MShortcutPlugin	<plugin>	<плагин>
+MFSShortcutName	Title:	Название:
+MFSShortcutPath	Path:	Путь:
+MFSShortcutPluginFile	File:	Файл:
+MFSShortcutPluginData	Data:	Данные:
+MNeedNearPath	Jump to the nearest existing folder?	Перейти в ближайшую доступную папку?
+MSaveThisShortcut	Save this shortcut?	Запомнить эту ссылку?
+MEditShiftF2	SaveAs	Сохр.в
+MEditShiftF7	Next	Дальше
+MEditShiftF8	CodePg	КодСтр
+MEditShiftF10	SaveQ	СхрВых
+MEditAltF7	Prev	Назад
+MEditAltF8	Goto	Строка
+MEditCtrlF7	Replac	Замена
+MEditCtrlF10	GoFile	Позиц
+MEditAltShiftF9	Config	Конфиг
+MEditSaveAs	Save file &as	Сохранить &файл как
+MEditCodePage	&Code page:	&Кодовая страница:
+MEditAddSignature	Add &signature (BOM)	Добавить &сигнатуру (BOM)
+MEditSaveAsFormatTitle	Change line breaks to:	Изменить перевод строки:
+MEditSaveOriginal	Do n&ot change	&исходный формат
+MEditSaveDOS	&Dos/Windows format (CR LF)	в форма&те DOS/Windows (CR LF)
+MEditSaveUnix	&Unix format (LF)	в формат&е UNIX (LF)
+MEditSaveMac	&Mac format (CR)	в фор&мате MAC (CR)
+MEditCannotSave	Cannot save the file	Ошибка сохранения файла
+MEditSavedChangedNonFile	The file is changed but the file or the folder containing	Файл изменён, но файл или папка, в которой он находился,
+MEditSavedChangedNonFile1	The file or the folder containing	Файл или папка, в которой он находился,
+MEditSavedChangedNonFile2	this file was moved or deleted. Save?	был перемещён или удалён. Сохранить?
+MEditNewPath1	The path to the edited file does not exist,	Путь к редактируемому файлу не существует,
+MEditNewPath2	but will be created when the file is saved.	но будет создан при сохранении файла.
+MEditNewPath3	Continue?	Продолжать?
+MEditNewPlugin1	The name of the file to edit cannot be empty	Имя редактируемого файла не может быть пустым
+MEditorLoadCPWarn1	The file contains characters that cannot be	Файл содержит символы, которые невозможно
+MEditorLoadCPWarn2	correctly read using the selected code page.	корректно прочитать, используя выбранную кодовую страницу.
+MEditorReloadCPWarnLost1	The file has to be reloaded to change the code page.	Для смены кодовой страницы требуется перезагрузка файла.
+MEditorReloadCPWarnLost2	All unsaved changes will be lost.	Все несохранённые изменения будут потеряны.
+MEditDataLostWarn	During the file editing some data was lost.	Во время редактирования файла некоторые данные были утеряны.
+MEditorSaveNotRecommended	It is not recommended to save this file.	Сохранять файл не рекомендуется.
+MEditorSaveCPWarnShow	Show	Показать
+MEditorCPNotSupported	Code page {0} is not supported in your system	Кодовая страница {0} не поддерживается вашей системой
+MColumnExtension	Extension	Расширение
+MColumnAlocatedSize	Allocated	Выделено
+MColumnDate	Date	Дата
+MColumnTime	Time	Время
+MColumnCreated	Created	Создание
+MColumnAccessed	Accessed	Доступ
+MColumnChanged	Change	Изменение
+MColumnAttr	Attr	Атриб
+MColumnDescription	Description	Описание
+MColumnMumLinks	NmL	КлС
+MColumnNumStreams	NmS	КлП
+MColumnStreamsSize	StrmSz	РазмПт
+MListUp	Up	Вверх
+MListSymlink	Symlink	Ссылка
+MListJunction	Junction	Связь
+MListVolMount	Volume	Том
+MListUnknownReparsePoint	?Symlink?	?Ссылка?
+MListBytes	B	Б
+MListKb	K	К
+MListMb	M	М
+MListGb	G	Г
+MListTb	T	Т
+MListPb	P	П
+MListEb	E	Э
+MListFileSize	Bytes: {0}, files: {1}, folders: {2}	Байт: {0}, файлов: {1}, папок: {2}
+MListFreeSize	{0} free bytes	{0} байт свободно
+MFileToEdit	File to edit:	Редактировать файл:
+MUnselectTitle	Deselect	Снять
+MSelectTitle	Select	Пометить
+MSelectFilter	&Filter	&Фильтр
+MCompareTitle	Compare	Сравнение
+MCompareFilePanelsRequired1	Two file panels are required to perform	Для сравнения папок требуются
+MCompareFilePanelsRequired2	the Compare folders command	две файловые панели
+MCompareSameFolders1	The folders contents seems	Содержимое папок,
+MCompareSameFolders2	to be identical	скорее всего, одинаково
+MSelectAssocTitle	Select association	Выберите ассоциацию
+MAssocTitle	File associations	Ассоциации для файлов
+MAskDelAssoc	Do you wish to delete association for	Вы хотите удалить ассоциацию для
+MFileAssocTitle	Edit file associations	Редактирование ассоциаций файлов
+MFileAssocMasks	A file &mask or several file masks:	Одна или несколько &масок файлов:
+MFileAssocDescr	&Description of the association:	&Описание ассоциации:
+MFileAssocExec	E&xecute command (used for Enter):	Команда, &выполняемая по Enter:
+MFileAssocAltExec	Exec&ute command (used for Ctrl+PgDn):	Коман&да, выполняемая по Ctrl+PgDn:
+MFileAssocView	&View command (used for F3):	Команда &просмотра, выполняемая по F3:
+MFileAssocAltView	V&iew command (used for Alt+F3):	Команда просмотра, в&ыполняемая по Alt+F3:
+MFileAssocEdit	&Edit command (used for F4):	Команда &редактирования, выполняемая по F4:
+MFileAssocAltEdit	Edit comm&and (used for Alt+F4):	Команда редактировани&я, выполняемая по Alt+F4:
+MViewF2	Wrap	Сверн
+MViewF4	Hex	Код
+MViewF11	Plugins	Плагины
+MViewShiftF2	WWrap	Слова
+MViewShiftF4	Mode	Режим
+MViewF2Unwrap	Unwrap	Развер
+MViewF4Text	Text	Текст
+MViewF4Dump	Dump	Дамп
+MViewMode	View mode	Режим просмотра
+MInViewer	view	просмотр
+MInEditor	edit	редактирование
+MFilterTitle	Filters menu	Меню фильтров
+MPanelFileType	Panel file type	Файлы панели
+MFolderFileType	Folders	Папки
+MCanEditCustomFilterOnly	Only custom filter can be edited	Только пользовательский фильтр можно редактировать
+MAskDeleteFilter	Do you wish to delete the filter	Вы хотите удалить фильтр
+MCanDeleteCustomFilterOnly	Only custom filter can be deleted	Только пользовательский фильтр может быть удалён
+MFindFileTitle	Find file	Поиск файла
+MFindFileContaining	Containing	Содержащих
+MFindFileCodePage	Using code pa&ge:	Используя кодо&вую страницу:
+MFindFileAllCodePages	All standard code pages	Все стандартные кодовые страницы
+MFindFileSelectedCodePages	Selected code pages	Отмеченные кодовые страницы
+MFindFileNotContaining	&Not containing	&Не содержащих
+MFindFileArchives	Search in arch&ives	Искать в а&рхивах
+MFindFileFolders	Search for f&olders	Искать п&апки
+MFindFileSymLinks	Search in symbolic lin&ks	Искать в символи&ческих ссылках
+MFindFileAlternateStreams	Search in a&lternate streams	Искать в альтернативных потоках
+MFindFileSearchArea	Select search &area:	Выберите &область поиска:
+MFindFileSearchAllDisks	In &all non-removable drives	На всех несъёмных &дисках
+MFindFileSearchAllButNetwork	In all &local drives	На всех &локальных дисках
+MFindFileSearchInPATH	In &PATH folders	В PATH-катало&гах
+MFindFileSearchFromRootOfDrive	From the &root of	С кор&ня диска
+MFindFileSearchFromRootFolder	From the &root folder	С кор&невой папки
+MFindFileSearchFromCurrent	From the curre&nt folder	С &текущей папки
+MFindFileSearchInCurrent	The current folder onl&y	Только в теку&щей папке
+MFindFileSearchInSelected	&Selected folders	В &отмеченных папках
+MFindFileUsingFilter	using filter	используя фильтр
+MFindFileDrive	Dri&ve	Дис&к
+MFindFileAdvanced	Advance&d	До&полнительно
+MFindFileSearchingIn	Searching {0} in	Поиск {0} в
+MFindFileNewSearch	&New search	&Новый поиск
+MFindFileGoTo	&Go to	Пе&рейти
+MFindFileView	&View	&Смотреть
+MFindFilePanel	&Panel	Пане&ль
+MFindFileStop	&Stop	С&топ
+MFindFileDone	Search done. Found files: {0}, folders: {1}	Поиск закончен. Найдено файлов: {0}, папок: {1}
+MFindFileFound	Files: {0}, folders: {1}	Файлов: {0}, папок: {1}
+MFindFileAdvancedTitle	Find file advanced options	Дополнительные параметры поиска
+MFindFileSearchFirst	Search only in the &first:	Искать только в &первых:
+MFindFileSearchOutputFormat	&Output format:	&Формат вывода:
+MFindAlternateModeTypes	Column &types	&Типы колонок
+MFindAlternateModeWidths	Column &widths	&Ширина колонок
+MFoldTreeSearch	Search:	Поиск:
+MGetCodePageTitle	Code pages	Кодовые страницы
+MGetCodePageSystem	System	Системные
+MGetCodePageUnicode	Unicode	Юникод
+MGetCodePageFavorites	Favorites	Избранные
+MGetCodePageOther	Other	Прочие
+MGetCodePageEditCodePageName	Rename the code page	Переименование кодовой страницы
+MHighlightTitle	Files highlighting	Раскраска файлов
+MHighlightUpperSortGroup	Upper sort group	Верхняя группа сортировки
+MHighlightLowerSortGroup	Lower sort group	Нижняя группа сортировки
+MHighlightLastGroup	Lowest priority highlighting group	Наименее приоритетная группа раскраски
+MHighlightAskDel	Do you wish to delete highlighting for	Вы хотите удалить раскраску для
+MHighlightWarning	You will lose all changes	Будут потеряны все Ваши настройки
+MHighlightAskRestore	Do you wish to restore default highlighting?	Вы хотите восстановить раскраску файлов по умолчанию?
+MHighlightEditTitle	Edit files highlighting	Редактирование раскраски файлов
+MHighlightMark	Markin&g,	Ма&ркировка,
+MHighlightInheritMark	In&herit	На&следовать
+MHighlightColors	File name colors ("black on black" - default color)	Цвета файлов ("чёрный на чёрном" - цвет по умолчанию)
+MHighlightFileName1	&1. Normal file name	&1. Обычное имя файла
+MHighlightFileName2	&3. Selected file name	&3. Помеченное имя файла
+MHighlightFileName3	&5. File name under cursor	&5. Имя файла под курсором
+MHighlightFileName4	&7. File name selected under cursor	&7. Помеченное под курсором имя файла
+MHighlightMarking1	&2. Marking	&2. Пометка
+MHighlightMarking2	&4. Marking	&4. Пометка
+MHighlightMarking3	&6. Marking	&6. Пометка
+MHighlightMarking4	&8. Marking	&8. Пометка
+MHighlightContinueProcessing	C&ontinue processing	Продолжать &обработку
+MInfoCompName	Computer name	Имя компьютера
+MInfoCompDescription	Computer description	Описание компьютера
+MInfoUserName	User name	Имя пользователя
+MInfoUserDescription	User description	Описание пользователя
+MInfoUserAccessLevel	Access level	Уровень доступа
+MInfoUserAccessLevelGuest	Guest	Гость
+MInfoUserAccessLevelUser	User	Пользователь
+MInfoUserAccessLevelUnknown	Unknown	Неизвестно
+MInfoDiskTitle	Disk	Диск
+MInfoRemovable	Removable	Сменный
+MInfoFixed	Fixed	Жёсткий
+MInfoNetwork	Network	Сетевой
+MInfoVirtual	Virtual	Виртуальный
+MInfoMetricTotal	total	всего
+MInfoMetricAvailable	available	доступно
+MInfoDisk	disk	диск
+MInfoDiskSpace	Space	Место
+MInfoDiskLabel	Volume label	Метка тома
+MInfoDiskNumber	Serial number	Серийный номер
+MInfoMemory	Memory	Память
+MInfoMetricMemoryInstalled	installed	установлено
+MInfoDizAbsent	Folder description file is absent	Файл описания папки отсутствует
+MInfoPowerStatus	Power Status	Питание
+MInfoPowerStatusAC	AC power status	Подключения к сети
+MInfoPowerStatusACOffline	Offline	Отсутствует
+MInfoPowerStatusACOnline	Online	Подключено
+MInfoPowerStatusACBackUp	Backup power	Резервный источник
+MInfoPowerStatusBCLifePercentUnknown	unknown	не определено
+MInfoPowerStatusBC	Battery charge status	Статус заряда батареи
+MInfoPowerStatusBCHigh	High	Высокий
+MInfoPowerStatusBCMedium	Medium	Средний
+MInfoPowerStatusBCLow	Low	Низкий
+MInfoPowerStatusBCCritical	Critical	Критичный
+MInfoPowerStatusBCCharging	charging	зарядка
+MInfoPowerStatusBCNoSysBat	No system battery	Батареи нет
+MInfoPowerStatusBCTimeRem	Battery life time	Время до разряда
+MInfoPowerStatusBCFullTimeRem	Battery full time	Полное время работы
+MAccessDenied	Access denied	Доступ запрещён
+MCannotExecute	Cannot execute	Ошибка выполнения
+MCannotInvokeComspec	Cannot invoke command interpreter	Ошибка вызова командного интерпретатора
+MCheckComspecVar	Check COMSPEC environment variable	Проверьте переменную окружения COMSPEC
+MScanningFolder	Scanning the folder	Просмотр папки
+MMakeFolderTitle	Make folder	Создание папки
+MCreateFolder	Create the &folder:	Создать п&апку:
+MMakeFolderLinkType	&Link type:	Тип ссылки:
+MMakeFolderLinkNone	&none	Нет
+MMakeFolderLinkSymlink	symbolic &link	символическая ссылка
+MMakeFolderLinkTarget	&Target:	Цель:
+MMultiMakeDir	Process &multiple names	Обрабатыват&ь несколько имён папок
+MIncorrectDirList	Incorrect folders list	Неправильный список папок
+MMenuBriefView	&Brief	&Краткий
+MMenuMediumView	&Medium	&Средний
+MMenuFullView	&Full	&Полный
+MMenuWideView	&Wide	&Широкий
+MMenuDetailedView	Detai&led	&Детальный
+MMenuDizView	&Descriptions	&Описания
+MMenuLongDizView	Lon&g descriptions	Д&линные описания
+MMenuOwnersView	File own&ers	Вл&адельцы файлов
+MMenuLinksView	File lin&ks	Ссылки файлов
+MMenuAlternativeView	&Alternative full	Аль&тернативный полный
+MMenuInfoPanel	&Info panel	Панель ин&формации
+MMenuTreePanel	&Tree panel	Де&рево папок
+MMenuQuickView	Quick &view	Быстры&й просмотр
+MMenuSortModes	&Sort modes	Режим&ы сортировки
+MMenuLongNames	Show long &names	Показывать длинные &имена
+MMenuTogglePanel	Panel &On/Off	Панель &Вкл/Выкл
+MMenuReread	&Re-read	П&еречитать
+MMenuChangeDrive	&Change drive	С&менить диск
+MMenuEdit	&Edit	&Редактирование
+MMenuMove	&Rename or move	П&еренос
+MMenuLink	Lin&k	Ссы&лка
+MMenuCreateFolder	&Make folder	&Создание папки
+MMenuAdd	Add &to archive	&Архивировать
+MMenuExtract	E&xtract files	Распако&вать
+MMenuArchiveCommands	Arc&hive commands	Архивн&ые команды
+MMenuAttributes	File &attributes	А&трибуты файлов
+MMenuApplyCommand	A&pply command	Применить коман&ду
+MMenuDescribe	Descri&be files	&Описание файлов
+MMenuSelectGroup	Select &group	Пометить &группу
+MMenuUnselectGroup	U&nselect group	С&нять пометку
+MMenuInvertSelection	&Invert selection	&Инверсия пометки
+MMenuRestoreSelection	Re&store selection	Восстановить по&метку
+MMenuFindFile	&Find file	&Поиск файла
+MMenuHistory	&History	&История команд
+MMenuVideoMode	&Video mode	Видео&режим
+MMenuFindFolder	Fi&nd folder	Поис&к папки
+MMenuViewHistory	File vie&w history	Ис&тория просмотра
+MMenuFoldersHistory	F&olders history	Ист&ория папок
+MMenuSwapPanels	&Swap panels	По&менять панели
+MMenuTogglePanels	&Panels On/Off	Панели &Вкл/Выкл
+MMenuCompareFolders	&Compare folders	&Сравнение папок
+MMenuUserMenu	Edit user &menu	Меню пользовател&я
+MMenuFileAssociations	File &associations	&Ассоциации файлов
+MMenuFolderShortcuts	Fol&der shortcuts	Ссы&лки на папки
+MMenuFilter	File panel f&ilter	&Фильтр панели файлов
+MMenuPluginCommands	Pl&ugin commands	Команды внешних мо&дулей
+MMenuWindowsList	Sc&reens list	Список экра&нов
+MMenuProcessList	Task &list	Список &задач
+MMenuHotPlugList	Ho&tplug devices list	Список Hotplug-&устройств
+MMenuSystemSettings	S&ystem settings	Систе&мные параметры
+MMenuPanelSettings	&Panel settings	Настройки па&нели
+MMenuTreeSettings	&Tree settings	Настройки д&ерева папок
+MMenuInterface	&Interface settings	Настройки &интерфейса
+MMenuLanguages	Lan&guages	&Языки
+MMenuPluginsConfig	Pl&ugins configuration	Параметры плагино&в
+MMenuPluginsManagerSettings	Plugins manage&r settings	Параметры менеджера плагинов
+MMenuDialogSettings	Di&alog settings	Настройки &диалогов
+MMenuCmdlineSettings	&Command line settings	Настройки &командной строки
+MMenuAutoCompleteSettings	Au&toComplete settings	На&стройки автозавершения
+MMenuInfoPanelSettings	Inf&oPanel settings	Нас&тройки информационной панели
+MMenuMaskGroups	Groups of file mas&ks	Группы масок файлов
+MMenuConfirmation	Co&nfirmations	&Подтверждения
+MMenuFilePanelModes	File panel &modes	Режим&ы панели файлов
+MMenuFileDescriptions	File &descriptions	&Описания файлов
+MMenuFolderInfoFiles	&Folder description files	Файлы описания п&апок
+MMenuViewer	&Viewer settings	Настройки про&граммы просмотра
+MMenuEditor	&Editor settings	Настройки &редактора
+MMenuColors	Co&lors	&Цвета
+MMenuFilesHighlighting	Files &highlighting and sort groups	Раскраска &файлов и группы сортировки
+MMenuSaveSetup	&Save setup	&Сохранить параметры
+MMenuLeftTitle	&Left	&Левая
+MMenuFilesTitle	&Files	&Файлы
+MMenuCommandsTitle	&Commands	&Команды
+MMenuOptionsTitle	&Options	Па&раметры
+MMenuRightTitle	&Right	&Правая
+MMenuSortTitle	Sort by	Критерий сортировки
+MMenuSortByName	&Name	&Имя
+MMenuSortByExt	E&xtension	&Расширение
+MMenuSortByWrite	&Write time	Время &записи
+MMenuSortBySize	&Size	Р&азмер
+MMenuUnsorted	&Unsorted	&Не сортировать
+MMenuSortByCreation	&Creation time	Время &создания
+MMenuSortByAccess	&Access time	Время &доступа
+MMenuSortByChange	Chan&ge time	Время из&менения
+MMenuSortByOwner	&Owner	&Владельцы файлов
+MMenuSortByAllocatedSize	Allocated size	Выделенный размер
+MMenuSortByNumLinks	Number of &hard links	Ко&личество ссылок
+MMenuSortByNumStreams	Number of st&reams	Количество &потоков
+MMenuSortByStreamsSize	Si&ze of streams	Размер по&токов
+MMenuSortByNameOnly	Name only	Только имя
+MMenuSortUseGroups	Use sort groups	Использовать &группы сортировки
+MMenuSortSelectedFirst	Show selected f&irst	Помеченные &файлы вперёд
+MMenuSortDirectoriesFirst	Show directories &first	&Каталоги вперёд
+MMaskGroupTitle	Groups of file masks	Группы масок файлов
+MMaskGroupName	&Name:	&Имя:
+MMaskGroupAskDelete	Do you wish to delete	Вы хотите удалить
+MMaskGroupRestore	Do you wish to restore default mask sets?	Вы хотите восстановить наборы масок по умолчанию?
+MMaskGroupFindMask	&Mask:	&Маска:
+MMaskGroupTotal	Total: {0}	Всего: {0}
+MChangeDriveTitle	Change drive	Диск
+MChangeDriveRemovable	removable	сменный
+MChangeDriveFixed	fixed	жёсткий
+MChangeDriveNetwork	network	сетевой
+MChangeDriveDisconnectedNetwork	disconnected	отключенный
+MChangeDriveRAM	RAM disk	RAM диск
+MChangeDriveSUBST	subst	SUBST
+MChangeDriveVirtual	virtual	виртуальный
+MChangeDriveLabelAbsent	not available	недоступен
+MChangeDriveCannotReadDisk	Cannot read the disk in drive	Ошибка чтения диска в дисководе
+MChangeDriveCannotDisconnect	Cannot disconnect from {0}	Не удаётся отсоединиться от {0}
+MChangeDriveCannotDelSubst	Cannot delete a substituted disk {0}	Не удаётся удалить SUBST-диск {0}
+MChangeDriveCannotDetach	Cannot detach a virtual disk {0}	Не удаётся отсоединить виртуальный диск {0}
+MChangeDriveOpenFiles	If you do not close the open files, data may be lost	Если вы не закроете открытые файлы, данные могут быть утеряны
+MChangeSUBSTDisconnectDriveTitle	Substituted disk deletion	Отключение SUBST-диска
+MChangeSUBSTDisconnectDriveQuestion	Delete SUBST-disk {0}?	Удалить SUBST-диск {0}?
+MChangeVHDDisconnectDriveTitle	Virtual disk detaching	Отсоединение виртуального диска
+MChangeVHDDisconnectDriveQuestion	Detach virtual disk {0}?	Отсоединить виртуальный диск {0}?
+MChangeHotPlugDisconnectDriveTitle	Device Removal	Удаление устройства
+MChangeHotPlugDisconnectDriveQuestion	Do you want to remove the device	Вы хотите удалить устройство
+MHotPlugDisks	(disk(s): {0})	(диск(и): {0})
+MChangeCouldNotEjectHotPlugMedia	Cannot remove a device for drive {0}	Невозможно удалить устройство для диска {0}
+MChangeCouldNotEjectHotPlugMedia2	Cannot remove a device:	Невозможно удалить устройство:
+MChangeHotPlugNotify1	The device	Теперь устройство
+MChangeHotPlugNotify2	can now be safely removed	может быть безопасно извлечено из компьютера
+MHotPlugListTitle	Hotplug devices list	Hotplug-устройства
+MChangeDriveDisconnectTitle	Disconnect network drive	Отсоединение сетевого диска
+MChangeDriveDisconnectQuestion	Do you want to disconnect from the drive {0}?	Вы хотите удалить соединение с устройством {0}?
+MChangeDriveDisconnectMapped	The drive is mapped to:	На устройство отображена папка:
+MChangeDriveDisconnectReconnect	&Reconnect at logon	&Восстанавливать при входе в систему
+MChangeDriveAskDisconnect	Do you want to disconnect the device anyway?	Вы хотите в любом случае отключиться от устройства?
+MChangeWaitingLoadDisk	Waiting for the disk to mount…	Ожидание чтения диска…
+MChangeCouldNotEjectMedia	Could not eject media from drive	Невозможно извлечь диск из привода
+MChangeDriveConfigure	Change Drive Menu Options	Настройка меню выбора диска
+MChangeDriveShowDiskType	Show disk &type	Показывать &тип диска
+MChangeDriveShowPath	Show &network name / SUBST path / VHD name	Показывать &сетевое имя / путь SUBST / имя VHD
+MChangeDriveShowLabel	Show disk &label	Показывать &метку диска
+MChangeDriveShowLabelUseShell	Use shell na&me	Использовать имя оболочки
+MChangeDriveShowFileSystem	Show &file system type	Показывать тип &файловой системы
+MChangeDriveShowSize	Show &size	Показывать &размер
+MChangeDriveShowSizeFloat	Show si&ze as a decimal fraction	Показывать ра&змер в виде десятичной дроби
+MChangeDriveShowRemovableDrive	Show &removable drive parameters	Показывать параметры см&енных дисков
+MChangeDriveShowPlugins	Show &plugins	Показывать &плагины
+MChangeDriveSortPluginsByHotkey	Sort plugins by &hotkey	Сортировать плагины по горячей клавише
+MChangeDriveShowNetworkDrive	Show n&etwork drive parameters	Показывать параметры се&тевых дисков
+MChangeDriveShowVirtualDisk	Detect virtual disks	Определять виртуальные диски
+MCannotCreateListTemp	Cannot create a temporary file for the list of files	Невозможно создать временный файл для списка файлов
+MDragFiles	{0} files	{0} файлов
+MDragMove	Move {0}	Перенос {0}
+MDragCopy	Copy {0}	Копирование {0}
+MProcessListTitle	Task list	Список задач
+MKillProcessTitle	Kill task	Удаление задачи
+MAskKillProcess	Do you wish to kill selected task?	Вы хотите удалить выбранную задачу?
+MKillProcessWarning	You will lose any unsaved information in this program	Вы потеряете всю несохраненную информацию этой программы
+MKillProcessKill	Kill	Удалить
+MCannotKillProcess	Cannot kill the specified task	Указанную задачу удалить не удалось
+MCannotKillProcessPerm	You have no permission to kill this process.	Вы не имеет права удалить этот процесс.
+MQuickViewTitle	Quick view	Быстрый просмотр
+MQuickViewReparsePoint	&Reparse point	Точка повторного анализа
+MQuickViewUnknownReparsePoint	Unknown reparse point	Неизвестная точка повторного анализа
+MQuickViewFolders	Folders:	Папок:
+MQuickViewBytes	Files size:	Размер файлов:
+MQuickViewAllocated	Allocated size:	Выделенный размер:
+MQuickViewCluster	Cluster size:	Размер кластера:
+MQuickViewSlack	Files slack:	Остатки кластеров:
+MQuickViewMFTOverhead	MFT overhead:	Занято MFT:
+MSetAttrTitle	Attributes	Атрибуты
+MSetAttrFor	Change file attributes for	Изменить файловые атрибуты
+MSetAttrSelectedObjects	selected objects	выбранных объектов
+MSetAttrHardLinks	hard links	жёстких ссылок
+MSetAttrJunction	&Junction:	Связь:
+MSetAttrSymlink	S&ymlink{}:	Ссылка{}:
+MSetAttrVolMount	&Volume:	Том:
+MSetAttrDfsTargets	DFS Targets:	DFS цели:
+MSetAttrAppExecLink	App Alias:	Псевдоним приложения:
+MSetAttrDiskDevice	Device:	Устройство:
+MSetAttrReadOnly	&Read only	&Только для чтения
+MSetAttrArchive	&Archive	&Архивный
+MSetAttrHidden	&Hidden	Скр&ытый
+MSetAttrSystem	&System	С&истемный
+MSetAttrCompressed	&Compressed	С&жатый
+MSetAttrEncrypted	&Encrypted	За&шифрованный
+MSetAttrNotIndexed	Not &indexed	Неиндексируемый
+MSetAttrSparse	&Sparse	Разреженный
+MSetAttrTemporary	&Temporary	Временный
+MSetAttrOffline	&Offline	Автономный
+MSetAttrVirtual	&Virtual	Виртуальный
+MSetAttrIntegrityStream	&Integrity stream	Поток целостности
+MSetAttrNoScrubData	&No scrub data	Нет данных очистки
+MSetAttrPinned	&Pinned	Закреплённый
+MSetAttrUnpinned	&Unpinned	Откреплённый
+MSetAttrRecallOnOpen	R&ecall on open	Recall on open
+MSetAttrRecallOnDataAccess	Rec&all on data access	Recall on data access
+MSetAttrStrictlySequential	Strictly se&quential	Strictly sequential
+MSetAttrDevice	Device	Устройство
+MSetAttrMore	&More	Ещё
+MSetAttrSubfolders	Process sub&folders	Обрабатывать &вложенные папки
+MSetAttrOwner	Owner&:	Владелец:
+MSetAttrDate	Date/Time:	Дата/Время:
+MSetAttrWrite	&write:	за&писи:
+MSetAttrCreation	crea&tion:	со&здания:
+MSetAttrAccess	&access:	&доступа:
+MSetAttrChange	chan&ge:	из&менения:
+MSetAttrOriginal	&Original	Исход&ное
+MSetAttrCurrent	Curre&nt	Те&кущее
+MSetAttrBlank	&Blank	Сбр&ос
+MSetAttrSet	Set	Установить
+MSetAttrDateTitleMDY	MM{0}DD{0}YYYYY	ММ{0}ДД{0}ГГГГГ
+MSetAttrDateTitleDMY	DD{0}MM{0}YYYYY	ДД{0}ММ{0}ГГГГГ
+MSetAttrDateTitleYMD	YYYYY{0}MM{0}DD	ГГГГГ{0}ММ{0}ДД
+MSetAttrTimeTitle	hh{0}mm{0}ss	чч{0}мм{0}сс
+MSetAttrSystemDialog	System &properties	Системные &свойства
+MSetAttrSetting	Setting file attributes for	Установка файловых атрибутов для
+MSetAttrCannotFor	Cannot set attributes for	Ошибка установки атрибутов для
+MSetAttrCompressedCannotFor	Cannot set attribute COMPRESSED for	Не удалось установить атрибут СЖАТЫЙ для
+MSetAttrEncryptedCannotFor	Cannot set attribute ENCRYPTED for	Не удалось установить атрибут ЗАШИФРОВАННЫЙ для
+MSetAttrSparseCannotFor	Cannot set attribute SPARSE for	Не удалось установить атрибут РАЗРЕЖЁННЫЙ для
+MSetAttrTimeCannotFor	Cannot set file time for	Не удалось установить время файла для
+MSetAttrOwnerCannotFor	Cannot set owner for	Не удалось установить владельца для
+MSetAttrReparsePointCannotFor	Cannot remove reparse point for	Не удалось удалить точку повторного анализа для
+MSetColorDialog	&Dialog	&Диалог
+MSetColorWarning	&Warning message	Пр&едупреждение
+MSetColorMenu	&Menu	&Меню
+MSetColorHMenu	Hori&zontal menu	&Горизонтальное меню
+MSetColorKeyBar	&Key bar	&Линейка клавиш
+MSetColorCommandLine	&Command line	&Командная строка
+MSetColorClock	C&lock	&Часы
+MSetColorViewer	&Viewer	Про&смотрщик
+MSetColorEditor	&Editor	&Редактор
+MSetColorHelp	&Help	П&омощь
+MColorThemes	Themes	Темы
+MDefaultThemeRGB	Default (RGB)	По умолчанию (RGB)
+MSetColorPanelNormal	Normal text	Обычный текст
+MSetColorPanelSelected	Selected text	Выбранный текст
+MSetColorPanelHighlightedText	Highlighted text	Выделенный текст
+MSetColorPanelHighlightedInfo	Highlighted info	Выделенная информация
+MSetColorPanelDragging	Dragging text	Перетаскиваемый текст
+MSetColorPanelBox	Border	Рамка
+MSetColorPanelNormalCursor	Normal cursor	Обычный курсор
+MSetColorPanelSelectedCursor	Selected cursor	Выделенный курсор
+MSetColorPanelNormalTitle	Normal title	Обычный заголовок
+MSetColorPanelSelectedTitle	Selected title	Выделенный заголовок
+MSetColorPanelColumnTitle	Column title	Заголовок колонки
+MSetColorPanelTotalInfo	Total info	Количество файлов
+MSetColorPanelSelectedInfo	Selected info	Количество выбранных файлов
+MSetColorPanelScrollbar	Scrollbar	Полоса прокрутки
+MSetColorPanelScreensNumber	Number of background screens	Количество фоновых экранов
+MSetColorDialogDisabled	Disabled text	Блокированный текст
+MSetColorDialogBoxTitle	Title	Заголовок рамки
+MSetColorDialogHighlightedBoxTitle	Highlighted title	Выделенный заголовок рамки
+MSetColorDialogTextInput	Text input	Ввод текста
+MSetColorDialogUnchangedTextInput	Unchanged text input	Неизмененный текст
+MSetColorDialogSelectedTextInput	Selected text input	Ввод выделенного текста
+MSetColorDialogEditDisabled	Disabled input line	Блокированное поле ввода
+MSetColorDialogButtons	Buttons	Кнопки
+MSetColorDialogSelectedButtons	Selected buttons	Выбранные кнопки
+MSetColorDialogHighlightedButtons	Highlighted buttons	Выделенные кнопки
+MSetColorDialogSelectedHighlightedButtons	Selected highlighted buttons	Выбранные выделенные кнопки
+MSetColorDialogDefaultButton	Default button	Кнопка по умолчанию
+MSetColorDialogSelectedDefaultButton	Selected default button	Выбранная кнопка по умолчанию
+MSetColorDialogHighlightedDefaultButton	Highlighted default button	Выделенная кнопка по умолчанию
+MSetColorDialogSelectedHighlightedDefaultButton	Selected highlighted default button	Выбранная выделенная кнопка по умолчанию
+MSetColorDialogListBoxControl	List box	Список
+MSetColorDialogComboBoxControl	Combobox	Комбинированный список
+MSetColorDialogListSelectedHighLight	Selected highlighted text	Выбранный выделенный текст
+MSetColorDialogListDisabled	Disabled item	Блокированный пункт
+MSetColorDialogListGrayed	Grayed list text	Серый текст списка
+MSetColorDialogSelectedListGrayed	Selected grayed list text	Выбранный серый текст списка
+MSetColorDialogListArrows	Long string indicators	Индикаторы длинных строк
+MSetColorDialogListArrowsSelected	Selected long string indicators	Выбранные индикаторы длинных строк
+MSetColorDialogListArrowsDisabled	Disabled long string indicators	Блокированные индикаторы длинных строк
+MSetColorMenuGrayed	Grayed text	Серый текст
+MSetColorMenuSelectedGrayed	Selected grayed text	Выбранный серый текст
+MSetColorKeyBarNumbers	Key numbers	Номера клавиш
+MSetColorKeyBarNames	Key names	Названия клавиш
+MSetColorKeyBarBackground	Background	Фон
+MSetColorCommandLinePrefix	Prefix text	Текст префикса
+MSetColorCommandLineUserScreen	User screen	Пользовательский экран
+MSetColorClockNormal	Normal text (Panel)	Обычный текст (панели)
+MSetColorClockNormalEditor	Normal text (Editor)	Обычный текст (редактор)
+MSetColorClockNormalViewer	Normal text (Viewer)	Обычный текст (вьювер)
+MSetColorViewerStatus	Status line	Статус
+MSetColorViewerArrows	Screen scrolling arrows	Стрелки сдвига экрана
+MSetColorHelpReference	Reference	Ссылка
+MSetColorHelpSelectedReference	Selected reference	Выбранная ссылка
+MSetColorGroupsTitle	Color groups	Цветовые группы
+MSetColorItemsTitle	Group items	Элементы группы
+MSetColorTitle	Color	Цвет
+MSetColorForeground	&Foreground:	&Текст:
+MSetColorBackground	&Background:	&Фон:
+MSetColorStyle	Style:	Стиль:
+MSetColorStyleBold	B&old	Жирный
+MSetColorStyleItalic	I&talic	Курсив
+MSetColorStyleOverline	O&verline	Надчёркивание
+MSetColorStyleStrikeout	&Strikeout	Зачёркнутый
+MSetColorStyleFaint	F&aint	Бледный
+MSetColorStyleBlink	B&link	Мерцающий
+MSetColorStyleInverse	Inverse	Обратный
+MSetColorStyleInvisible	Invisible	Невидимый
+MSetColorStyleUnderline	&Underline:	Подчёркивание:
+MSetColorStyleUnderlineSingle	Single	Одинарное
+MSetColorStyleUnderlineDouble	Double	Двойное
+MSetColorStyleUnderlineCurly	Curly	Фигурное
+MSetColorStyleUnderlineDotted	Dotted	Точечное
+MSetColorStyleUnderlineDashed	Dashed	Пунктирное
+MSetColorSample	Text Text Text Text Text Text Text	Текст Текст Текст Текст Текст Текст
+MColorsPalette	Palette	Палитра
+MColorsClassicPalette	Classic palette	Классическая палитра
+MSetConfirmTitle	Confirmations	Подтверждения
+MSetConfirmMove	&Move	Перезапись файлов при &переносе
+MSetConfirmRO	&Overwrite and delete R/O files	Перезапись и удаление R/O &файлов
+MSetConfirmDrag	&Drag and drop	Пере&таскивание
+MSetConfirmDelete	De&lete	&Удаление
+MSetConfirmDeleteFolders	Delete non-empty &folders	У&даление непустых папок
+MSetConfirmEsc	&Interrupt operation	Прерыва&ние операций
+MSetConfirmRemoveConnection	Disconnect &network drive	&Отсоединение сетевого диска
+MSetConfirmRemoveSUBST	Delete &SUBST-disk	Удаление SUBST-диска
+MSetConfirmDetachVHD	Detach &virtual disk	Отсоедиение виртуального диска
+MSetConfirmRemoveHotPlug	Hot&Plug-device removal	Отключение HotPlug-у&стройства
+MSetConfirmAllowReedit	&Reload edited file	Повто&рное открытие файла в редакторе
+MSetConfirmHistoryClear	Clear &history list	Очистка списка &истории
+MSetConfirmExit	E&xit	&Выход
+MPluginsManagerSettingsTitle	Plugins manager settings	Параметры менеджера плагинов
+MPluginsManagerOEMPluginsSupport	&OEM plugins support	&Поддержка OEM-плагинов
+MPluginsManagerOFP	&File processing	Обработка &файла
+MPluginsManagerStdAssoc	Show standard &association item	Пункт вызова стандартной &ассоциации
+MPluginsManagerEvenOne	&Even if only one plugin found	Даже если найден всего &один плагин
+MPluginsManagerSFL	Search &results (SetFindList)	&Результаты поиска (SetFindList)
+MPluginsManagerPF	&Prefix processing	Обрабо&тка префикса
+MPluginConfirmationTitle	Plugin selection	Выбор плагина
+MMenuPluginStdAssociation	Standard association	Стандартная ассоциация
+MFindFolderTitle	Find folder	Поиск папки
+MFolderTreeF2	Rescan	Обновить
+MFolderTreeF5	Zoom	Размер
+MCannotSaveTree	Cannot save folders tree to file	Ошибка записи дерева папок в файл
+MReadingTree	Reading the folders tree	Чтение дерева папок
+MUserMenuTitle	User menu	Пользовательское меню
+MChooseMenuType	Choose user menu type to edit	Выберите тип пользовательского меню для редактирования
+MChooseMenuMain	&Main	&Главное
+MChooseMenuLocal	&Local	&Местное
+MMainMenuTitle	Main menu	Главное меню
+MMainMenuGlobal	Global	Глобальное
+MLocalMenuTitle	Local menu	Местное меню
+MAskDeleteMenuItem	Do you wish to delete the menu item	Вы хотите удалить пункт меню
+MAskDeleteSubMenuItem	Do you wish to delete the submenu	Вы хотите удалить вложенное меню
+MUserMenuInvalidInputLabel	Invalid format for UserMenu Label	Неправильный формат метки меню
+MUserMenuInvalidInputHotKey	Invalid format for Hot Key	Неправильный формат горячей клавиши
+MEditMenuTitle	Edit user menu	Редактирование пользовательского меню
+MEditMenuHotKey	&Hot key:	&Горячая клавиша:
+MEditMenuLabel	&Label:	&Метка:
+MEditMenuCommands	&Commands:	&Команды:
+MAskInsertMenuOrCommand	Do you wish to insert a new command or a new menu?	Вы хотите вставить новую команду или новое меню?
+MMenuInsertCommand	Insert command	Вставить команду
+MMenuInsertMenu	Insert menu	Вставить меню
+MEditSubmenuTitle	Edit submenu label	Редактирование метки вложенного меню
+MEditMenuConfirmation	Save changes?	Сохранить изменения?
+MEditMenuError	Cannot update menu	Не удалось обновить меню
+MViewSearchingFor	Searching for	Поиск
+MViewSearchingHex	Searching for bytes	Поиск байтов
+MViewSearchCannotFindHex	Could not find the bytes	Байты не найдены
+MViewSearchEod	End of the document reached	Достигнут конец документа
+MViewSearchFromBegin	Continue from the beginning of the document?	Продолжить поиск с начала документа?
+MViewSearchBod	Begin of the document reached	Достигнуто начало документа
+MViewSearchFromEnd	Continue from the end of the document?	Продолжить поиск с конца документа?
+MViewSearchCycle	The whole document scanned	Просмотрен весь документ
+MViewSearchRepeat	Repeat the search in the document?	Повторить поиск в документе?
+MPrintTo	Print {0} to	Печатать {0} на
+MPrintFilesTo	Print {0} files to	Печатать {0} файлов на
+MPrintingFile	Printing {0}	Печать {0}
+MCannotEnumeratePrinters	Cannot enumerate available printers list	Не удалось получить список доступных принтеров
+MCannotOpenPrinter	Cannot open printer	Не удалось открыть принтер
+MCannotPrint	Cannot print	Не удалось распечатать
+MDescribeFiles	Describe file	Описание файла
+MEnterDescription	Enter description for	Введите описание для
+MReadingDiz	Reading file descriptions	Чтение описаний файлов
+MCannotUpdateDiz	Cannot update file descriptions	Не удалось обновить описания файлов
+MCfgDizTitle	File descriptions	Описания файлов
+MCfgDizListNames	Description &list names delimited with commas:	Имена &списков описаний, разделённые запятыми:
+MCfgDizSetHidden	Set "&Hidden" attribute to new description lists	Устанавливать &атрибут "Скрытый" на новые списки описаний
+MCfgDizROUpdate	Update &read only description file	Обновлять файл описаний с атрибутом "Толь&ко для чтения"
+MCfgDizStartPos	&Position of new descriptions in the string	&Позиция новых описаний в строке
+MCfgDizNotUpdate	Do &not update descriptions	&Не обновлять описания
+MCfgDizUpdateIfDisplayed	Update if &displayed	&Обновлять, если они выводятся на экран
+MCfgDizAlwaysUpdate	&Always update	&Всегда обновлять
+MCfgDizAnsiByDefault	Use ANS&I code page by default	&Использовать кодовую страницу ANSI по умолчанию
+MCfgDizSaveInUTF	Save in UTF-&8	Сохранять в UTF-&8
+MReadingTitleFiles	Update of panels	Обновление панелей
+MReadingFiles	Reading: {0} files	Чтение: {0} файлов
+MOperationNotCompleted	Operation not completed	Операция не завершена
+MEditPanelModes	Edit panel modes	Режимы панели
+MEditPanelModeStatusTypes	St&atus line column types	Типы колонок строки ст&атуса
+MEditPanelModeStatusWidths	Status l&ine column widths	Ширина колонок строки стат&уса
+MEditPanelModeFullscreen	&Fullscreen view	&Полноэкранный режим
+MEditPanelModeAlignExtensions	Ali&gn file extensions	&Выравнивать расширения файлов
+MEditPanelModeAlignFolderExtensions	Align folder e&xtensions	Выравнивать расширения пап&ок
+MEditPanelModeFoldersUpperCase	Show folders in &uppercase	Показывать папки &заглавными буквами
+MEditPanelModeFilesLowerCase	Show files in &lowercase	Показывать файлы ст&рочными буквами
+MEditPanelModeUpperToLowerCase	Show uppercase file names in lower&case	Показывать имена файлов из заглавных букв &строчными буквами
+MSetFolderInfoTitle	Folder description files	Файлы информации о папках
+MSetFolderInfoNames	Enter file names delimited with commas (wildcards are allowed)	Введите имена файлов, разделённые запятыми (допускаются маски)
+MScreensTitle	Screens	Экраны
+MScreensPanels	Panels	Панели
+MAskApplyCommandTitle	Apply command	Применить команду
+MAskApplyCommand	Enter command to process selected files	Введите команду для обработки выбранных файлов
+MPluginConfigTitle	Plugins configuration	Конфигурация плагинов
+MPluginCommandsMenuTitle	Plugin commands	Команды плагинов
+MPreparingList	Preparing files list	Создание списка файлов
+MLangTitle	Main language	Основной язык
+MHelpLangTitle	Help language	Язык помощи
+MDefineMacroTitle	Define macro	Задание макрокоманды
+MDefineMacro	Press the desired key	Нажмите желаемую клавишу
+MMacroReDefinedKey	Macro key '{0}' already defined.	Макроклавиша '{0}' уже определена.
+MMacroDeleteKey	Macro key '{0}' will be removed.	Макроклавиша '{0}' будет удалена.
+MMacroCommonReDefinedKey	Common macro key '{0}' already defined.	Общая макроклавиша '{0}' уже определена.
+MMacroCommonDeleteKey	Common macro key '{0}' will be removed.	Общая макроклавиша '{0}' будет удалена.
+MMacroSequence	Sequence:	Последовательность:
+MMacroReDefinedKey2	Redefine?	Переопределить?
+MMacroDeleteKey2	Delete?	Удалить?
+MMacroEditKey	Chan&ge	Изменить
+MMacroSettingsTitle	Macro settings for '{0}'	Параметры макрокоманды для '{0}'
+MMacroSettingsSequence	Se&quence:	Последовательность:
+MMacroSettingsDescription	&Description:	Описание:
+MMacroSettingsEnableOutput	Allo&w screen output while executing macro	Разрешить во время &выполнения вывод на экран
+MMacroSettingsRunAfterStart	Execute after Far &start	В&ыполнять после запуска Far
+MMacroSettingsActivePanel	&Active panel	&Активная панель
+MMacroSettingsPassivePanel	&Passive panel	&Пассивная панель
+MMacroSettingsPluginPanel	P&lugin panel	На панели пла&гина
+MMacroSettingsFolders	Execute for &folders	Выполнять для папо&к
+MMacroSettingsSelectionPresent	Se&lection present	&Отмечены файлы
+MMacroSettingsCommandLine	Empty &command line	Пустая командная &строка
+MMacroSettingsSelectionBlockPresent	Selection &block present	Отмечен б&лок
+MMacroPluginLuamacroNotLoaded	Plugin LuaMacro is not loaded	Плагин LuaMacro не загружен
+MMacroRecordingIsDisabled	Macro recording is disabled	Запись макросов запрещена
+MCannotSaveFile	Cannot save file	Ошибка сохранения файла
+MTextSavedToTemp	Edited text is stored in	Отредактированный текст записан в
+MPluginHotKeyTitle	Assign plugin hot key	Назначение горячей клавиши
+MPluginHotKey	Enter hot key (letter or digit)	Введите горячую клавишу (букву или цифру)
+MPluginInformation	Plugin information	Информация о плагине
+MPluginModuleTitle	&Title:	&Название:
+MPluginAuthor	&Author:	&Автор:
+MPluginVersion	&Version:	&Версия:
+MPluginModulePath	&Module path:	&Файл плагина:
+MPluginUUID	Plugin &UUID:	&UUID плагина:
+MPluginItemUUID	Plugin &item UUID:	UU&ID пункта:
+MPluginPrefix	Plugin &prefix:	&Префикс плагина:
+MExceptionDialogTitle	Oops	Ой
+MExceptionDialogMessage1	Something went wrong.	Что-то пошло не так.
+MExceptionDialogMessage2	Please send the bug report to the developers:	Пожалуйста, отправьте отчет об ошибке разработчикам:
+MExceptionDialogClipboard	Clipboard	Буфер обмена
+MExcTerminate	&Terminate Far	Завершить Far
+MExcUnload	&Unload plugin	Выгрузить плагин
+MExcContinue	Continue	Продолжить
+MExcFullDump	Full dump	Полный дамп
+MNetUserPassword	User password	Пароль пользователя
+MReadFolderError	Cannot read folder contents	Не удаётся прочесть содержимое папки
+MPlgBadVers	This plugin requires more recent version of Far	Для работы этого плагина требуется более новая версия Far
+MPlgRequired	Required Far version is {0},	Требуемая версия Far - {0},
+MPlgRequired2	current Far version is {0}.	текущая версия Far - {0}.
+MPlgLoadPluginError	Error loading plugin	Ошибка при загрузке плагина
+MHelpActivatorURL	This reference starts an external application	Эта ссылка запускает внешнее приложение
+MHelpActivatorFormat	with parameter:	с параметром:
+MHelpActivatorQ	Do you wish to start it?	Желаете запустить?
+MHelpTopicNotFound	Requested help topic not found:	Не найден запрошенный раздел помощи:
+MPluginsHelpTitle	Plugins help	Плагины
+MDocumentsHelpTitle	Documents help	Документы
+MHelpShiftF1	Index	Содерж
+MInfoF3	VieDiz	СмОпис
+MInfoF4	EdtDiz	РедОпи
+MCopyTimeInfoElapsed	Time:	Время:
+MCopyTimeInfoRemaining	Remaining:	Осталось:
+MCopyTimeInfoSpeed	B/s	Б/с
+MKeyESCWasPressed	Operation has been interrupted	Действие было прервано
+MDoYouWantToCancel	Do you really want to cancel it?	Вы действительно хотите отменить действие?
+MDoYouWantToContinue	Continue work?	Продолжить выполнение?
+MCheckingFileInPlugin	The file is being checked by the plugin	Файл проверяется в плагине
+MDialogType	Dialog	Диалог
+MFolderTreeType	FolderTree	ПоискКаталогов
+MVMenuType	Menu	Меню
+MIncorrectMask	File-mask string contains errors	Некорректная маска файлов
+MComspecNotFound	Environment variable %COMSPEC% not defined	Переменная окружения %COMSPEC% не определена
+MFileFilterTitle	Filter	Фильтр
+MFileFilterSize	Si&ze:	Разм&ер:
+MFileHardLinksCount	Has more than one hardlin&k	Болee одной жёсткой ссылки
+MFileFilterDate	Date&/Time:	&Дата/Время:
+MFileFilterWrite	&write	&записи
+MFileFilterCreation	&creation	&создания
+MFileFilterAccess	&access	&доступа
+MFileFilterChange	c&hange	&изменения
+MFileFilterDateRelative	Relat&ive	Относительна&я
+MFileFilterCurrent	C&urrent	Теку&щая
+MFileFilterBlank	B&lank	С&брос
+MFileFilterAttr	Attri&butes	Атрибут&ы
+MFileFilterAttrDirectory	&Directory	&Каталог
+MFileFilterAttrSparse	S&parse	&Разрежённый
+MFileFilterAttrTemporary	Temporar&y	&Временный
+MFileFilterAttrReparse	Reparse poin&t	Точка повторного анализа
+MFileFilterAttrOffline	O&ffline	Автономны&й
+MFileFilterAttrIntegrityStream	Inte&grity stream	Поток целостности
+MFileFilterAttrNoScrubData	No scru&b data	Нет данных очистки
+MFileFilterAttrPinned	Pi&nned	Закреплённый
+MFileFilterAttrRecallOnOpen	Recal&l on open	Recall on open
+MFileFilterAttrRecallOnDataAccess	Recall &on data access	Recall on data access
+MFileFilterMakeTransparent	Make &transparent	Выставить прозрачность
+MBadFileSizeFormat	File size field is incorrectly filled	Неправильно заполнено поле размера
+MElevationRequired	You need to provide administrator permission	Нужно обладать правами администратора
+MElevationRequiredPrivileges	Additional privileges required	Требуются дополнительные привилегии
+MElevationRequiredProcess	to process this object:	для обработки этого объекта:
+MElevationRequiredDelete	to delete this object:	для удаления этого объекта:
+MElevationRequiredCopy	to copy this object:	для копирования этого объекта:
+MElevationRequiredMove	to move this object:	для перемещения этого объекта:
+MElevationRequiredReplace	to replace this object:	для замещения этого объекта:
+MElevationRequiredGetAttributes	to get attributes of this object:	для получения атрибутов этого объекта:
+MElevationRequiredSetAttributes	to set attributes of this object:	для установки атрибутов этого объекта:
+MElevationRequiredHardLink	to create this hard link:	для создания этой жёсткой ссылки:
+MElevationRequiredSymLink	to create this symbolic link:	для создания этой символической ссылки:
+MElevationRequiredRecycle	to move this object to recycle bin:	для перемещения этого объекта в корзину:
+MElevationRequiredList	to list this object:	для просмотра этого объекта:
+MElevationRequiredSetOwner	to set owner of this object:	для установки владельца этого объекта:
+MElevationRequiredOpen	to open this object:	для открытия этого объекта:
+MElevationRequiredEncryptFile	to encrypt this object:	для шифрования этого объекта:
+MElevationRequiredDecryptFile	to decrypt this object:	для расшифрования этого объекта:
+MElevationDoForAll	Do this for &all current objects	Выполнить это действие для &всех текущих объектов
+MElevationDoNotAskAgainInTheCurrentSession	Do not ask again in the current session	Больше не спрашивать в текущей сессии
+MCompletionEnvironmentTitle	Environment	Окружение
+MCompletionFilesTitle	Files	Файлы
+MObjectLockedReason	Object is being {0} in:	Объект {0} в:
+MObjectLockedReasonPlayed	played	воспроизводится
+MObjectLockedReasonEdited	edited	редактируется
+MObjectLockedReasonOpened	opened	открыт
+MObjectLockedAndMore	and {0} more processes.	и ещё {0} процессах
+MObjectLockedSwitchTo	Switch to	Переключиться
+MObjectLockedClose	Close file	Закрыть файл
+MObjectLockedReasonSessionMismatch	One or more processes are running in another Terminal Services session.	Один или несколько процессов выполняются в другом сеансе служб терминалов.
+MObjectLockedReasonCriticalProcess	One or more processes are critical processes.	Один или несколько процессов являются критическими процессами.
+MObjectLockedReasonCriticalService	One or more services are critical services.	Одна или несколько служб являются критическими службами.
+MObjectLockedReasonDetectedSelf	The file is opened by the current process.	Файл открыт текущим процессом.
+MProblemDb	Problem configuration DB	Проблемы с БД настроек
+MShowConfigFolders	Show configuration folders	Показать каталоги настроек
+MBadLanguageFile	Incorrect language file	Некорректный языковой файл
+MLanguageStringNotFound	String {0} not found	Строка {0} не найдена
+MCharacterIsNotSupportedByTheCodepage	The character "{0}" ({1}) is not supported by the selected code page	Символ "{0}" ({1}) не поддерживается выбранной кодовой страницей
+MNewFileName	New_File_{0:04}-{1:02}-{2:02}_{3:02}.{4:02}.{5:02}.{6:03}.txt	Новый_файл_{0:04}-{1:02}-{2:02}_{3:02}.{4:02}.{5:02}.{6:03}.txt
+ARC0	en	ru
+ARC2	Extract files	Распаковка архива
+ARC3	&Extract files to:	&Извлечь файлы в:
+ARC4	&Ignore errors	&Пропускать файлы с ошибками
+ARC5	When destination file exists:	Если файл существует:
+ARC6	As&k	&Спросить
+ARC10	&Append	До&бавить
+ARC11	&Delete files from archive after extraction	&Удалить файлы из архива после распаковки
+ARC12	Pass&word:	П&ароль:
+ARC13	Ex&tract archive into separate directory	Распаковать архив в &отдельный каталог
+ARC14	De&lete archive after extraction	У&далить архив после распаковки
+ARC15	&Go to target directory after extraction	Пере&йти в целевой каталог после распаковки
+ARC16	Sa&ve settings	Со&хранить настройки
+ARC17	Settings saved	Настройки сохранены
+ARC18	Add files to archive	Обновление архива
+ARC19	Create archive	Создание архива
+ARC20	&Profile:	&Профиль:
+ARC23	Arc&hive path:	Пу&ть:
+ARC24	Eval&uate	Пок&азать
+ARC25	&Append extension	&Добавить расширение
+ARC26	Select archiver:	Формат архива:
+ARC27	O&ther:	П&рочие:
+ARC28	Compression &level:	&Уровень сжатия:
+ARC29	&Method:	&Метод:
+ARC30	S&olid	&Непрерывный
+ARC31	Advan&ced parameters:	Прод&винутые параметры:
+ARC32	&Encrypt archive	&Шифрование файлов
+ARC33	Show password	Показать пароль
+ARC35	Repeat:	Проверка пароля:
+ARC36	Encrypt header	Шифрование оглавления
+ARC37	Create self-e&xtracting archive	&Создать самоизвлекающийся архив
+ARC38	SFX options	Параметры SFX
+ARC39	Split into &volumes	Порезать на куск&и
+ARC40	Volume size:	Размер куска:
+ARC41	&Delete files after archiving	Удалит&ь файлы после архивации
+ARC42	Archive files open for w&riting	Архивировать файлы, &открытые для записи
+ARC46	O&verwrite	&Перезаписать
+ARC47	Ski&p	П&ропустить
+ARC48	Use &filter	Использовать &фильтр
+ARC49	Select archive format	Необходимо выбрать формат архива
+ARC50	Select compression level	Необходимо выбрать уровень сжатия
+ARC51	Select compression method	Необходимо выбрать метод сжатия
+ARC52	Passwords don't match	Введенные пароли не совпадают
+ARC53	Password is empty	Необходимо указать пароль
+ARC54	Invalid volume size	Неверно указан размер куска
+ARC55	Target file already exists. Do you want to overwrite it?	Целевой архив уже существует. Хотите перезаписать его?
+ARC56	Input profile name	Введите название профиля
+ARC57	Do you want to delete selected profile?	Хотите удалить текущий профиль?
+ARC58	Selected SFX module does not support PPMD compression	Выбранный SFX модуль не поддерживает сжатие методом PPMD
+ARC59	Selected SFX module does not support encryption	Выбранный SFX модуль не поддерживает шифрование данных
+ARC60	Save settings	Сохранить настройки
+ARC75	Do you want to delete selected files?	Вы хотите удалить выбранные файлы?
+ARC76	Enter directory name:	Введите имя каталога:
+ARC77	Archive test complete	Тест архива завершен успешно
+ARC78	Test archive files	Протестировать архив
+ARC79	Enter password	Ввод пароля
+ARC80	Password:	Пароль:
+ARC81	Overwrite file	Перезапись файла
+ARC82	Destination file already exists. Overwrite?	Целевой файл уже существует. Заменить?
+ARC83	Source:	Источник:
+ARC84	Destination:	Цель:
+ARC85	(newer)	(более новый)
+ARC95	Operation log	Список ошибок
+ARC96	Operation completed with errors. Do you want to review log file?	Операция завершена с ошибками. Хотите просмотреть список?
+ARC97	&Close	&Закрыть
+ARC98	Show &log	&Показать список
+ARC99	Handle archive creation (Shift-F&1)	Обрабатывать команду создания архива (Shift-F&1)
+ARC100	Handle archive commands (Ctrl-PgDn, Shift-F&2)	Обрабатывать прочие архивные команды (Ctrl-PgDn, Shift-F&2)
+ARC101	Use o&wn panel view mode	Использовать собственный ре&жим работы панели
+ARC102	OEM &Codepage:	Ко&довая страница OEM:
+ARC103	&ANSI Codepage:	ANSI:
+ARC104	Sa&ve Codepages	&Хранить
+ARC105	&Open files matching masks:	Маски &включения:
+ARC106	&Exclude files matching masks:	Маски &исключения:
+ARC107	Ma&sk settings apply to Ctrl-PgDn	Н&астройки масок влияют на Ctrl-PgDn
+ARC108	&Generate masks	&Сгенерировать маски
+ARC109	Default &masks	С&тандартные маски
+ARC110	E&nable archive formats:	В&ключить форматы архивов:
+ARC111	&Disable archive formats:	&Отключить форматы архивов:
+ARC112	&Format settings apply to Ctrl-PgDn	&Настройки форматов влияют на Ctrl-PgDn
+ARC113	&7z library info	Информация о библиотеке &7z
+ARC114	7z library not found	Библиотека 7z не найдена
+ARC115	Version:	Версия:
+ARC116	Formats	Форматы
+ARC117	Masks	Маски
+ARC118	Active	Активно
+ARC121	SFX Options	Параметры SFX
+ARC122	Apply &profile:	Использовать про&филь:
+ARC123	&Module name:	&Модуль:
+ARC124	Replace &icon	Заменить &иконку
+ARC125	Icon pat&h:	&Путь к ICO файлу:
+ARC126	Replace &version	Заменить информацию о &версии
+ARC127	V&ersion:	В&ерсия:
+ARC128	&Comments:	&Комментарии:
+ARC129	C&ompany name:	На&звание компании:
+ARC130	File &description:	&Описание файла:
+ARC131	&Legal copyright:	Копи&райт:
+ARC132	Product &name:	Название про&дукта:
+ARC133	In&stall configuration	Параметры и&нсталлятора
+ARC135	&Begin prompt:	Вопро&с:
+ARC136	Pro&gress meter:	Индика&тор распаковки:
+ARC137	&Run program:	Зап&устить программу из архива:
+ARC138	Director&y:	Ката&лог с программой:
+ARC139	E&xecute file:	Запустит&ь произвольный файл:
+ARC140	Execute p&arameters:	Параметр&ы запуска:
+ARC141	Select SFX module	Необходимо указать SFX модуль
+ARC142	Icon path is invalid	ICO файл не найден
+ARC143	Standard GUI	Стандартный
+ARC144	Standard console	Стандартный консольный
+ARC145	Installer GUI (static)	Инсталлятор (статический)
+ARC146	Small installer GUI	Инсталлятор упрощенный
+ARC147	Small installer console	Инсталлятор упрощенный консольный
+ARC148	Installer GUI	Инсталлятор
+ARC150	&Open archive	&Открыть архив
+ARC151	Open (&format menu)	О&ткрыть (список форматов)
+ARC152	&Create archive	&Создать архив
+ARC153	&Extract archive(s)	&Распаковать архив(ы)
+ARC154	&Test archive(s)	&Проверить архив(ы)
+ARC155	C&onvert archive into SFX	Прео&бразовать архив в SFX
+ARC156	Reading archive...	Чтение архива...
+ARC157	Extracting files...	Извлечение файлов...
+ARC158	Creating directories...	Создание каталогов...
+ARC159	Setting attributes...	Установка атрибутов...
+ARC160	Testing archive...	Тестирование архива...
+ARC161	Updating archive...	Обновление архива...
+ARC162	Creating archive...	Создание архива...
+ARC163	Deleting files...	Удаление файлов...
+ARC164	Scanning directories...	Сканирование каталогов...
+ARC165	Do you want to interrupt current operation?	Хотите прервать текущую операцию?
+ARC166	Paused	Пауза
+ARC168	Converting into SFX...	Преобразование в SFX...
+ARC169	Unsupported compression method	Неподдерживаемый метод сжатия
+ARC170	Data error	Ошибка в данных
+ARC171	Wrong password or data error	Неправильный пароль либо ошибка в данных
+ARC172	CRC check failed	Ошибка при проверке контрольной суммы
+ARC173	Wrong password or CRC check failure	Неправильный пароль либо ошибка при проверке контрольной суммы
+ARC174	Unavailable data	Недоступные данные
+ARC175	Unexpected end of data	Неожиданный конец данных
+ARC176	There are some data after the end of the payload data	Есть данные после конца блока полезных данных
+ARC177	Is not archive	Не является архивом
+ARC178	Headers Error	Ошибка в заголовках
+ARC179	Wrong password	Неверный пароль
+ARC180	Unknown extraction error	Неизвестная ошибка распаковки
+ARC181	Update error	Ошибка обновления
+ARC182	Unknown update error	Неизвестная ошибка обновления
+ARC183	Archive format not found	Формат архива не найден
+ARC184	Archive modification not supported	Изменение архива невозможно
+ARC185	File is not recognized as archive	Файл не распознан как архив
+ARC186	Archive cannot be converted into SFX archive	Архив нельзя преобразовать в SFX архив
+ARC187	Can't change single file archive format	Изменение однофайловых архивов невозможно
+ARC191	KB	КБ
+ARC192	MB	МБ
+ARC193	GB	ГБ
+ARC194	TB	ТБ
+ARC196	KB/s	КБ/с
+ARC197	MB/s	МБ/с
+ARC198	GB/s	ГБ/с
+ARC199	TB/s	ТБ/с
+ARC200	Path	Путь
+ARC205	Packed Size	Сжатый
+ARC209	Modified	Изменен
+ARC210	Solid	Непрерывный
+ARC211	Commented	Комментарий
+ARC212	Encrypted	Зашифрован
+ARC213	Split Before	Разбит До
+ARC214	Split After	Разбит После
+ARC215	Dictionary	Словарь
+ARC217	Type	Тип
+ARC218	Anti	Анти
+ARC219	Method	Метод
+ARC220	Host OS	Система
+ARC221	File System	Файловая Система
+ARC224	Block	Блок
+ARC225	Comment	Комментарий
+ARC226	Position	Позиция
+ARC227	Path Prefix	Префикс
+ARC230	Version	Версия
+ARC232	Multivolume	Многотомный
+ARC233	Offset	Смещение
+ARC234	Links	Ссылок
+ARC235	Blocks	Блоков
+ARC236	Volumes	Томов
+ARC237	Time Type	Тип Времени
+ARC240	CPU	Процессор
+ARC241	Physical Size	Физический Размер
+ARC242	Headers Size	Размер Заголовков
+ARC243	Checksum	Контр. Сумма
+ARC244	Characteristics	Характеристики
+ARC245	Virtual Address	Виртуальный Адрес
+ARC247	Short Name	Короткое имя
+ARC248	Creator Application	Программа
+ARC249	Sector Size	Размер сектора
+ARC251	Symbolic Link	Ссылка
+ARC253	Total Size	Емкость
+ARC254	Free Space	Свободно
+ARC255	Cluster Size	Размер кластера
+ARC256	Label	Метка
+ARC257	Local Name	Локальное Имя
+ARC258	Provider	Провайдер
+ARC259	NT Security	NT Безопасность
+ARC260	Alternate Stream	Альтернативный Поток
+ARC262	Deleted	Удаленный
+ARC263	Is Tree	Дерево
+ARC266	Error Type	Тип Ошибки
+ARC267	Errors	Ошибки
+ARC269	Warnings	Предупреждения
+ARC271	Streams	Потоки
+ARC272	Alternate Streams	Альтернативные Потоки
+ARC273	Alternate Streams Size	Размер Альтернативных потоков
+ARC274	Virtual Size	Виртуальный Размер
+ARC275	Unpack Size	Распакованный Размер
+ARC276	Total Physical Size	Общий Физический Размер
+ARC277	Volume Index	Номер Тома
+ARC278	SubType	Подтип
+ARC279	Short Comment	Короткий Комментарий
+ARC280	Code Page	Кодовая Страница
+ARC281	Is not archive type	Не Архивный Тип
+ARC282	Physical Size can't be detected	Физический размер неопределим
+ARC283	Zeros Tail Is Allowed	Разрешены нули в конце
+ARC284	Tail Size	Размер Остатка
+ARC285	Embedded Stub Size	Размер Встроенного Блока
+ARC287	Hard Link	Жесткая Ссылка
+ARC289	Stream ID	ID Потока
+ARC290	Read-only	Только для чтения
+ARC304	Compression ratio	Степень сжатия
+ARC305	Data size	Размер данных
+ARC306	Packed size	Упакованный размер
+ARC307	File count	Число файлов
+ARC308	Directory count	Число каталогов

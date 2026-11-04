@@ -10,13 +10,27 @@ use crossterm::style::Color;
 
 use crate::grid::Grid;
 use crate::listing;
-use crate::palette;
 
-const BG: Color = palette::bg(palette::BLUE);
-const TEXT: Color = palette::fg(palette::LIGHT_CYAN);
-const INFO: Color = palette::fg(palette::YELLOW);
-const SELECTED_TITLE_BG: Color = palette::bg(palette::CYAN);
-const BLACK: Color = palette::fg(palette::BLACK);
+#[allow(non_snake_case)]
+fn BG() -> Color {
+    crate::colors::bg("Panel.Text")
+}
+#[allow(non_snake_case)]
+fn TEXT() -> Color {
+    crate::colors::fg("Panel.Text")
+}
+#[allow(non_snake_case)]
+fn INFO() -> Color {
+    crate::colors::fg("Panel.Text.Info")
+}
+#[allow(non_snake_case)]
+fn SELECTED_TITLE_BG() -> Color {
+    crate::colors::bg("Panel.Title.Selected")
+}
+#[allow(non_snake_case)]
+fn BLACK() -> Color {
+    crate::colors::fg("Panel.Title.Selected")
+}
 
 /// Far's folder information files (System.FolderInfo's default).
 const FOLDER_INFO: [&str; 5] = ["DirInfo", "File_Id.diz", "Descript.ion", "ReadMe.*", "Read.Me"];
@@ -53,7 +67,10 @@ fn percent(part: u64, total: u64) -> u64 {
 /// The description file of `dir`, as Far looks for one (the first of
 /// FolderInfo that is there; a mask like `ReadMe.*` takes the first match).
 pub fn folder_description(dir: &Path) -> Option<std::path::PathBuf> {
-    for name in FOLDER_INFO {
+    let configured = crate::settings::string("System.FolderInfo");
+    let names: Vec<&str> = configured.split(',').map(str::trim).filter(|n| !n.is_empty()).collect();
+    let names = if names.is_empty() { FOLDER_INFO.to_vec() } else { names };
+    for name in names {
         if let Some(stem) = name.strip_suffix(".*") {
             let entries = std::fs::read_dir(dir).ok()?;
             let found = entries.flatten().map(|e| e.path()).find(|p| {
@@ -80,17 +97,17 @@ pub fn paint(grid: &mut Grid, left: u16, width: u16, height: u16, active: bool, 
         return;
     }
     let (right, bottom) = (left + width - 1, height - 1);
-    grid.fill(left, 0, width, height, BG);
+    grid.fill(left, 0, width, height, BG());
     let inner = (width - 2) as usize;
     let horizontal = "\u{2550}".repeat(inner);
-    grid.put(left, 0, &format!("\u{2554}{horizontal}\u{2557}"), TEXT, BG);
-    grid.put(left, bottom, &format!("\u{255A}{horizontal}\u{255D}"), TEXT, BG);
+    grid.put(left, 0, &format!("\u{2554}{horizontal}\u{2557}"), TEXT(), BG());
+    grid.put(left, bottom, &format!("\u{255A}{horizontal}\u{255D}"), TEXT(), BG());
     for row in 1..bottom {
-        grid.put(left, row, "\u{2551}", TEXT, BG);
-        grid.put(right, row, "\u{2551}", TEXT, BG);
+        grid.put(left, row, "\u{2551}", TEXT(), BG());
+        grid.put(right, row, "\u{2551}", TEXT(), BG());
     }
     let title = " Information ";
-    let (fg, bg) = if active { (BLACK, SELECTED_TITLE_BG) } else { (TEXT, BG) };
+    let (fg, bg) = if active { (BLACK(), SELECTED_TITLE_BG()) } else { (TEXT(), BG()) };
     grid.put(left + (width.saturating_sub(title.chars().count() as u16)) / 2, 0, title, fg, bg);
 
     let mut y = 1u16;
@@ -100,13 +117,13 @@ pub fn paint(grid: &mut Grid, left: u16, width: u16, height: u16, active: bool, 
             return;
         }
         let room = right.saturating_sub(left + 2) as usize;
-        grid.put(left + 2, *y, &label.chars().take(room).collect::<String>(), TEXT, BG);
+        grid.put(left + 2, *y, &label.chars().take(room).collect::<String>(), TEXT(), BG());
         let label_end = left + 2 + label.chars().count() as u16;
         let max = right.saturating_sub(label_end).saturating_sub(2) as usize;
         let value = listing::truncate_left(value, max);
         let x = right.saturating_sub(value.chars().count() as u16 + 1);
         if x > left && x > label_end {
-            grid.put(x, *y, &format!("{value} "), INFO, BG);
+            grid.put(x, *y, &format!("{value} "), INFO(), BG());
         }
         *y += 1;
     };
@@ -114,10 +131,10 @@ pub fn paint(grid: &mut Grid, left: u16, width: u16, height: u16, active: bool, 
         if *y >= bottom {
             return;
         }
-        grid.put(left, *y, &format!("\u{255F}{}\u{2562}", "\u{2500}".repeat(inner)), TEXT, BG);
+        grid.put(left, *y, &format!("\u{255F}{}\u{2562}", "\u{2500}".repeat(inner)), TEXT(), BG());
         let title = listing::truncate_left(&format!(" {title} "), (width as usize).saturating_sub(4));
-        grid.put(left + width.saturating_sub(title.chars().count() as u16) / 2, *y, &title, TEXT, BG);
-        grid.put(left + 1, *y, "[-]", TEXT, BG);
+        grid.put(left + width.saturating_sub(title.chars().count() as u16) / 2, *y, &title, TEXT(), BG());
+        grid.put(left + 1, *y, "[-]", TEXT(), BG());
         *y += 1;
     };
 
@@ -163,7 +180,7 @@ pub fn paint(grid: &mut Grid, left: u16, width: u16, height: u16, active: bool, 
                         break;
                     }
                     let shown: String = row.replace('\t', "        ").chars().take(inner).collect();
-                    grid.put(left + 1, y, &shown, TEXT, BG);
+                    grid.put(left + 1, y, &shown, TEXT(), BG());
                     y += 1;
                 }
             }

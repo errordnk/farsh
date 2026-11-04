@@ -71,6 +71,28 @@ pub enum Action {
     DeleteFilter(usize),
     /// Alt+F7.
     FindFile,
+    /// An Options dialog: which, and the settings its items are bound to.
+    Settings(crate::builder::Settings, Vec<crate::builder::Binding>),
+    /// Options > Folder description files.
+    FolderInfo,
+    /// Shift+F9.
+    SaveSetup,
+    /// Groups of file masks: a group edited (its old name; none: a new one), deleted, defaults back.
+    MaskGroup(Option<String>),
+    DeleteMaskGroup(String),
+    RestoreMaskGroups,
+    /// Groups of file masks, F7: the name to look for.
+    FindMaskGroup,
+    /// Code pages, F4.
+    RenameCodePage(u32),
+    /// File panel modes: the mode (Far's number, Ctrl+N).
+    PanelMode(usize),
+    /// Files highlighting: group N edited (or a new one at N), with the
+    /// attributes and the eight colors the dialog has so far.
+    Highlight { index: usize, new: bool, attributes: Vec<u8>, colors: [Option<(u8, u8)>; 8] },
+    /// Files highlighting: delete group N; Ctrl+R's defaults.
+    DeleteHighlight(usize),
+    RestoreHighlight,
     Quit,
     /// The answer to a file that already exists.
     Conflict,
@@ -102,30 +124,22 @@ struct Palette {
 }
 
 impl Style {
+    /// Far's Dialog.* or WarnDialog.* colors (Options > Colors).
     fn palette(self) -> Palette {
-        let common = Palette {
-            bg: palette::bg(palette::LIGHT_GRAY),
-            fg: palette::fg(palette::BLACK),
-            hot: palette::fg(palette::YELLOW),
-            focus_bg: palette::bg(palette::CYAN),
-            focus_fg: palette::fg(palette::BLACK),
-            edit_bg: palette::bg(palette::CYAN),
-            edit_fg: palette::fg(palette::BLACK),
-            unchanged_fg: palette::fg(palette::LIGHT_GRAY),
-            selected_bg: palette::bg(palette::BLACK),
-            selected_fg: palette::fg(palette::WHITE),
-            dim: palette::fg(palette::DARK_GRAY),
-        };
-        match self {
-            // Far's COL_DIALOG*: black on light gray, yellow hotkeys, cyan focus and edits
-            Style::Normal => common,
-            // COL_WARNDIALOG*: white on red, the focus black on light gray
-            Style::Warning => Palette {
-                bg: palette::bg(palette::RED),
-                fg: palette::fg(palette::WHITE),
-                focus_bg: palette::bg(palette::LIGHT_GRAY),
-                ..common
-            },
+        use crate::colors::{bg, fg};
+        let k = |name: &str| -> String { format!("{}{name}", if self == Style::Warning { "WarnDialog." } else { "Dialog." }) };
+        Palette {
+            bg: bg(&k("Text")),
+            fg: fg(&k("Text")),
+            hot: fg(&k("Text.Highlight")),
+            focus_bg: bg(&k("Button.Selected")),
+            focus_fg: fg(&k("Button.Selected")),
+            edit_bg: bg(&k("Edit")),
+            edit_fg: fg(&k("Edit")),
+            unchanged_fg: fg(&k("Edit.Unchanged")),
+            selected_bg: bg(&k("List.Text.Selected")),
+            selected_fg: fg(&k("List.Text.Selected")),
+            dim: fg(&k("Disabled")),
         }
     }
 }
@@ -243,6 +257,11 @@ impl Values {
         self.choices.iter().find(|(k, _)| *k == id).map_or(0, |(_, v)| *v)
     }
 
+    /// Values as if a dialog had this text (Copy with no question).
+    pub fn with_text(id: &'static str, text: &str) -> Self {
+        Self { texts: vec![(id, text.to_string())], ..Self::default() }
+    }
+
     /// Whether the dialog had a choice control `id`.
     pub fn has_choice(&self, id: &str) -> bool {
         self.choices.iter().any(|(k, _)| *k == id)
@@ -270,6 +289,11 @@ pub struct Dialog {
     /// The hook decided to close the dialog with this button (after a
     /// question over it was answered).
     closing: Option<&'static str>,
+    /// DialogBuilder's LinkFlags (DIF_AUTOMATION): while the check box is
+    /// off, the other item is disabled.
+    links: Vec<(usize, usize)>,
+    /// The texts are in the interface language.
+    localized: bool,
     action: Action,
 }
 
@@ -346,7 +370,7 @@ impl Dialog {
                 button("Ca&ncel", "cancel", false),
             ]),
         ];
-        Self { title: if moving { "Rename/Move" } else { "Copy" }.into(), style: Style::Normal, layout: Layout::Fixed(76), items, focus: 1, button: 0, places: vec![], disabled: vec![], hidden: vec![], hook: None, sub: None, closing: None, action }
+        Self { title: if moving { "Rename/Move" } else { "Copy" }.into(), style: Style::Normal, layout: Layout::Fixed(76), items, focus: 1, button: 0, places: vec![], disabled: vec![], hidden: vec![], hook: None, sub: None, closing: None, links: vec![], localized: false, action }
     }
 
     /// F7 (mkdir.cpp: 76 wide). Links are not made yet: the link type is
@@ -373,7 +397,7 @@ impl Dialog {
             hidden: vec![],
             hook: None,
             sub: None,
-            closing: None,
+            closing: None, links: vec![], localized: false,
             action: Action::MkDir,
         }
     }
@@ -395,7 +419,7 @@ impl Dialog {
         let verb = if matches!(action, Action::Wipe(_)) { "Wipe" } else { "Delete" };
         items.push(Item::Buttons(vec![button(verb, "ok", true), button("Cancel", "cancel", false)]));
         let focus = items.len() - 1;
-        Self { title: verb.into(), style: Style::Warning, layout: Layout::Builder, items, focus, button: 0, places: vec![], disabled: vec![], hidden: vec![], hook: None, sub: None, closing: None, action }
+        Self { title: verb.into(), style: Style::Warning, layout: Layout::Builder, items, focus, button: 0, places: vec![], disabled: vec![], hidden: vec![], hook: None, sub: None, closing: None, links: vec![], localized: false, action }
     }
 
     /// Delete/Wipe meets a folder with something in it (delete.cpp's
@@ -447,7 +471,7 @@ impl Dialog {
         items.push(Item::Separator(None));
         items.push(Item::Buttons(buttons));
         let focus = items.len() - 1;
-        Self { title: title.into(), style: Style::Warning, layout: Layout::Message, items, focus, button: 0, places: vec![], disabled: vec![], hidden: vec![], hook: None, sub: None, closing: None, action: Action::Conflict }
+        Self { title: title.into(), style: Style::Warning, layout: Layout::Message, items, focus, button: 0, places: vec![], disabled: vec![], hidden: vec![], hook: None, sub: None, closing: None, links: vec![], localized: false, action: Action::Conflict }
     }
 
     /// Far's Message with these buttons (`warning`: MSG_WARNING's red): the
@@ -465,13 +489,13 @@ impl Dialog {
     /// Far::message(... FMSG_MB_OKCANCEL) as arclite asks it: the first line is the title.
     pub fn ok_cancel(title: &str, line: &str, action: Action) -> Self {
         let items = vec![centered(line), Item::Separator(None), Item::Buttons(vec![button("OK", "ok", true), button("Cancel", "cancel", false)])];
-        Self { title: title.into(), style: Style::Normal, layout: Layout::Message, items, focus: 2, button: 0, places: vec![], disabled: vec![], hidden: vec![], hook: None, sub: None, closing: None, action }
+        Self { title: title.into(), style: Style::Normal, layout: Layout::Message, items, focus: 2, button: 0, places: vec![], disabled: vec![], hidden: vec![], hook: None, sub: None, closing: None, links: vec![], localized: false, action }
     }
 
     /// A question with Yes and No (Far's Message with no hot keys).
     pub fn confirm(title: &str, line: &str, action: Action) -> Self {
         let items = vec![centered(line), Item::Separator(None), Item::Buttons(vec![button("Yes", "ok", true), button("No", "cancel", false)])];
-        Self { title: title.into(), style: Style::Normal, layout: Layout::Message, items, focus: 2, button: 0, places: vec![], disabled: vec![], hidden: vec![], hook: None, sub: None, closing: None, action }
+        Self { title: title.into(), style: Style::Normal, layout: Layout::Message, items, focus: 2, button: 0, places: vec![], disabled: vec![], hidden: vec![], hook: None, sub: None, closing: None, links: vec![], localized: false, action }
     }
 
     /// Far::info_dlg / Message with OK: something to read, not red.
@@ -480,7 +504,7 @@ impl Dialog {
         items.push(Item::Separator(None));
         items.push(Item::Buttons(vec![button("OK", "ok", true)]));
         let focus = items.len() - 1;
-        Self { title: title.into(), style: Style::Normal, layout: Layout::Message, items, focus, button: 0, places: vec![], disabled: vec![], hidden: vec![], hook: None, sub: None, closing: None, action: Action::Info }
+        Self { title: title.into(), style: Style::Normal, layout: Layout::Message, items, focus, button: 0, places: vec![], disabled: vec![], hidden: vec![], hook: None, sub: None, closing: None, links: vec![], localized: false, action: Action::Info }
     }
 
     /// Message(MSG_WARNING) with OK.
@@ -496,7 +520,7 @@ impl Dialog {
         items.push(Item::Separator(None));
         items.push(Item::Buttons(vec![button("OK", "ok", true)]));
         let focus = items.len() - 1;
-        Self { title: "Error".into(), style: Style::Warning, layout: Layout::Message, items, focus, button: 0, places: vec![], disabled: vec![], hidden: vec![], hook: None, sub: None, closing: None, action: Action::Info }
+        Self { title: "Error".into(), style: Style::Warning, layout: Layout::Message, items, focus, button: 0, places: vec![], disabled: vec![], hidden: vec![], hook: None, sub: None, closing: None, links: vec![], localized: false, action: Action::Info }
     }
 
     /// A file is in the way of a copy.
@@ -513,7 +537,7 @@ impl Dialog {
             Item::Separator(None),
             Item::Buttons(vec![button("&Overwrite", "overwrite", true), button("&Skip", "skip", false), button("&Cancel", "cancel", false)]),
         ];
-        Self { title: "Warning".into(), style: Style::Warning, layout: Layout::Fixed(76), items, focus: 8, button: 0, places: vec![], disabled: vec![], hidden: vec![], hook: None, sub: None, closing: None, action: Action::Conflict }
+        Self { title: "Warning".into(), style: Style::Warning, layout: Layout::Fixed(76), items, focus: 8, button: 0, places: vec![], disabled: vec![], hidden: vec![], hook: None, sub: None, closing: None, links: vec![], localized: false, action: Action::Conflict }
     }
 
     /// Ctrl+A, laid out as setattr.cpp lays it out: 80 by 21 (DlgX, DlgY),
@@ -590,7 +614,7 @@ impl Dialog {
             hidden: vec![],
             hook: Some(attributes_hook),
             sub: None,
-            closing: None,
+            closing: None, links: vec![], localized: false,
             action: Action::Attributes(Box::new(setup)),
         }
     }
@@ -617,7 +641,7 @@ impl Dialog {
             hidden: vec![],
             hook: Some(more_attributes_hook),
             sub: None,
-            closing: None,
+            closing: None, links: vec![], localized: false,
             action: Action::Info,
         }
     }
@@ -670,7 +694,7 @@ impl Dialog {
             hidden: vec![false; count],
             hook,
             sub: None,
-            closing: None,
+            closing: None, links: vec![], localized: false,
             action,
         }
     }
@@ -692,7 +716,7 @@ impl Dialog {
 
     /// A DialogBuilder dialog (as wide as its content, centered).
     pub(crate) fn builder(title: &str, items: Vec<Item>, focus: usize, hook: Option<fn(&mut Dialog, Event)>, action: Action) -> Self {
-        Self { title: title.into(), style: Style::Normal, layout: Layout::Builder, items, focus, button: 0, places: vec![], disabled: vec![], hidden: vec![], hook, sub: None, closing: None, action }
+        Self { title: title.into(), style: Style::Normal, layout: Layout::Builder, items, focus, button: 0, places: vec![], disabled: vec![], hidden: vec![], hook, sub: None, closing: None, links: vec![], localized: false, action }
     }
 
     /// DM_ENABLE of a button in a row of buttons.
@@ -1065,8 +1089,13 @@ fn shown(label: &str) -> String {
 }
 
 /// Buttons in a row, each `[ label ]`, one space apart (DIF_CENTERGROUP).
+/// A button's width: `[ label ]`, or the label alone (DIF_NOBRACKETS: an id starting with `~`).
+fn button_width(b: &Button) -> u16 {
+    label_len(b.label) + if b.id.starts_with('~') { 0 } else { 4 }
+}
+
 fn buttons_len(buttons: &[Button]) -> u16 {
-    let total: u16 = buttons.iter().map(|b| label_len(b.label) + 5).sum();
+    let total: u16 = buttons.iter().map(|b| button_width(b) + 1).sum();
     total.saturating_sub(1)
 }
 
@@ -1120,7 +1149,7 @@ fn spans_at(item: &Item, frame: &Frame, place: Option<&Place>) -> Vec<Span> {
                 .iter()
                 .enumerate()
                 .map(|(i, b)| {
-                    let width = label_len(b.label) + 4;
+                    let width = button_width(b);
                     let span = (i, at, width);
                     at += width + 1;
                     span
@@ -1226,7 +1255,16 @@ impl Dialog {
     }
 
     /// Draws the dialog centered on `grid`; returns where the text cursor goes.
-    pub fn paint(&self, grid: &mut Grid) -> Option<(u16, u16)> {
+    pub fn paint(&mut self, grid: &mut Grid) -> Option<(u16, u16)> {
+        self.localize();
+        if let Some(sub) = &mut self.sub {
+            sub.localize();
+        }
+        self.draw(grid)
+    }
+
+    /// Draws the dialog (and the one over it) as it is.
+    pub(crate) fn draw(&self, grid: &mut Grid) -> Option<(u16, u16)> {
         let p = self.style.palette();
         let frame = self.frame((grid.cols, grid.rows));
         frame.draw(grid, &self.title, &p);
@@ -1317,7 +1355,8 @@ impl Dialog {
                     if *unchanged && *enabled {
                         grid.put(fx, y, &visible, p.unchanged_fg, p.edit_bg);
                     }
-                    if *history {
+                    // Dialog settings: History in dialog edit controls
+                    if *history && crate::settings::bool("Dialog.EditHistory") {
                         grid.put(fx + w, y, "\u{2193}", if *enabled { p.fg } else { p.dim }, p.bg);
                     }
                     if focused {
@@ -1371,6 +1410,10 @@ impl Dialog {
                         } else {
                             (p.fg, p.bg, p.hot)
                         };
+                        if b.id.starts_with('~') {
+                            put_label(grid, *bx, y, b.label, fg, bg, hot);
+                            continue;
+                        }
                         let (open, close) = if b.default { ('{', '}') } else { ('[', ']') };
                         grid.put(*bx, y, &format!("{open} "), fg, bg);
                         put_label(grid, *bx + 2, y, b.label, fg, bg, hot);
@@ -1380,7 +1423,7 @@ impl Dialog {
             }
         }
         match &self.sub {
-            Some(sub) => sub.paint(grid),
+            Some(sub) => sub.draw(grid),
             None => cursor,
         }
     }
@@ -1479,7 +1522,49 @@ impl Dialog {
             }
             _ => return,
         };
+        self.apply_links();
         self.notify(Event::Toggled(id));
+    }
+
+    /// LinkFlags: each linked item enabled while its check box is on.
+    pub(crate) fn apply_links(&mut self) {
+        for (parent, target) in self.links.clone() {
+            let on = self.check_state(parent) == 1 && !self.is_disabled(parent);
+            self.enable(target, on);
+        }
+    }
+
+    pub(crate) fn link_flags(&mut self, parent: usize, target: usize) {
+        self.links.push((parent, target));
+    }
+
+    /// The texts into the interface language (Far's English ones are looked up).
+    fn localize(&mut self) {
+        if std::mem::replace(&mut self.localized, true) || !crate::lang::russian() {
+            return;
+        }
+        use crate::lang::{tr, trs};
+        self.title = trs(&self.title);
+        for item in &mut self.items {
+            match item {
+                Item::Text { text, .. } | Item::Label(text) => *text = trs(text),
+                Item::Edit { label: Some(label), .. } => *label = tr(label),
+                Item::Radio { label, options, .. } | Item::Combo { label, options, .. } => {
+                    *label = tr(label);
+                    for option in options.iter_mut() {
+                        *option = tr(option);
+                    }
+                }
+                Item::Check { label, .. } | Item::Check3 { label, .. } | Item::Option { label, .. } => *label = tr(label),
+                Item::Separator(Some(text)) => *text = tr(text),
+                Item::Buttons(buttons) => {
+                    for button in buttons.iter_mut() {
+                        button.label = tr(button.label);
+                    }
+                }
+                _ => {}
+            }
+        }
     }
 
     fn move_focus(&mut self, forward: bool) {
@@ -1674,6 +1759,7 @@ impl Dialog {
     }
 
     pub fn key(&mut self, key: KeyEvent) -> Outcome {
+        self.localize();
         if let Some(sub) = &mut self.sub {
             let outcome = sub.key(key);
             return self.after_sub(outcome);
@@ -1804,11 +1890,17 @@ impl Dialog {
 
     /// What a click at (`col`, `row`) does, on a screen of `size`.
     pub fn click(&mut self, col: u16, row: u16, size: (u16, u16)) -> Outcome {
+        self.localize();
         if let Some(sub) = &mut self.sub {
             let outcome = sub.click(col, row, size);
             return self.after_sub(outcome);
         }
         let frame = self.frame(size);
+        // Dialog settings: Mouse click outside a dialog closes it
+        let outside = col < frame.x || col >= frame.x + frame.w || row < frame.y || row >= frame.y + frame.h;
+        if outside {
+            return if crate::settings::bool("Dialog.MouseButton") { Outcome::Closed } else { Outcome::Open };
+        }
         for index in 0..self.items.len() {
             if row != self.item_y(&frame, index) {
                 continue;
@@ -2237,7 +2329,8 @@ mod tests {
         assert_eq!(id, "ok");
         assert_eq!(values.text("dest"), "/tXmp/x");
         assert!(values.checked("multiple"));
-        assert!(matches!(dialog.click(0, 0, size), Outcome::Open), "outside does nothing");
+        // Dialog settings' "Mouse click outside a dialog closes it" is on by default
+        assert!(matches!(dialog.click(0, 0, size), Outcome::Closed), "outside closes it");
     }
 
     #[test]
@@ -2305,7 +2398,7 @@ mod tests {
     /// The screen of an 80 by 25 terminal: the dialog's box is at row 2.
     fn screen(dialog: &Dialog) -> Vec<String> {
         let mut grid = Grid::new(80, 25);
-        dialog.paint(&mut grid);
+        dialog.draw(&mut grid);
         (0..25).map(|row| grid.row(row).iter().map(|cell| cell.text.clone()).collect()).collect()
     }
 

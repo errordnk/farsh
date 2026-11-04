@@ -94,6 +94,14 @@ impl History {
 
     fn save(&self) {
         let Some(file) = &self.file else { return };
+        let key = match self.which {
+            Which::Commands => "System.SaveHistory",
+            Which::Views => "System.SaveViewHistory",
+            Which::Folders => "System.SaveFoldersHistory",
+        };
+        if !cfg!(test) && !crate::settings::bool(key) {
+            return;
+        }
         let lines: Vec<String> = self
             .records
             .iter()

@@ -9,6 +9,31 @@ pub struct Masks {
     exclude: Vec<Vec<char>>,
 }
 
+/// `<arc>` is the group of masks of that name (Options > Groups of file
+/// masks), `%PATHEXT%` the executable extensions as masks (`*.com,*.exe...`).
+fn expand_groups(text: &str, depth: u8) -> String {
+    let mut out = String::new();
+    let mut rest = text;
+    while let Some(start) = rest.find('<') {
+        let Some(end) = rest[start..].find('>') else { break };
+        let name = &rest[start + 1..start + end];
+        out.push_str(&rest[..start]);
+        match crate::optmenu::mask_groups().into_iter().find(|(n, _)| n.eq_ignore_ascii_case(name)) {
+            Some((_, value)) if depth < 4 => out.push_str(&expand_groups(&value, depth + 1)),
+            _ => out.push_str(&rest[start..=start + end]),
+        }
+        rest = &rest[start + end + 1..];
+    }
+    out.push_str(rest);
+    if out.to_uppercase().contains("%PATHEXT%") {
+        let exts = std::env::var("PATHEXT").unwrap_or_default();
+        let masks: Vec<String> = exts.split(';').filter(|e| !e.is_empty()).map(|e| format!("*{}", e.to_lowercase())).collect();
+        let at = out.to_uppercase().find("%PATHEXT%").unwrap_or(0);
+        out.replace_range(at..at + 9, &masks.join(","));
+    }
+    out
+}
+
 /// Splits on `,` and `;` outside quotes and brackets, trims, drops the quotes.
 fn tokens(text: &str) -> Vec<Vec<char>> {
     let mut out = Vec::new();
@@ -50,7 +75,8 @@ fn tokens(text: &str) -> Vec<Vec<char>> {
 impl Masks {
     /// None when there is nothing to match with (Far's "incorrect mask").
     pub fn new(text: &str) -> Option<Self> {
-        let text = text.trim();
+        let expanded = expand_groups(text.trim(), 0);
+        let text = expanded.trim();
         if text.starts_with('/') {
             return None;
         }

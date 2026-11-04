@@ -5,6 +5,11 @@ mod arcdialog;
 mod archive;
 mod assoc;
 mod attributes;
+mod builder;
+mod codepages;
+mod colordata;
+mod colorpick;
+mod colors;
 mod commands;
 mod cwd;
 mod dialog;
@@ -15,14 +20,18 @@ mod fileops;
 mod filter;
 mod findfile;
 mod grid;
+mod highlight;
 mod history;
 mod hotplug;
 mod infopanel;
 mod keys;
+mod lang;
 mod links;
 mod listing;
 mod masks;
 mod menu;
+mod optmenu;
+mod options;
 mod mouse;
 mod palette;
 mod panels;
@@ -31,6 +40,7 @@ mod qview;
 mod shell;
 mod shortcuts;
 mod sorting;
+mod settings;
 mod sortmenu;
 mod subst;
 mod tasklist;
@@ -101,6 +111,8 @@ enum Overlay {
     List(Box<commands::List>),
     /// Alt+F7's results.
     Find(Box<findfile::Results>),
+    /// Options > Colors: the color dialog.
+    ColorPick(Box<colorpick::Picker>),
 }
 
 struct App {
@@ -137,6 +149,11 @@ struct App {
     find_after_drive: bool,
     /// Alt+F9.
     maximized: bool,
+    /// The minute the clock showed last.
+    clock: String,
+    /// A highlighting group whose color dialog is open, and the part a new one goes to.
+    hl_pending: Option<(highlight::Group, usize, bool)>,
+    hl_section: u8,
     /// Viewers sent to the background (F12, the screens list).
     screens: Vec<Viewer>,
 }
@@ -152,9 +169,15 @@ struct Editing {
 
 impl App {
     fn new(cols: u16, rows: u16) -> Result<Self> {
+        lang::load();
+        sorting::load_options();
         Ok(Self {
             shell: Shell::spawn(cols, rows)?,
-            panels: Panels::new(std::env::current_dir()?),
+            panels: {
+                let mut panels = Panels::new(std::env::current_dir()?);
+                panels.restore_state();
+                panels
+            },
             panels_visible: false,
             overlay: Overlay::None,
             quit: false,
@@ -174,6 +197,9 @@ impl App {
             find_options: findfile::Options::default(),
             find_after_drive: false,
             maximized: false,
+            clock: String::new(),
+            hl_pending: None,
+            hl_section: 0,
             screens: Vec::new(),
         })
     }
@@ -214,6 +240,12 @@ impl App {
                 dirty = true;
             }
             self.after_event();
+            // the clock moves on
+            let minute = chrono::Local::now().format("%H:%M").to_string();
+            if self.panels_visible && minute != self.clock {
+                self.clock = minute;
+                dirty = true;
+            }
             if dirty {
                 frame.clear();
                 let cursor = self.paint(&mut frame);
@@ -296,9 +328,13 @@ impl App {
                 results.paint(frame);
                 cursor = None;
             }
+            Overlay::ColorPick(picker) => {
+                picker.paint(frame);
+                cursor = None;
+            }
             Overlay::Job(job, question) => {
                 dialog::paint_progress(job, frame);
-                cursor = question.as_ref().and_then(|dialog| dialog.paint(frame));
+                cursor = question.as_mut().and_then(|dialog| dialog.paint(frame));
             }
         }
         cursor
@@ -349,6 +385,10 @@ impl App {
                 }
             }
             Overlay::List(list) => self.list_key(*list, key),
+            Overlay::ColorPick(mut picker) => {
+                let outcome = picker.key(key);
+                self.color_pick_outcome(picker, outcome);
+            }
             Overlay::Find(mut results) => {
                 let outcome = results.key(key);
                 self.find_outcome(results, outcome);
@@ -409,6 +449,10 @@ impl App {
                 self.overlay = Overlay::Viewer(viewer);
             }
             Overlay::List(list) => self.list_click(*list, event),
+            Overlay::ColorPick(mut picker) => {
+                let outcome = picker.click(event);
+                self.color_pick_outcome(picker, outcome);
+            }
             Overlay::Find(mut results) => {
                 let outcome = results.click(event);
                 self.find_outcome(results, outcome);
@@ -527,6 +571,10 @@ impl App {
 
     fn request(&mut self, request: Request) {
         match request {
+            // Viewer settings: an external viewer for F3 (Alt+F3 is the other one)
+            Request::View(path) if settings::bool("Viewer.UseExternalViewer") && !settings::string("Viewer.ExternalViewerName").trim().is_empty() => {
+                self.external_view(&path);
+            }
             Request::View(path) => {
                 self.views.add(&path.display().to_string(), history::Kind::View);
                 self.overlay = match Viewer::open(&path) {
@@ -548,6 +596,15 @@ impl App {
                 self.shell.run(&line);
                 self.panels_visible = false;
             }
+            // Confirmations > Copy / Move off: straight to the other panel
+            Request::Copy(sources, other) if !settings::bool("Confirmations.Copy") => {
+                let dest = default_dest(&sources, &other);
+                self.start_job(Kind::Copy, &sources, &dialog::Values::with_text("dest", &dest));
+            }
+            Request::Move(sources, other) if !settings::bool("Confirmations.Move") => {
+                let dest = default_dest(&sources, &other);
+                self.start_job(Kind::Move, &sources, &dialog::Values::with_text("dest", &dest));
+            }
             Request::Copy(sources, other) => {
                 let label = copy_label("Copy", &sources);
                 let dialog = Dialog::copy_or_move(Kind::Copy, label, &default_dest(&sources, &other), Action::Copy(sources));
@@ -559,6 +616,8 @@ impl App {
                 self.overlay = Overlay::Dialog(dialog);
             }
             Request::MkDir => self.overlay = Overlay::Dialog(Dialog::mkdir()),
+            // Confirmations > Delete off
+            Request::Delete(sources) if !settings::bool("Confirmations.Delete") => self.accept(Action::Delete(sources), "ok", &dialog::Values::default()),
             Request::Delete(sources) => {
                 let (question, names) = delete_question(&sources, "delete");
                 let single = sources.len() == 1;
@@ -569,6 +628,8 @@ impl App {
                 let single = sources.len() == 1;
                 self.overlay = Overlay::Dialog(Dialog::delete(question, names, single, Action::Wipe(sources)));
             }
+            // Options > Confirmations > Exit
+            Request::Quit if !settings::bool("Confirmations.Exit") => self.quit(),
             Request::Quit => {
                 self.overlay = Overlay::Dialog(Dialog::confirm("Quit", "Do you want to quit farsh?", Action::Quit));
             }
@@ -680,6 +741,7 @@ impl App {
                 }
             }
             menu::Command::Do(cmd) => self.run_command(cmd),
+            menu::Command::Set(opt) => self.run_option(opt),
             menu::Command::ChangeDrive { right } => self.request(Request::ChangeDrive { right }),
             menu::Command::View { right, mode } => self.panels.set_view(right, mode),
             menu::Command::SortModes { right } => {
@@ -785,11 +847,12 @@ impl App {
             Action::Move(sources) => self.start_job(Kind::Move, &sources, values),
             Action::Delete(sources) => {
                 let items = sources.into_iter().map(|path| (path.clone(), path)).collect();
-                self.overlay = Overlay::Job(fileops::start(Kind::Delete, items, Options::default()), None);
+                let options = Options { recycle: cfg!(windows) && settings::bool("System.DeleteToRecycleBin"), ..delete_options() };
+                self.overlay = Overlay::Job(fileops::start(Kind::Delete, items, options), None);
             }
             Action::Wipe(sources) => {
                 let items = sources.into_iter().map(|path| (path.clone(), path)).collect();
-                self.overlay = Overlay::Job(fileops::start(Kind::Wipe, items, Options::default()), None);
+                self.overlay = Overlay::Job(fileops::start(Kind::Wipe, items, delete_options()), None);
             }
             Action::MkDir => {
                 let typed = values.text("name");
@@ -877,10 +940,51 @@ impl App {
                 self.panels.refresh_descriptions();
                 self.describe_next(dir, names);
             }
-            Action::Quit => self.quit = true,
+            Action::Quit => self.quit(),
             Action::Conflict | Action::Info => {}
             other => self.accept_command(other, id, values),
         }
+    }
+
+    /// The external viewer's command for the file, run in the shell (the
+    /// panels come back after it, as after F4).
+    fn external_view(&mut self, path: &Path) {
+        let command = settings::string("Viewer.ExternalViewerName");
+        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let line = if command.contains('!') {
+            self.substitute(&command, &name, std::slice::from_ref(&name))
+        } else {
+            format!("{} {}", command.trim(), editor::quote(self.shell.kind(), &path.display().to_string()))
+        };
+        self.views.add(&path.display().to_string(), history::Kind::View);
+        self.shell.clear_line();
+        if self.panels_visible && self.shell.kind() != cwd::Kind::Other {
+            self.editing = Some(Editing { until: self.shell.prompts() + 1, name: Some(name) });
+        }
+        self.shell.run(&line);
+        self.panels_visible = false;
+    }
+
+    /// Alt+F3: the viewer F3 does not use.
+    pub(crate) fn alt_view(&mut self, path: &Path) {
+        let external = !settings::string("Viewer.ExternalViewerName").trim().is_empty();
+        if settings::bool("Viewer.UseExternalViewer") || !external {
+            self.views.add(&path.display().to_string(), history::Kind::View);
+            self.overlay = match Viewer::open(path) {
+                Ok(viewer) => Overlay::Viewer(viewer),
+                Err(error) => Overlay::Dialog(Dialog::error(&format!("{}: {error}", path.display()))),
+            };
+        } else {
+            self.external_view(path);
+        }
+    }
+
+    /// F10: with "Auto save setup" the panels' state is kept first.
+    fn quit(&mut self) {
+        if settings::bool("System.AutoSaveSetup") {
+            self.save_setup();
+        }
+        self.quit = true;
     }
 
     /// After every turn of the loop: a folder the active panel came to goes
@@ -960,6 +1064,7 @@ impl App {
                 2 => Access::Inherit,
                 _ => Access::Default,
             },
+            ..delete_options()
         };
         let base = self.panels.active_dir().to_path_buf();
         match fileops::targets(sources, &values.text("dest"), &base, values.checked("multiple")) {
@@ -993,6 +1098,11 @@ fn answer(job: &mut Job, dialog: Dialog, outcome: dialog::Outcome) -> Option<Dia
             None
         }
     }
+}
+
+/// Delete and Wipe as Options > Confirmations has them.
+fn delete_options() -> Options {
+    Options { confirm_folders: settings::bool("Confirmations.DeleteFolder"), confirm_read_only: settings::bool("Confirmations.RO"), ..Options::default() }
 }
 
 /// With `FARSH_KEYLOG=<file>` set, every key event is appended to that file

@@ -9,18 +9,32 @@ use crossterm::style::Color;
 
 use crate::grid::{Cell, Grid};
 use crate::listing::{self, Entry};
-use crate::palette;
 use crate::sorting::{self, SortMode, Sorting};
 
 // Far's default colors, as Far's console attributes reach the terminal.
 /// Blue: the panels' background.
-const BG: Color = palette::bg(palette::BLUE);
+#[allow(non_snake_case)]
+fn BG() -> Color {
+    crate::colors::bg("Panel.Text")
+}
 /// Light cyan: panel text, frames, totals.
-const TEXT: Color = palette::fg(palette::LIGHT_CYAN);
+#[allow(non_snake_case)]
+fn TEXT() -> Color {
+    crate::colors::fg("Panel.Text")
+}
 /// Yellow: column titles, the sort letter, marked names.
-const TITLE: Color = palette::fg(palette::YELLOW);
-const CURSOR_BG: Color = palette::bg(palette::CYAN);
-const BLACK: Color = palette::fg(palette::BLACK);
+#[allow(non_snake_case)]
+fn TITLE() -> Color {
+    crate::colors::fg("Panel.Title.Column")
+}
+#[allow(non_snake_case)]
+fn CURSOR_BG() -> Color {
+    crate::colors::bg("Panel.Cursor")
+}
+#[allow(non_snake_case)]
+fn BLACK() -> Color {
+    crate::colors::fg("Panel.Cursor")
+}
 
 const KEY_BAR: [&str; 12] =
     ["Help", "UserMn", "View", "Edit", "Copy", "RenMov", "MkFold", "Delete", "ConfMn", "Quit", "Plugin", "Screen"];
@@ -65,6 +79,8 @@ enum Col {
     Description,
     Owner,
     Links,
+    /// DE: the change time.
+    Changed,
 }
 
 impl Col {
@@ -83,6 +99,7 @@ impl Col {
             Col::Description => "Description",
             Col::Owner => "Owner",
             Col::Links => "NmL",
+            Col::Changed => "Change",
         }
     }
 
@@ -93,7 +110,7 @@ impl Col {
             Col::Size | Col::Allocated | Col::Attributes => 6,
             Col::Date => 8,
             Col::Time => 5,
-            Col::Write | Col::Created | Col::Accessed => 14,
+            Col::Write | Col::Created | Col::Accessed | Col::Changed => 14,
             Col::Links => 3,
         }
     }
@@ -110,68 +127,170 @@ enum W {
 
 use W::{Cells, Default as Auto, Percent};
 
-const STATUS_FULL: &[(Col, W)] = &[(Col::Name, Auto), (Col::Size, Cells(6)), (Col::Date, Auto), (Col::Time, Cells(5))];
-const STATUS_NAME: &[(Col, W)] = &[(Col::Name, Auto)];
+/// A mode as Far keeps it (PanelViewSettings): the column types and
+/// widths of the list and of the status line as Far writes them
+/// (`N,S,D,T` / `0,6,0,5`, `40%`), the PVS_* flags, a name.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ModeText {
+    pub name: String,
+    pub columns: String,
+    pub widths: String,
+    pub status: String,
+    pub status_widths: String,
+    pub flags: u32,
+}
+
+/// PVS_FULLSCREEN, PVS_ALIGNEXTENSIONS, PVS_FOLDERALIGNEXTENSIONS,
+/// PVS_FOLDERUPPERCASE, PVS_FILELOWERCASE, PVS_FILEUPPERTOLOWERCASE.
+pub const PVS_FULLSCREEN: u32 = 1;
+pub const PVS_ALIGNEXTENSIONS: u32 = 2;
+pub const PVS_FOLDERALIGNEXTENSIONS: u32 = 4;
+pub const PVS_FOLDERUPPERCASE: u32 = 8;
+pub const PVS_FILELOWERCASE: u32 = 16;
+pub const PVS_FILEUPPERTOLOWERCASE: u32 = 32;
+
+/// A column with its flags: COLFLAGS_MARK (`NM`), COLFLAGS_GROUPDIGITS (`SC`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Column {
+    col: Col,
+    width: W,
+    mark: bool,
+    group: bool,
+}
+
+/// Far's column types (panelmix.cpp's ColumnInfo) and their flags.
+fn parse_columns(types: &str, widths: &str) -> Vec<Column> {
+    let widths: Vec<&str> = widths.split(',').map(str::trim).collect();
+    types
+        .split(',')
+        .map(str::trim)
+        .enumerate()
+        .filter_map(|(i, t)| {
+            let t = t.to_uppercase();
+            let (col, flags) = match t.get(..2) {
+                Some("DM") => (Col::Write, &t[2..]),
+                Some("DC") => (Col::Created, &t[2..]),
+                Some("DA") => (Col::Accessed, &t[2..]),
+                Some("DE") => (Col::Changed, &t[2..]),
+                Some("LN") => (Col::Links, &t[2..]),
+                _ => {
+                    let col = match t.chars().next()? {
+                        'N' => Col::Name,
+                        'S' => Col::Size,
+                        'P' => Col::Allocated,
+                        'D' => Col::Date,
+                        'T' => Col::Time,
+                        'A' => Col::Attributes,
+                        'Z' => Col::Description,
+                        'O' => Col::Owner,
+                        _ => return None,
+                    };
+                    (col, &t[1..])
+                }
+            };
+            let w = widths.get(i).copied().unwrap_or("0");
+            let width = match w.strip_suffix('%') {
+                Some(p) => Percent(p.parse().unwrap_or(0)),
+                None => match w.parse::<usize>() {
+                    Ok(0) | Err(_) => Auto,
+                    Ok(n) => Cells(n),
+                },
+            };
+            Some(Column { col, width, mark: col == Col::Name && flags.contains('M'), group: col == Col::Size && flags.contains('C') })
+        })
+        .collect()
+}
 
 impl ViewMode {
-    /// The columns and their widths, as Far's defaults.
-    fn columns(self) -> &'static [(Col, W)] {
-        match self {
-            ViewMode::Brief => &[(Col::Name, Auto), (Col::Name, Auto), (Col::Name, Auto)],
-            ViewMode::Medium => &[(Col::Name, Auto), (Col::Name, Auto)],
-            ViewMode::Full => &[(Col::Name, Auto), (Col::Size, Cells(6)), (Col::Date, Auto), (Col::Time, Cells(5))],
-            ViewMode::Wide => &[(Col::Name, Auto), (Col::Size, Cells(6))],
-            ViewMode::Detailed => &[
-                (Col::Name, Auto),
-                (Col::Size, Cells(6)),
-                (Col::Allocated, Cells(6)),
-                (Col::Write, Cells(14)),
-                (Col::Created, Cells(14)),
-                (Col::Accessed, Cells(14)),
-                (Col::Attributes, Auto),
-            ],
-            ViewMode::Descriptions => &[(Col::Name, Percent(40)), (Col::Description, Auto)],
-            ViewMode::LongDescriptions => &[(Col::Name, Auto), (Col::Size, Cells(6)), (Col::Description, Percent(70))],
-            ViewMode::Owners => &[(Col::Name, Auto), (Col::Size, Cells(6)), (Col::Owner, Cells(15))],
-            ViewMode::Links => &[(Col::Name, Auto), (Col::Size, Cells(6)), (Col::Links, Cells(3))],
-            ViewMode::AlternativeFull => &[(Col::Name, Auto), (Col::Size, Cells(10)), (Col::Date, Auto)],
+    /// Far's number of the mode (Ctrl+N; 0 is Alternative full).
+    fn number(self) -> usize {
+        Panels::VIEWS.iter().position(|&m| m == self).unwrap_or(2)
+    }
+
+    /// Far's defaults (config.cpp's ResetViewModes).
+    pub fn default_text(self) -> ModeText {
+        let (columns, widths, status, status_widths, flags) = match self {
+            ViewMode::AlternativeFull => ("NM,SC,D", "0,10,0", "N", "0", PVS_ALIGNEXTENSIONS),
+            ViewMode::Brief => ("N,N,N", "0,0,0", "N,S,D,T", "0,6,0,5", PVS_ALIGNEXTENSIONS),
+            ViewMode::Medium => ("N,N", "0,0", "N,S,D,T", "0,6,0,5", 0),
+            ViewMode::Full => ("N,S,D,T", "0,6,0,5", "N", "0", PVS_ALIGNEXTENSIONS),
+            ViewMode::Wide => ("N,S", "0,6", "N,S,D,T", "0,6,0,5", 0),
+            ViewMode::Detailed => ("N,S,P,DM,DC,DA,A", "0,6,6,14,14,14,0", "N", "0", PVS_ALIGNEXTENSIONS | PVS_FULLSCREEN),
+            ViewMode::Descriptions => ("N,Z", "40%,0", "N,S,D,T", "0,6,0,5", PVS_ALIGNEXTENSIONS),
+            ViewMode::LongDescriptions => ("N,S,Z", "0,6,70%", "N", "0", PVS_ALIGNEXTENSIONS | PVS_FULLSCREEN),
+            ViewMode::Owners => ("N,S,O", "0,6,15", "N,S,D,T", "0,6,0,15", PVS_ALIGNEXTENSIONS),
+            ViewMode::Links => ("N,S,LN", "0,6,3", "N,S,D,T", "0,6,0,5", PVS_ALIGNEXTENSIONS),
+        };
+        ModeText { name: String::new(), columns: columns.into(), widths: widths.into(), status: status.into(), status_widths: status_widths.into(), flags }
+    }
+
+    fn key(self) -> String {
+        format!("Panel.ViewModes.Mode{}", self.number())
+    }
+
+    /// The mode as Options > File panel modes left it (else Far's default).
+    pub fn text(self) -> ModeText {
+        let default = self.default_text();
+        let Some(serde_json::Value::Object(map)) = crate::settings::value(&self.key()) else { return default };
+        let get = |k: &str, d: &str| map.get(k).and_then(|v| v.as_str()).unwrap_or(d).to_string();
+        ModeText {
+            name: get("Name", ""),
+            columns: get("Columns", &default.columns),
+            widths: get("ColumnWidths", &default.widths),
+            status: get("StatusColumns", &default.status),
+            status_widths: get("StatusColumnWidths", &default.status_widths),
+            flags: map.get("Flags").and_then(|v| v.as_u64()).map_or(default.flags, |f| f as u32),
         }
+    }
+
+    pub fn set_text(self, text: Option<&ModeText>) {
+        let value = match text {
+            None => serde_json::Value::Null,
+            Some(t) => serde_json::json!({
+                "Name": t.name,
+                "Columns": t.columns,
+                "ColumnWidths": t.widths,
+                "StatusColumns": t.status,
+                "StatusColumnWidths": t.status_widths,
+                "Flags": t.flags,
+            }),
+        };
+        crate::settings::set(&self.key(), value);
+    }
+
+    fn list(self) -> Vec<Column> {
+        let t = self.text();
+        parse_columns(&t.columns, &t.widths)
+    }
+
+    /// The columns and their widths.
+    fn columns(self) -> Vec<(Col, W)> {
+        self.list().into_iter().map(|c| (c.col, c.width)).collect()
     }
 
     /// The status line under the list.
-    fn status(self) -> &'static [(Col, W)] {
-        match self {
-            ViewMode::Full | ViewMode::Detailed | ViewMode::LongDescriptions | ViewMode::AlternativeFull => STATUS_NAME,
-            // File owners' status has a 15-cell time (Far's own default)
-            ViewMode::Owners => &[(Col::Name, Auto), (Col::Size, Cells(6)), (Col::Date, Auto), (Col::Time, Cells(15))],
-            _ => STATUS_FULL,
-        }
-    }
-
-    /// PVS_ALIGNEXTENSIONS: all but Medium and Wide.
-    fn align_extensions(self) -> bool {
-        !matches!(self, ViewMode::Medium | ViewMode::Wide)
+    fn status(self) -> Vec<(Col, W)> {
+        let t = self.text();
+        parse_columns(&t.status, &t.status_widths).into_iter().map(|c| (c.col, c.width)).collect()
     }
 
     /// PVS_FULLSCREEN: the panel takes the whole screen.
     pub fn full_screen(self) -> bool {
-        matches!(self, ViewMode::Detailed | ViewMode::LongDescriptions)
-    }
-
-    /// COLFLAGS_MARK on the name and COLFLAGS_GROUPDIGITS on the size.
-    fn marks_and_groups(self) -> bool {
-        self == ViewMode::AlternativeFull
+        self.text().flags & PVS_FULLSCREEN != 0
     }
 
     /// What the mode shows that the listing does not read by itself.
-    fn needs(self) -> &'static [crate::sorting::SortMode] {
+    fn needs(self) -> Vec<crate::sorting::SortMode> {
         use crate::sorting::SortMode;
-        match self {
-            ViewMode::Descriptions | ViewMode::LongDescriptions => &[SortMode::Descriptions],
-            ViewMode::Owners => &[SortMode::Owner],
-            ViewMode::Links => &[SortMode::Links],
-            _ => &[],
+        let mut cols: Vec<Col> = self.columns().into_iter().map(|c| c.0).collect();
+        cols.extend(self.status().into_iter().map(|c| c.0));
+        let mut needs = Vec::new();
+        for (col, mode) in [(Col::Description, SortMode::Descriptions), (Col::Owner, SortMode::Owner), (Col::Links, SortMode::Links)] {
+            if cols.contains(&col) {
+                needs.push(mode);
+            }
         }
+        needs
     }
 }
 
@@ -328,6 +447,12 @@ pub struct Panel {
     /// Which filter marks apply (Far's panel_left / panel_right): the
     /// panel keeps them when the panels swap places.
     pub filter_area: usize,
+    /// The first row of the list: 2 under the column titles, 1 without them.
+    list_top: u16,
+    /// Free space of the folder's volume, read with the folder.
+    free: Option<u64>,
+    /// The mode's flags, marks and digit groups, read once a paint.
+    mode_flags: (u32, bool, bool),
 }
 
 impl Panel {
@@ -350,6 +475,9 @@ impl Panel {
             area: (0, 0, 0, 0),
             stripe_cols: Vec::new(),
             filter_area: 0,
+            list_top: 2,
+            free: None,
+            mode_flags: (PVS_ALIGNEXTENSIONS, false, false),
         };
         panel.reload(None);
         panel
@@ -384,6 +512,13 @@ impl Panel {
             return;
         }
         let mut entries = listing::read(&self.dir);
+        // Panel settings: Show hidden and system files
+        if !crate::settings::bool("Panel.ShowHidden") {
+            entries.retain(|entry| !entry.hidden);
+        }
+        if crate::settings::bool("Panel.Layout.FreeInfo") {
+            self.free = crate::drives::free_space(&self.dir);
+        }
         // Ctrl+I: what the panel's filter marks hide
         let area = self.filter_area;
         crate::filter::with(|filters| {
@@ -392,13 +527,14 @@ impl Panel {
                 entries.retain(|entry| filters.shows(entry, area, now));
             }
         });
-        if self.dir.parent().is_some() {
+        // Panel settings: Show ".." in root folders
+        if self.dir.parent().is_some() || crate::settings::bool("Interface.ShowDotsInRoot") {
             let modified = std::fs::metadata(&self.dir).and_then(|m| m.modified()).ok();
             entries.insert(0, Entry::up(modified));
         }
         let needs = self.mode.needs();
         if !needs.is_empty() {
-            crate::sorting::fill(&mut entries, needs, &self.dir);
+            crate::sorting::fill(&mut entries, &needs, &self.dir);
         }
         self.marked.clear();
         sorting::sort(&mut entries, &self.sorting, &self.marked, &self.dir);
@@ -412,7 +548,7 @@ impl Panel {
     fn fill_for_view(&mut self) {
         let needs = self.mode.needs();
         if self.archive.is_none() && !needs.is_empty() {
-            crate::sorting::fill(&mut self.entries, needs, &self.dir);
+            crate::sorting::fill(&mut self.entries, &needs, &self.dir);
         }
     }
 
@@ -542,9 +678,10 @@ impl Panel {
             if !masks.check(shown) {
                 continue;
             }
+            // Panel settings: Select folders
             if !add {
                 self.marked.remove(&entry.name);
-            } else if !entry.is_dir {
+            } else if !entry.is_dir || crate::settings::bool("Panel.SelectFolders") {
                 self.marked.insert(entry.name.clone());
             }
         }
@@ -568,7 +705,7 @@ impl Panel {
 
     /// The entry drawn at (`col`, `row`), if one is.
     fn entry_at(&self, col: u16, row: u16) -> Option<usize> {
-        let line = (row as usize).checked_sub(2).filter(|&line| line < self.height)?;
+        let line = (row as usize).checked_sub(self.list_top as usize).filter(|&line| line < self.height)?;
         let stripe = self.stripe_cols.iter().position(|&(first, last)| col >= first && col <= last)?;
         let index = self.top + stripe * self.height + line;
         (index < self.entries.len()).then_some(index)
@@ -652,20 +789,57 @@ impl Panel {
 
     /// Far's `GetShowColor`: the colors of the entry at `pos` (panel text past the end).
     fn colors(&self, pos: usize, active: bool) -> (Color, Color) {
-        let Some(entry) = self.entries.get(pos) else { return (TEXT, BG) };
+        let Some(entry) = self.entries.get(pos) else { return (TEXT(), BG()) };
         let cursor = active && pos == self.cursor;
         let marked = self.marked.contains(&entry.name);
-        let (normal, under_cursor) = listing::highlight(entry);
-        match (cursor, marked) {
-            (true, true) => (TITLE, CURSOR_BG),
-            (true, false) => (under_cursor, CURSOR_BG),
-            (false, true) => (TITLE, BG),
-            (false, false) => (normal, BG),
+        // Far's GetShowColor: the panel's color of the state, the group's (Options > Files highlighting) over it
+        let state = match (cursor, marked) {
+            (false, false) => 0,
+            (false, true) => 1,
+            (true, false) => 2,
+            (true, true) => 3,
+        };
+        let base = ["Panel.Text", "Panel.Text.Selected", "Panel.Cursor", "Panel.Cursor.Selected"][state];
+        let (mut fg, mut bg) = (crate::colors::fg(base), crate::colors::bg(base));
+        if crate::settings::bool("Panel.Highlight")
+            && let Some((f, b)) = crate::highlight::colors(entry).0[state]
+        {
+            // black on black is "the panel's own"; a black background is transparent
+            if (f, b) != (0, 0) {
+                fg = crate::palette::fg(f);
+                if b != 0 {
+                    bg = crate::palette::bg(b);
+                }
+            }
         }
+        (fg, bg)
     }
 
     fn cell(&self, entry: &Entry, col: Col, width: usize, status: bool) -> (String, bool) {
-        let marks = self.mode.marks_and_groups() && !status;
+        let (flags, marks, groups) = self.mode_flags;
+        let (marks, groups) = (marks && !status, groups && !status);
+        // PVS_FOLDERUPPERCASE, PVS_FILELOWERCASE, PVS_FILEUPPERTOLOWERCASE
+        let cased;
+        let entry = {
+            let name = &entry.name;
+            let new = if entry.is_dir && flags & PVS_FOLDERUPPERCASE != 0 {
+                Some(name.to_uppercase())
+            } else if !entry.is_dir && flags & PVS_FILELOWERCASE != 0 {
+                Some(name.to_lowercase())
+            } else if !entry.is_dir && flags & PVS_FILEUPPERTOLOWERCASE != 0 && *name == name.to_uppercase() {
+                Some(name.to_lowercase())
+            } else {
+                None
+            };
+            match new {
+                Some(name) if !entry.is_up() => {
+                    cased = Entry { name, ..entry.clone() };
+                    &cased
+                }
+                _ => entry,
+            }
+        };
+        let align = |e: &Entry| flags & PVS_ALIGNEXTENSIONS != 0 && (!e.is_dir || flags & PVS_FOLDERALIGNEXTENSIONS != 0);
         // Ctrl+N: AlternateOrNormal, the short name where there is one
         let shown;
         let entry = if self.short_names && !entry.short_name.is_empty() {
@@ -679,11 +853,11 @@ impl Panel {
             // COLFLAGS_MARK: `√ ` before a marked name, two spaces before the rest
             Col::Name if marks && width > 2 => {
                 let mark = if self.marked.contains(&entry.name) { "\u{221A} " } else { "  " };
-                let (name, cut) = listing::list_name(&entry.name, width - 2, self.mode.align_extensions() && !entry.is_dir);
+                let (name, cut) = listing::list_name(&entry.name, width - 2, align(entry));
                 (format!("{mark}{name}"), cut)
             }
-            Col::Name => listing::list_name(&entry.name, width, self.mode.align_extensions() && !entry.is_dir),
-            Col::Size if marks => (listing::size_column_grouped(entry, width), false),
+            Col::Name => listing::list_name(&entry.name, width, align(entry)),
+            Col::Size if groups => (listing::size_column_grouped(entry, width), false),
             Col::Size => (listing::size_column(entry, width), false),
             Col::Allocated => (listing::size_column(&Entry { size: entry.allocated, ..entry.clone() }, width), false),
             Col::Date => (listing::right(&listing::date_time(entry.modified).0, width), false),
@@ -691,6 +865,7 @@ impl Panel {
             Col::Write => (listing::right(&listing::date_and_time(entry.modified, width), width), false),
             Col::Created => (listing::right(&listing::date_and_time(entry.created, width), width), false),
             Col::Accessed => (listing::right(&listing::date_and_time(entry.accessed, width), width), false),
+            Col::Changed => (listing::right(&listing::date_and_time(entry.changed, width), width), false),
             Col::Attributes => (listing::attribute_letters(entry.attributes, width), false),
             Col::Description => {
                 let text = entry.description.as_deref().unwrap_or("");
@@ -713,27 +888,36 @@ impl Panel {
             return;
         }
         let (left, right, bottom) = (col, col + width - 1, height - 1);
-        grid.fill(col, 0, width, height, BG);
+        grid.fill(col, 0, width, height, BG());
         let inner = (width - 2) as usize;
         let horizontal = "\u{2550}".repeat(inner);
-        grid.put(left, 0, &format!("\u{2554}{horizontal}\u{2557}"), TEXT, BG);
-        grid.put(left, bottom, &format!("\u{255A}{horizontal}\u{255D}"), TEXT, BG);
+        grid.put(left, 0, &format!("\u{2554}{horizontal}\u{2557}"), TEXT(), BG());
+        grid.put(left, bottom, &format!("\u{255A}{horizontal}\u{255D}"), TEXT(), BG());
         for row in 1..bottom {
-            grid.put(left, row, "\u{2551}", TEXT, BG);
-            grid.put(right, row, "\u{2551}", TEXT, BG);
+            grid.put(left, row, "\u{2551}", TEXT(), BG());
+            grid.put(right, row, "\u{2551}", TEXT(), BG());
         }
 
-        let cols = layout(self.mode.columns(), inner);
+        let text = self.mode.text();
+        let list = parse_columns(&text.columns, &text.widths);
+        self.mode_flags = (text.flags, list.iter().any(|c| c.mark), list.iter().any(|c| c.group));
+        let cols = layout(&list.iter().map(|c| (c.col, c.width)).collect::<Vec<_>>(), inner);
         let in_stripe = stripe_len(&cols);
         self.stripes = (cols.len() / in_stripe).max(1);
-        self.height = height.saturating_sub(5) as usize;
+        // Panel settings: Show column titles, Show status line
+        let titles = crate::settings::bool("Panel.Layout.ColumnTitles");
+        let status = crate::settings::bool("Panel.Layout.StatusLine");
+        self.list_top = if titles { 2 } else { 1 };
+        self.height = height.saturating_sub(2 + u16::from(titles) + if status { 2 } else { 0 }) as usize;
 
         // column titles, with the joints of the dividers in the top border
         self.stripe_cols.clear();
         let mut x = left + 1;
         let mut stripe_start = x;
         for (i, &(kind, w)) in cols.iter().enumerate() {
-            grid.put(x, 1, &listing::center(kind.title(), w), TITLE, BG);
+            if titles {
+                grid.put(x, 1, &listing::center(crate::lang::tr(kind.title()), w), TITLE(), BG());
+            }
             x += w as u16;
             if (i + 1) % in_stripe == 0 {
                 self.stripe_cols.push((stripe_start, x));
@@ -743,15 +927,20 @@ impl Panel {
                 break;
             }
             let double = (i + 1) % in_stripe == 0;
-            grid.put(x, 0, if double { "\u{2566}" } else { "\u{2564}" }, TEXT, BG);
-            grid.put(x, 1, if double { "\u{2551}" } else { "\u{2502}" }, TEXT, BG);
+            grid.put(x, 0, if double { "\u{2566}" } else { "\u{2564}" }, TEXT(), BG());
+            if titles {
+                grid.put(x, 1, if double { "\u{2551}" } else { "\u{2502}" }, TEXT(), BG());
+            }
             x += 1;
         }
-        let mut indicator = self.sorting.mode.indicator(self.sorting.reverse).to_string();
-        if self.sorting.selected_first {
-            indicator.push('^');
+        // Panel settings: Show sort mode letter
+        if crate::settings::bool("Panel.Layout.SortMode") {
+            let mut indicator = self.sorting.mode.indicator(self.sorting.reverse).to_string();
+            if self.sorting.selected_first {
+                indicator.push('^');
+            }
+            grid.put(left + 1, if titles { 1 } else { 0 }, &indicator, TITLE(), BG());
         }
-        grid.put(left + 1, 1, &indicator, TITLE, BG);
 
         // the folder in the top border
         let max = inner;
@@ -765,19 +954,29 @@ impl Panel {
         let title = format!(" {title} ");
         let title: String = title.chars().take(max).collect();
         let title_x = left + 1 + (width - 1).saturating_sub(listing::chars(&title) as u16) / 2;
-        let (fg, bg) = if active { (BLACK, CURSOR_BG) } else { (TEXT, BG) };
+        let (fg, bg) = if active { (BLACK(), CURSOR_BG()) } else { (TEXT(), BG()) };
         grid.put(title_x, 0, &title, fg, bg);
 
         self.correct_position();
         self.paint_list(grid, &cols, in_stripe, active);
-        self.paint_status(grid, left, right, bottom);
-        self.paint_totals(grid, left, width, bottom, &cols, in_stripe);
+        if status {
+            self.paint_status(grid, left, right, bottom);
+        }
+        self.paint_totals(grid, left, width, bottom, &cols, in_stripe, status);
+        // Panel settings: Show scrollbar (Far's on the right border when the files do not fit)
+        let shown = self.height * self.stripes;
+        if crate::settings::bool("Panel.Layout.Scrollbar") && self.entries.len() > shown && self.height >= 2 {
+            let bar = crate::vmenu::scroll_bar(self.height, self.top, self.top + shown, self.entries.len());
+            for (i, c) in bar.chars().enumerate() {
+                grid.put(right, self.list_top + i as u16, &c.to_string(), TEXT(), BG());
+            }
+        }
     }
 
     fn paint_list(&self, grid: &mut Grid, cols: &[(Col, usize)], in_stripe: usize, active: bool) {
         let right = self.area.0 + self.area.2 - 1;
         for line in 0..self.height {
-            let y = 2 + line as u16;
+            let y = self.list_top + line as u16;
             let mut x = self.area.0 + 1;
             let mut stripe = 0;
             let mut level = 1;
@@ -790,13 +989,13 @@ impl Panel {
                 };
                 grid.put(x, y, &text, fg, bg);
                 // Far's `HighlightBorder`: inside a stripe the divider takes the entry's background
-                let border = if level == in_stripe { (TEXT, BG) } else { (TEXT, bg) };
+                let border = if level == in_stripe { (TEXT(), BG()) } else { (TEXT(), bg) };
                 let last = k == cols.len() - 1;
                 if too_long {
                     grid.put(x + w as u16, y, "}", border.0, border.1);
                 } else if last {
                     let edge = if x + w as u16 == right { "\u{2551}" } else { " " };
-                    grid.put(x + w as u16, y, edge, TEXT, BG);
+                    grid.put(x + w as u16, y, edge, TEXT(), BG());
                 } else {
                     let divider = if level == in_stripe { "\u{2551}" } else { "\u{2502}" };
                     grid.put(x + w as u16, y, divider, border.0, border.1);
@@ -809,7 +1008,7 @@ impl Panel {
                 level += 1;
             }
             if x < right {
-                grid.put(x, y, &" ".repeat((right - x) as usize), TEXT, BG);
+                grid.put(x, y, &" ".repeat((right - x) as usize), TEXT(), BG());
             }
         }
     }
@@ -818,30 +1017,33 @@ impl Panel {
     fn paint_status(&self, grid: &mut Grid, left: u16, right: u16, bottom: u16) {
         let inner = (right - left - 1) as usize;
         let y = bottom - 1;
-        grid.put(left, y - 1, &format!("\u{255F}{}\u{2562}", "\u{2500}".repeat(inner)), TEXT, BG);
+        grid.put(left, y - 1, &format!("\u{255F}{}\u{2562}", "\u{2500}".repeat(inner)), TEXT(), BG());
         let Some(entry) = self.current() else { return };
-        let cols = layout(self.mode.status(), inner);
+        let cols = layout(&self.mode.status(), inner);
         let mut x = left + 1;
         for (k, &(kind, w)) in cols.iter().enumerate() {
             let (text, _) = self.cell(entry, kind, w, true);
-            grid.put(x, y, &text, TEXT, BG);
+            grid.put(x, y, &text, TEXT(), BG());
             let edge = if k == cols.len() - 1 && x + w as u16 == right { "\u{2551}" } else { " " };
-            grid.put(x + w as u16, y, edge, TEXT, BG);
+            grid.put(x + w as u16, y, edge, TEXT(), BG());
             x += w as u16 + 1;
         }
         if x < right {
-            grid.put(x, y, &" ".repeat((right - x) as usize), TEXT, BG);
+            grid.put(x, y, &" ".repeat((right - x) as usize), TEXT(), BG());
         }
     }
 
     /// The joints of the dividers, the marked total on the divider and the
     /// folder's total in the bottom border.
-    fn paint_totals(&self, grid: &mut Grid, left: u16, width: u16, bottom: u16, cols: &[(Col, usize)], in_stripe: usize) {
+    #[allow(clippy::too_many_arguments)]
+    fn paint_totals(&self, grid: &mut Grid, left: u16, width: u16, bottom: u16, cols: &[(Col, usize)], in_stripe: usize, status: bool) {
         let mut x = left + 1;
+        // the dividers end on the status line's divider, else on the bottom border
+        let joint_row = if status { bottom - 2 } else { bottom };
         for (i, &(_, w)) in cols.iter().enumerate().take(cols.len().saturating_sub(1)) {
             x += w as u16;
-            let joint = if (i + 1) % in_stripe == 0 { "\u{2568}" } else { "\u{2534}" };
-            grid.put(x, bottom - 2, joint, TEXT, BG);
+            let joint = if (i + 1) % in_stripe == 0 { if status { "\u{2568}" } else { "\u{2569}" } } else if status { "\u{2534}" } else { "\u{2567}" };
+            grid.put(x, joint_row, joint, TEXT(), BG());
             x += 1;
         }
         let room = (width as usize).saturating_sub(4);
@@ -850,11 +1052,22 @@ impl Panel {
         let files = self.entries.iter().filter(|e| !e.is_up() && !e.is_dir);
         let (count, bytes) = files.fold((0, 0), |(n, sum), e| (n + 1, sum + e.size));
         let folders = self.entries.iter().filter(|e| !e.is_up() && e.is_dir).count();
-        let total = format!("Bytes: {}, files: {count}, folders: {folders}", listing::float_size(bytes));
-        let total = listing::truncate_right(&total, room);
-        grid.put(centered(&total), bottom, &format!(" {total} "), TEXT, BG);
+        // Panel settings: Show files total information, Show free size
+        let mut parts = Vec::new();
+        if crate::settings::bool("Panel.Layout.TotalInfo") {
+            parts.push(crate::lang::trs(&format!("Bytes: {}, files: {count}, folders: {folders}", listing::float_size(bytes))));
+        }
+        if crate::settings::bool("Panel.Layout.FreeInfo")
+            && let Some(free) = self.free
+        {
+            parts.push(crate::lang::trs(&format!("{} free bytes", listing::float_size(free))));
+        }
+        if !parts.is_empty() {
+            let total = listing::truncate_right(&parts.join(", "), room);
+            grid.put(centered(&total), bottom, &format!(" {total} "), TEXT(), BG());
+        }
 
-        if !self.marked.is_empty() {
+        if !self.marked.is_empty() && status {
             let marked = self.entries.iter().filter(|e| self.marked.contains(&e.name));
             let (files, dirs, bytes) = marked.fold((0, 0, 0), |(f, d, sum), e| {
                 if e.is_dir { (f, d + 1, sum) } else { (f + 1, d, sum + e.size) }
@@ -866,7 +1079,7 @@ impl Panel {
                 text = line(if short.len() <= 6 { short } else { listing::file_size(bytes, 6).trim().to_string() });
                 text = listing::truncate_right(&text, room);
             }
-            grid.put(centered(&text), bottom - 2, &format!(" {text} "), TITLE, CURSOR_BG);
+            grid.put(centered(&text), bottom - 2, &format!(" {text} "), TITLE(), CURSOR_BG());
         }
     }
 }
@@ -962,6 +1175,56 @@ impl Panels {
         right.filter_area = 1;
         right.reload(None);
         Self { left: Panel::new(dir), right, right_active: false, info: None, qview: None, screen: (0, 0), key_ends: Vec::new() }
+    }
+
+    /// Save setup: each panel's folder, view and sort (Far's Panel.Left / Panel.Right).
+    pub fn save_state(&self) {
+        use crate::settings::{set_bool, set_int, set_string};
+        for (side, panel) in [("Left", &self.left), ("Right", &self.right)] {
+            let key = |name: &str| -> &'static str { Box::leak(format!("Panel.{side}.{name}").into_boxed_str()) };
+            set_string(key("Folder"), &panel.dir.display().to_string());
+            set_string(key("CurFile"), panel.current().map(|e| e.name.as_str()).unwrap_or(""));
+            set_int(key("ViewMode"), Self::VIEWS.iter().position(|&m| m == panel.mode).unwrap_or(2) as i64);
+            set_bool(key("Visible"), panel.visible);
+            set_bool(key("ShortNames"), panel.short_names);
+            set_int(key("SortMode"), panel.sorting.mode as i64);
+            set_bool(key("ReverseSortOrder"), panel.sorting.reverse);
+            set_bool(key("SortGroups"), panel.sorting.groups);
+            set_bool(key("SelectedFirst"), panel.sorting.selected_first);
+            set_bool(key("DirectoriesFirst"), panel.sorting.directories_first);
+        }
+        set_bool("Panel.LeftFocus", !self.right_active);
+    }
+
+    /// At start: what Save setup kept (a folder that is gone is left as it was).
+    pub fn restore_state(&mut self) {
+        use crate::settings::{bool, int, string, value};
+        if value("Panel.Left.Folder").is_none() {
+            return;
+        }
+        for (side, right) in [("Left", false), ("Right", true)] {
+            let key = |name: &str| format!("Panel.{side}.{name}");
+            let panel = if right { &mut self.right } else { &mut self.left };
+            let folder = PathBuf::from(string(&key("Folder")));
+            if folder.is_dir() {
+                panel.dir = folder;
+            }
+            if let Some(&mode) = Self::VIEWS.get(int(&key("ViewMode")) as usize) {
+                panel.mode = mode;
+            }
+            panel.visible = value(&key("Visible")).and_then(|v| v.as_bool()).unwrap_or(true);
+            panel.short_names = bool(&key("ShortNames"));
+            if let Some(mode) = SortMode::from_index(int(&key("SortMode")) as usize) {
+                panel.sorting.mode = mode;
+            }
+            panel.sorting.reverse = bool(&key("ReverseSortOrder"));
+            panel.sorting.groups = bool(&key("SortGroups"));
+            panel.sorting.selected_first = bool(&key("SelectedFirst"));
+            panel.sorting.directories_first = value(&key("DirectoriesFirst")).and_then(|v| v.as_bool()).unwrap_or(true);
+            let current = string(&key("CurFile"));
+            panel.reload(if current.is_empty() { None } else { Some(&current) });
+        }
+        self.right_active = !value("Panel.LeftFocus").and_then(|v| v.as_bool()).unwrap_or(true);
     }
 
     /// The file under the active panel's cursor (not a folder, not in an archive).
@@ -1202,8 +1465,19 @@ impl Panels {
         self.right_active
     }
 
+    /// The mode Far numbers `n` (Ctrl+N).
+    pub fn view_of(n: usize) -> ViewMode {
+        Self::VIEWS[n % 10]
+    }
+
+    /// The active panel's mode number, if it is a file panel.
+    pub fn active_mode(&self) -> usize {
+        let panel = self.active_ref();
+        Self::VIEWS.iter().position(|&m| m == panel.mode).unwrap_or(2)
+    }
+
     /// Far's numbering: Ctrl+1 is Brief .. Ctrl+9 File links, Ctrl+0 Alternative full.
-    const VIEWS: [ViewMode; 10] = [
+    pub const VIEWS: [ViewMode; 10] = [
         ViewMode::AlternativeFull,
         ViewMode::Brief,
         ViewMode::Medium,
@@ -1278,8 +1552,9 @@ impl Panels {
         let panel = self.active();
         panel.save_selection();
         let entries: Vec<(String, bool)> = panel.entries.iter().filter(|e| !e.is_up()).map(|e| (e.name.clone(), e.is_dir)).collect();
+        let folders = crate::settings::bool("Panel.SelectFolders");
         for (name, is_dir) in entries {
-            if !panel.marked.remove(&name) && !is_dir {
+            if !panel.marked.remove(&name) && (!is_dir || folders) {
                 panel.marked.insert(name);
             }
         }
@@ -1443,7 +1718,9 @@ impl Panels {
     /// the same spot in quick succession.
     pub fn mouse(&mut self, event: MouseEvent, double: bool) -> Key {
         let (cols, rows) = self.screen;
-        let (col, row) = (event.column, event.row);
+        let col = event.column;
+        // the panels are a row lower under the menu bar (not the key bar)
+        let row = if Self::menu_bar_shown() && event.row + 1 < rows { event.row.saturating_sub(1) } else { event.row };
         let side = if self.left.contains(col, row) {
             Some(false)
         } else if self.right.contains(col, row) {
@@ -1673,7 +1950,10 @@ impl Panels {
             return None;
         }
         self.screen = (grid.cols, grid.rows);
-        let height = grid.rows - 2;
+        // Interface settings: Show key bar, Always show the menu bar
+        let key_bar = crate::settings::bool("Screen.KeyBar");
+        let menu_bar = crate::settings::bool("Interface.ShowMenuBar");
+        let height = grid.rows - 1 - u16::from(key_bar) - u16::from(menu_bar);
         // Far: the left panel ends at ScrX / 2
         let left_width = grid.cols.div_ceil(2);
         let right_width = grid.cols - left_width;
@@ -1688,11 +1968,32 @@ impl Panels {
             self.paint_one(grid, right, at.0, at.1, height, right == right_active);
         }
 
-        let row = grid.rows - 2;
+        if menu_bar {
+            for row in (0..height).rev() {
+                let cells = grid.row(row);
+                grid.set_row(row + 1, &cells);
+            }
+            crate::menu::paint_bar(grid);
+        }
+        let row = grid.rows - 1 - u16::from(key_bar);
         grid.set_row(row, line);
 
-        self.paint_key_bar(grid);
+        if key_bar {
+            self.paint_key_bar(grid);
+        } else {
+            self.key_ends.clear();
+        }
+        // Interface settings: Clock (Far's in the top right corner)
+        if crate::settings::bool("Screen.Clock") {
+            let clock = chrono::Local::now().format("%H:%M").to_string();
+            grid.put(grid.cols.saturating_sub(5), 0, &clock, crate::colors::fg("Clock"), crate::colors::bg("Clock"));
+        }
         Some((cursor_col.min(grid.cols - 1), row))
+    }
+
+    /// Whether the panels start one row lower (the menu bar always shown).
+    pub fn menu_bar_shown() -> bool {
+        crate::settings::bool("Interface.ShowMenuBar")
     }
 
     /// One panel, as what it is; a hidden one is not drawn (the shell shows there).
@@ -1770,8 +2071,8 @@ impl Panels {
         let count = KEY_BAR.len();
         let min_full = (1 + MIN_LABEL + 1) * count + (count - 9) - 1;
         let mut extra = cols.saturating_sub(min_full);
-        let default = (palette::fg(palette::LIGHT_GRAY), palette::bg(palette::BLACK));
-        let (number, text, gap) = (default, (BLACK, CURSOR_BG), default);
+        use crate::colors::{bg, fg};
+        let (number, text, gap) = ((fg("Keybar.Num"), bg("Keybar.Num")), (fg("Keybar.Text"), bg("Keybar.Text")), (fg("Keybar.Background"), bg("Keybar.Background")));
         let mut x = 0usize;
         let mut prev = 0usize;
         self.key_ends.clear();
@@ -1793,6 +2094,7 @@ impl Panels {
             self.key_ends.push(end as u16);
             grid.put(x as u16, y, &(i + 1).to_string(), number.0, number.1);
             x += 1 + two_digits;
+            let label = crate::lang::tr(label);
             grid.put(x as u16, y, &format!("{:<width$}", label.chars().take(width).collect::<String>()), text.0, text.1);
             x += width;
             if x >= cols {
@@ -2209,12 +2511,12 @@ mod tests {
     #[test]
     fn the_widths_are_fars_prepare_column_widths() {
         // Descriptions in a 38-cell panel: the name 40% of what is left, the description the rest
-        assert_eq!(layout(ViewMode::Descriptions.columns(), 38), [(Col::Name, 14), (Col::Description, 23)]);
+        assert_eq!(layout(&ViewMode::Descriptions.columns(), 38), [(Col::Name, 14), (Col::Description, 23)]);
         // Detailed on the whole 80-cell screen: the fixed columns, the name what is left
-        let detailed = layout(ViewMode::Detailed.columns(), 78);
+        let detailed = layout(&ViewMode::Detailed.columns(), 78);
         assert_eq!(detailed.iter().map(|c| c.1).collect::<Vec<_>>(), [12, 6, 6, 14, 14, 14, 6]);
         // Long descriptions: the description 70% of what is left (no zero-width column but the name)
-        let long = layout(ViewMode::LongDescriptions.columns(), 78);
+        let long = layout(&ViewMode::LongDescriptions.columns(), 78);
         assert_eq!(long, [(Col::Name, 21), (Col::Size, 6), (Col::Description, 49)], "70 left: 70 * 70 / 100 = 49, the name the 21 after");
     }
 
@@ -2228,7 +2530,8 @@ mod tests {
         let rows = painted(&mut panels);
         // the whole screen, Far's titles
         assert_eq!(rows[0].chars().next(), Some('\u{2554}'));
-        assert_eq!(rows[0].chars().nth(79), Some('\u{2557}'));
+        // the clock is in the top right corner (Interface settings' Clock)
+        assert_eq!(rows[0].chars().nth(77), Some(':'));
         for title in ["Name", "Size", "Alloca", "Write", "Created", "Accessed", "Attr"] {
             assert!(rows[1].contains(title), "{title} in {:?}", rows[1]);
         }

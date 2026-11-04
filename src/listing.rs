@@ -6,9 +6,8 @@
 use std::path::Path;
 use std::time::SystemTime;
 
-use crossterm::style::Color;
 
-use crate::palette::{self, fg};
+
 
 pub const TAG_MOUNT_POINT: u32 = 0xA000_0003;
 pub const TAG_SYMLINK: u32 = 0xA000_000C;
@@ -187,73 +186,6 @@ pub fn split_ext(name: &str) -> (&str, &str) {
     }
 }
 
-/// The extension without its dot (`""` when there is none).
-pub fn extension(name: &str) -> &str {
-    split_ext(name).1.strip_prefix('.').unwrap_or("")
-}
-
-/// Colors of one entry: (normal, under the cursor) foregrounds.
-pub fn highlight(entry: &Entry) -> (Color, Color) {
-    const ARC: &str = "*.zip,*.rar,*.[7bgxl]z,*.[bg]zip,*.tar,*.t[agbxl]z,*.z,*.ar[cj],*.r[0-9][0-9],*.a[0-9][0-9],*.bz2,*.cab,*.jar,*.lha,*.lzh,*.ha,*.ac[bei],*.pa[ck],*.rk,*.cpio,*.rpm,*.zoo,*.hqx,*.sit,*.ice,*.uc2,*.ain,*.imp,*.777,*.ufa,*.boa,*.bs[2a],*.sea,*.[ah]pk,*.ddi,*.x2,*.rkv,*.[lw]sz,*.h[ay]p,*.lim,*.sqz,*.chz,*.aa[br],*.zst";
-    const TEMP: &str = "*.bak,*.tmp";
-    let both = |c| (fg(c), fg(c));
-    if entry.hidden {
-        (fg(palette::CYAN), fg(palette::DARK_GRAY))
-    } else if entry.is_dir {
-        both(palette::WHITE)
-    } else if is_executable(&entry.name) {
-        both(palette::LIGHT_GREEN)
-    } else if matches_any(ARC, &entry.name) {
-        both(palette::LIGHT_MAGENTA)
-    } else if matches_any(TEMP, &entry.name) {
-        both(palette::BROWN)
-    } else {
-        (fg(palette::LIGHT_CYAN), fg(palette::BLACK))
-    }
-}
-
-/// Far's `<exec>` group: `*.exe,*.cmd,*.bat,*.com,%PATHEXT%`.
-fn is_executable(name: &str) -> bool {
-    let ext = format!(".{}", extension(name)).to_lowercase();
-    if [".exe", ".cmd", ".bat", ".com"].contains(&ext.as_str()) {
-        return true;
-    }
-    cfg!(windows)
-        && std::env::var("PATHEXT").is_ok_and(|list| list.split(';').any(|e| !e.is_empty() && e.eq_ignore_ascii_case(&ext)))
-}
-
-fn matches_any(masks: &str, name: &str) -> bool {
-    let name: Vec<char> = name.to_lowercase().chars().collect();
-    masks.split(',').any(|mask| glob(&mask.chars().collect::<Vec<_>>(), &name))
-}
-
-/// A file mask: `*`, `?` and `[a-z]` classes; `name` is lower case.
-fn glob(mask: &[char], name: &[char]) -> bool {
-    match mask.first() {
-        None => name.is_empty(),
-        Some('*') => (0..=name.len()).any(|skip| glob(&mask[1..], &name[skip..])),
-        Some('?') => !name.is_empty() && glob(&mask[1..], &name[1..]),
-        Some('[') => {
-            let Some(close) = mask.iter().position(|&c| c == ']') else { return false };
-            let Some(&c) = name.first() else { return false };
-            let set = &mask[1..close];
-            let mut hit = false;
-            let mut i = 0;
-            while i < set.len() {
-                if i + 2 < set.len() && set[i + 1] == '-' {
-                    hit |= (set[i]..=set[i + 2]).contains(&c);
-                    i += 3;
-                } else {
-                    hit |= set[i] == c;
-                    i += 1;
-                }
-            }
-            hit && glob(&mask[close + 1..], &name[1..])
-        }
-        Some(&m) => name.first() == Some(&m) && glob(&mask[1..], &name[1..]),
-    }
-}
-
 pub fn chars(s: &str) -> usize {
     s.chars().count()
 }
@@ -417,11 +349,11 @@ pub fn size_column(entry: &Entry, width: usize) -> String {
         return file_size(entry.size, width);
     }
     let label = if entry.is_up() {
-        center("Up", 6)
+        center(crate::lang::tr("Up"), 6)
     } else if let Some(tag) = entry.reparse {
         reparse_name(tag)
     } else {
-        center("Folder", 6)
+        center(crate::lang::tr("Folder"), 6)
     };
     let label = if chars(&label) + 2 <= width { format!("<{label}>") } else { label };
     right(&label, width)
@@ -629,10 +561,6 @@ mod tests {
 
     #[test]
     fn masks_and_paths() {
-        assert!(matches_any("*.r[0-9][0-9]", "x.r07"));
-        assert!(!matches_any("*.r[0-9][0-9]", "x.rar7"));
-        assert_eq!(highlight(&file("a.7z")).0, fg(palette::LIGHT_MAGENTA));
-        assert_eq!(highlight(&file("a.bak")).0, fg(palette::BROWN));
         assert_eq!(truncate_path("C:\\Users\\dnk\\very\\long", 13), "C:\\\u{2026}very\\long");
     }
 }

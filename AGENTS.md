@@ -133,7 +133,8 @@ over the shell screen.
   bottom title, keys it does not use go back to the caller); a dialog a
   list opens is drawn over it and the list comes back (`App::under`,
   `src/commands.rs`). What Far keeps in its profile is in farsh's
-  (`src/profile.rs`: `%APPDATA%\farsh`, `~/.config/farsh`).
+  (`src/profile.rs`: `~/.config/farsh` on every system; an old
+  `%APPDATA%\farsh` is moved there once).
   - Alt+F8 / Alt+F11 / Alt+F12 (`src/history.rs`, history.cpp): the
     commands Enter ran from the prompt (`Shell::typed`), the files F3/F4
     opened, the folders the active panel visited; a date separator a day,
@@ -173,6 +174,46 @@ over the shell screen.
   with a Russian letter is the Latin letter of its key (`keys::normalize`,
   in `App::on_key`), and the hot keys of menus and dialogs match either
   layout (`keys::same`, `keys::latin`). Plain letters stay as typed.
+- The Options menu is whole but for the editor's settings (the editor is
+  external) and the plugins' (they will be Lua): grey. Every setting is
+  Far's own, with Far's name and default, kept in
+  `~/.config/farsh/settings.json` (the user's rule) as soon as it changes
+  (`src/settings.rs`; the tests see only the defaults). Most dialogs are
+  config.cpp's DialogBuilder ones: `src/builder.rs` ports its layout
+  (TextBefore/After, Indent, two columns, LinkFlags) and binds each item to
+  a setting; `src/options.rs` is the dialogs, `src/optmenu.rs` the rest.
+  - What acts in farsh: the Recycle Bin for F8 (SHFileOperation), the
+    three histories' saving, the sorting collation / digits / case, folder
+    extensions, reverse sorts, hidden files, highlighting, select folders,
+    column titles, status line, totals, free size, scroll bar, sort letter,
+    `..` in the root, clock, mouse, key bar, the menu bar always shown, the
+    confirmations of copy, move, delete, folders, read-only files, history
+    clearing, hotplug removal and exit, the dialogs' history arrows and a
+    click outside, the menus' clicks outside, the description list names
+    and their hidden attribute, the folder description files, the viewer's
+    tab size and external viewer (F3 / Alt+F3), Save setup (Shift+F9: the
+    panels' folders, modes and sorting, restored at start; on F10 with
+    "Auto save setup"). The rest is kept and shown as Far has it, with
+    nothing in farsh for it yet (system copy, elevation, the command line's
+    and AutoComplete's settings: the command line is the shell's).
+  - Languages: English, or Russian from Far's own translation
+    (`assets/lang/ru.tsv`, made from farlang.m4 and arclite_rus.lng;
+    `src/lang.rs`: a whole text, or a pattern with Far's `{0}` places).
+    Dialogs translate when shown; the builder before laying out.
+  - File panel modes: the modes are Far's column strings (`N,S,D,T` /
+    `0,6,0,5`, `NM`, `SC`, `DM`, `DE`...) with the PVS_* flags, Far's
+    defaults unless changed (`ViewMode::text`). Ins/Del (more modes) not done.
+  - Colors: Far's 146 palette colors by name (`src/colordata.rs` is made
+    from palette.cpp and setcolor.cpp), the menus at Far's places, the color
+    dialog (`src/colorpick.rs`) with the 16 console colors and Default; the
+    code, 256-color and RGB fields and the styles are disabled. Panels,
+    menus, dialogs, viewer, key bar and clock take them.
+  - Files highlighting and sort groups (`src/highlight.rs`): Far's six
+    default groups, the four parts, the filter dialog with its colors part
+    (a color button opens the color dialog); the sort groups order the files
+    with "Use sort groups". The color example and the marks in the panel
+    are not drawn. Groups of file masks (`<arc>`, `<exec>`, `%PATHEXT%`) work
+    in every mask.
 - Tests: `cargo test` (the shell test starts cmd.exe on Windows, /bin/sh elsewhere).
 - Code, comments and logs in English; talk to the user in Russian.
 

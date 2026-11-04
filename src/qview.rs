@@ -11,17 +11,34 @@ use crossterm::style::Color;
 
 use crate::grid::Grid;
 use crate::listing;
-use crate::palette;
 use crate::viewer::Viewer;
 
-const BG: Color = palette::bg(palette::BLUE);
-const TEXT: Color = palette::fg(palette::LIGHT_CYAN);
-const INFO: Color = palette::fg(palette::YELLOW);
+#[allow(non_snake_case)]
+fn BG() -> Color {
+    crate::colors::bg("Panel.Text")
+}
+#[allow(non_snake_case)]
+fn TEXT() -> Color {
+    crate::colors::fg("Panel.Text")
+}
+#[allow(non_snake_case)]
+fn INFO() -> Color {
+    crate::colors::fg("Panel.Text.Info")
+}
 /// COL_PANELHIGHLIGHTTEXT: values while the scan is not finished.
-const HIGHLIGHT: Color = palette::fg(palette::LIGHT_GRAY);
+#[allow(non_snake_case)]
+fn HIGHLIGHT() -> Color {
+    crate::colors::fg("Panel.Text.Highlight")
+}
 /// COL_PANELSELECTEDINFO: the file type, yellow on cyan.
-const SELECTED_INFO_BG: Color = palette::bg(palette::CYAN);
-const BLACK: Color = palette::fg(palette::BLACK);
+#[allow(non_snake_case)]
+fn SELECTED_INFO_BG() -> Color {
+    crate::colors::bg("Panel.Title.Selected")
+}
+#[allow(non_snake_case)]
+fn BLACK() -> Color {
+    crate::colors::fg("Panel.Title.Selected")
+}
 
 /// What GetDirInfo counts.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -117,26 +134,26 @@ pub fn paint(grid: &mut Grid, left: u16, width: u16, height: u16, active: bool, 
         return;
     }
     let (right, bottom) = (left + width - 1, height - 1);
-    grid.fill(left, 0, width, height, BG);
+    grid.fill(left, 0, width, height, BG());
     let inner = (width - 2) as usize;
     let horizontal = "\u{2550}".repeat(inner);
-    grid.put(left, 0, &format!("\u{2554}{horizontal}\u{2557}"), TEXT, BG);
-    grid.put(left, bottom, &format!("\u{255A}{horizontal}\u{255D}"), TEXT, BG);
+    grid.put(left, 0, &format!("\u{2554}{horizontal}\u{2557}"), TEXT(), BG());
+    grid.put(left, bottom, &format!("\u{255A}{horizontal}\u{255D}"), TEXT(), BG());
     for row in 1..bottom {
-        grid.put(left, row, "\u{2551}", TEXT, BG);
-        grid.put(right, row, "\u{2551}", TEXT, BG);
+        grid.put(left, row, "\u{2551}", TEXT(), BG());
+        grid.put(right, row, "\u{2551}", TEXT(), BG());
     }
     let title = " Quick view ";
-    let (fg, bg) = if active { (BLACK, SELECTED_INFO_BG) } else { (TEXT, BG) };
+    let (fg, bg) = if active { (BLACK(), SELECTED_INFO_BG()) } else { (TEXT(), BG()) };
     grid.put(left + width.saturating_sub(title.chars().count() as u16) / 2, 0, title, fg, bg);
     // the separator above the name
-    grid.put(left, bottom - 2, &format!("\u{255F}{}\u{2562}", "\u{2500}".repeat(inner)), TEXT, BG);
+    grid.put(left, bottom - 2, &format!("\u{255F}{}\u{2562}", "\u{2500}".repeat(inner)), TEXT(), BG());
     let Some(state) = state else { return };
     let name = state.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    grid.put(left + 1, bottom - 1, &listing::left(&name, inner), TEXT, BG);
+    grid.put(left + 1, bottom - 1, &listing::left(&name, inner), TEXT(), BG());
     if !state.file_type.is_empty() {
         let text = listing::truncate_left(&format!(" {} ", state.file_type), inner);
-        grid.put(left + width.saturating_sub(text.chars().count() as u16) / 2, bottom - 2, &text, INFO, SELECTED_INFO_BG);
+        grid.put(left + width.saturating_sub(text.chars().count() as u16) / 2, bottom - 2, &text, INFO(), SELECTED_INFO_BG());
     }
     if let Some(scan) = &state.scan {
         let data = lock(scan).clone();
@@ -144,12 +161,12 @@ pub fn paint(grid: &mut Grid, left: u16, width: u16, height: u16, active: bool, 
         let shown = listing::truncate_path(&state.path.display().to_string(), room);
         let print = |grid: &mut Grid, y: u16, text: &str, color: Color| {
             let room = right.saturating_sub(left + 2) as usize;
-            grid.put(left + 2, y, &text.chars().take(room).collect::<String>(), color, BG);
+            grid.put(left + 2, y, &text.chars().take(room).collect::<String>(), color, BG());
         };
-        print(grid, 2, &format!("Folder \"{shown}\""), TEXT);
+        print(grid, 2, &format!("Folder \"{shown}\""), TEXT());
         let labels = ["Folders:", "Files:", "Files size:", "Allocated size:", "Cluster size:", "Files slack:", "MFT overhead:"];
         let column = labels.iter().map(|l| l.len()).max().unwrap_or(0) + 1;
-        let (color, prefix) = if data.done { (INFO, "") } else { (HIGHLIGHT, "~") };
+        let (color, prefix) = if data.done { (INFO(), "") } else { (HIGHLIGHT(), "~") };
         let rows = [
             (4, labels[0], data.dirs.to_string()),
             (5, labels[1], data.files.to_string()),
@@ -163,10 +180,10 @@ pub fn paint(grid: &mut Grid, left: u16, width: u16, height: u16, active: bool, 
             if y >= bottom - 2 {
                 break;
             }
-            print(grid, y, &format!("{label:<column$}"), TEXT);
+            print(grid, y, &format!("{label:<column$}"), TEXT());
             let x = left + 2 + column as u16;
             let room = right.saturating_sub(x) as usize;
-            grid.put(x, y, &format!("{prefix}{value}").chars().take(room).collect::<String>(), color, BG);
+            grid.put(x, y, &format!("{prefix}{value}").chars().take(room).collect::<String>(), color, BG());
         }
     } else if let Some(viewer) = &mut state.viewer {
         viewer.paint_area(grid, left + 1, 1, width - 2, height.saturating_sub(4));

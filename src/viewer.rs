@@ -12,10 +12,39 @@ use crate::grid::Grid;
 const LIMIT: u64 = 32 << 20;
 
 // Far's viewer: light cyan on blue, the title bar black on cyan
-const BG: Color = crate::palette::bg(crate::palette::BLUE);
-const FG: Color = crate::palette::fg(crate::palette::LIGHT_CYAN);
-const BAR_FG: Color = crate::palette::fg(crate::palette::BLACK);
-const BAR_BG: Color = crate::palette::bg(crate::palette::CYAN);
+#[allow(non_snake_case)]
+fn BG() -> Color {
+    crate::colors::bg("Viewer.Text")
+}
+#[allow(non_snake_case)]
+fn FG() -> Color {
+    crate::colors::fg("Viewer.Text")
+}
+#[allow(non_snake_case)]
+fn BAR_FG() -> Color {
+    crate::colors::fg("Viewer.Status")
+}
+#[allow(non_snake_case)]
+fn BAR_BG() -> Color {
+    crate::colors::bg("Viewer.Status")
+}
+
+/// Tabs to spaces up to the next multiple of `tab`.
+fn expand_tabs(line: &str, tab: usize) -> String {
+    let mut out = String::new();
+    let mut col = 0;
+    for c in line.chars() {
+        if c == '\t' {
+            let spaces = tab - col % tab;
+            out.push_str(&" ".repeat(spaces));
+            col += spaces;
+        } else {
+            out.push(c);
+            col += 1;
+        }
+    }
+    out
+}
 
 pub struct Viewer {
     name: String,
@@ -46,7 +75,11 @@ impl Viewer {
     pub fn from_text(name: &str, text: &str) -> Self {
         Self {
             name: name.into(),
-            lines: text.lines().map(|line| line.replace('\t', "    ").replace('\r', "")).collect(),
+            lines: {
+                // Viewer settings: Tab size (to the next tab stop)
+                let tab = crate::settings::int("Viewer.TabSize").clamp(1, 512) as usize;
+                text.lines().map(|line| expand_tabs(&line.replace('\r', ""), tab)).collect()
+            },
             truncated: false,
             top: 0,
             left: 0,
@@ -107,7 +140,7 @@ impl Viewer {
                     break 'lines;
                 }
                 let piece: String = chars[start..(start + width).min(chars.len())].iter().collect();
-                grid.put(x, y + row, &piece, FG, BG);
+                grid.put(x, y + row, &piece, FG(), BG());
                 row += 1;
                 start += width;
                 if start >= chars.len() {
@@ -118,23 +151,23 @@ impl Viewer {
     }
 
     pub fn paint(&mut self, grid: &mut Grid) {
-        grid.fill_with(0, 0, grid.cols, grid.rows, FG, BG);
+        grid.fill_with(0, 0, grid.cols, grid.rows, FG(), BG());
         if grid.rows < 3 {
             return;
         }
         self.page = grid.rows as usize - 2;
         let title: String = self.name.chars().take(grid.cols as usize).collect();
-        grid.fill_with(0, 0, grid.cols, 1, BAR_FG, BAR_BG);
-        grid.put(0, 0, &title, BAR_FG, BAR_BG);
+        grid.fill_with(0, 0, grid.cols, 1, BAR_FG(), BAR_BG());
+        grid.put(0, 0, &title, BAR_FG(), BAR_BG());
         for (row, line) in self.lines.iter().skip(self.top).take(self.page).enumerate() {
             let shown: String = line.chars().skip(self.left).take(grid.cols as usize).collect();
-            grid.put(0, 1 + row as u16, &shown, FG, BG);
+            grid.put(0, 1 + row as u16, &shown, FG(), BG());
         }
         let percent = if self.lines.len() <= self.page { 100 } else { (self.top + self.page).min(self.lines.len()) * 100 / self.lines.len() };
         let note = if self.truncated { " (cut)" } else { "" };
         let status = format!(" Line {}/{}  {}%{} -- Esc, F3 or F10 closes", self.top + 1, self.lines.len().max(1), percent, note);
-        grid.fill_with(0, grid.rows - 1, grid.cols, 1, BAR_FG, BAR_BG);
-        grid.put(0, grid.rows - 1, &status, BAR_FG, BAR_BG);
+        grid.fill_with(0, grid.rows - 1, grid.cols, 1, BAR_FG(), BAR_BG());
+        grid.put(0, grid.rows - 1, &status, BAR_FG(), BAR_BG());
     }
 }
 
@@ -171,7 +204,7 @@ mod tests {
         let path = std::env::temp_dir().join(format!("farsh-view-{}.txt", std::process::id()));
         std::fs::write(&path, b"a\tb\r\nbad \xff byte\n").unwrap();
         let viewer = Viewer::open(&path).unwrap();
-        assert_eq!(viewer.lines[0], "a    b");
+        assert_eq!(viewer.lines[0], "a       b", "Far's default tab size is 8");
         assert!(viewer.lines[1].contains('\u{fffd}'));
         std::fs::remove_file(path).unwrap();
     }

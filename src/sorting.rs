@@ -74,6 +74,11 @@ impl SortMode {
         }
     }
 
+    /// The mode of its number (`mode as usize`), as Save setup keeps it.
+    pub fn from_index(index: usize) -> Option<SortMode> {
+        [Unsorted, Name, Extension, Write, Creation, Access, Size, Descriptions, Owner, Allocated, Links, Streams, StreamsSize, NameOnly, Change].get(index).copied()
+    }
+
     pub fn by_key(n: u8) -> Option<SortMode> {
         Self::MENU.into_iter().find(|m| m.key() == Some(n))
     }
@@ -135,7 +140,9 @@ impl Sorting {
     /// Far's `SetSortMode`: the same mode again flips, another starts in its
     /// default direction.
     pub fn choose(&mut self, mode: SortMode) {
-        self.reverse = if self.mode == mode { !self.reverse } else { mode.descending_by_default() };
+        // Panel settings: Allow reverse sort modes
+        let flip = self.mode == mode && OPTIONS.reverse.load(Relaxed);
+        self.reverse = if flip { !self.reverse } else if self.mode == mode { self.reverse } else { mode.descending_by_default() };
         self.mode = mode;
     }
 }
@@ -157,6 +164,13 @@ fn compare_entries(a: &Entry, b: &Entry, sorting: &Sorting, marked: &HashSet<Str
     if sorting.directories_first && a.is_dir != b.is_dir {
         return b.is_dir.cmp(&a.is_dir);
     }
+    // Use sort groups: Far's highlighting sort groups first
+    if sorting.groups {
+        let order = crate::highlight::sort_group(a).cmp(&crate::highlight::sort_group(b));
+        if order.is_ne() {
+            return order;
+        }
+    }
     if sorting.selected_first {
         let (sa, sb) = (marked.contains(&a.name), marked.contains(&b.name));
         if sa != sb {
@@ -174,9 +188,40 @@ fn compare_entries(a: &Entry, b: &Entry, sorting: &Sorting, marked: &HashSet<Str
     Ordering::Equal
 }
 
-/// Name and extension as Far sorts them: a folder's name is all name.
+/// Name and extension as Far sorts them: a folder's name is all name
+/// (unless Panel settings' "Sort folder names by extension").
 fn name_ext(entry: &Entry) -> (&str, &str) {
-    if entry.is_dir { (&entry.name, "") } else { split_ext(&entry.name) }
+    if entry.is_dir && !OPTIONS.folder_ext.load(Relaxed) { (&entry.name, "") } else { split_ext(&entry.name) }
+}
+
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering::Relaxed};
+
+/// The sort settings, read once (sorting compares names many times).
+struct Options {
+    collation: AtomicU8,
+    digits: AtomicBool,
+    case: AtomicBool,
+    folder_ext: AtomicBool,
+    reverse: AtomicBool,
+}
+
+static OPTIONS: Options = Options {
+    collation: AtomicU8::new(2),
+    digits: AtomicBool::new(true),
+    case: AtomicBool::new(false),
+    folder_ext: AtomicBool::new(false),
+    reverse: AtomicBool::new(true),
+};
+
+/// System settings' sorting collation, digits as numbers, case; Panel
+/// settings' folder extensions and reverse sort modes.
+pub fn load_options() {
+    use crate::settings::{bool, int};
+    OPTIONS.collation.store(int("System.Sort.Collation").clamp(0, 2) as u8, Relaxed);
+    OPTIONS.digits.store(bool("System.Sort.DigitsAsNumbers"), Relaxed);
+    OPTIONS.case.store(bool("System.Sort.CaseSensitive"), Relaxed);
+    OPTIONS.folder_ext.store(bool("Panel.SortFolderExt"), Relaxed);
+    OPTIONS.reverse.store(bool("Panel.ReverseSort"), Relaxed);
 }
 
 const UNKNOWN: u64 = u64::MAX;
@@ -214,13 +259,26 @@ pub fn compare_text(a: &str, b: &str) -> Ordering {
         CompareStringW, LINGUISTIC_IGNORECASE, SORT_DIGITSASNUMBERS, SORT_STRINGSORT,
     };
     const LOCALE_USER_DEFAULT: u32 = 0x0400;
+    const LOCALE_INVARIANT: u32 = 0x007F;
+    let (collation, digits, case) = (OPTIONS.collation.load(Relaxed), OPTIONS.digits.load(Relaxed), OPTIONS.case.load(Relaxed));
+    if collation == 0 {
+        return ordinal(a, b, digits, case);
+    }
+    let mut flags = SORT_STRINGSORT;
+    if !case {
+        flags |= LINGUISTIC_IGNORECASE;
+    }
+    if digits {
+        flags |= SORT_DIGITSASNUMBERS;
+    }
+    let locale = if collation == 1 { LOCALE_INVARIANT } else { LOCALE_USER_DEFAULT };
     let a16: Vec<u16> = a.encode_utf16().collect();
     let b16: Vec<u16> = b.encode_utf16().collect();
     // SAFETY: both slices are valid for their lengths.
     let result = unsafe {
         CompareStringW(
-            LOCALE_USER_DEFAULT,
-            SORT_STRINGSORT | LINGUISTIC_IGNORECASE | SORT_DIGITSASNUMBERS,
+            locale,
+            flags,
             a16.as_ptr(),
             a16.len() as i32,
             b16.as_ptr(),
@@ -237,7 +295,28 @@ pub fn compare_text(a: &str, b: &str) -> Ordering {
 
 #[cfg(not(windows))]
 pub fn compare_text(a: &str, b: &str) -> Ordering {
-    natural(a, b)
+    let (digits, case) = (OPTIONS.digits.load(Relaxed), OPTIONS.case.load(Relaxed));
+    if case || !digits { ordinal(a, b, digits, case) } else { natural(a, b) }
+}
+
+/// The "ordinal" collation: by code points (case folded unless it matters),
+/// digits as numbers if asked.
+fn ordinal(a: &str, b: &str, digits: bool, case: bool) -> Ordering {
+    if digits && !case {
+        return natural(a, b);
+    }
+    if digits {
+        return natural_cased(a, b);
+    }
+    if case { a.cmp(b) } else { a.to_lowercase().cmp(&b.to_lowercase()) }
+}
+
+/// natural(), case kept.
+fn natural_cased(a: &str, b: &str) -> Ordering {
+    match natural(a, b) {
+        Ordering::Equal => a.cmp(b),
+        other => other,
+    }
 }
 
 /// Case ignored, runs of digits compared as numbers.
