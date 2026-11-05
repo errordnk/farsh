@@ -164,7 +164,14 @@ over the shell screen.
   is farsh's, and only at a prompt (`Shell::ctrl_o_is_ours`: the prompt hook
   reported it and no command runs, no program of the shell is on its
   alternate screen; a shell without the hook always gives Ctrl+O to farsh).
-  Elsewhere the keys still go through crossterm (`keys::encode`): not done.
+  On Linux/macOS (`src/rawinput.rs`) the terminal's own bytes go to the
+  shell's PTY as they came (escape sequences, kitty keyboard, mouse reports,
+  bracketed paste: the modes the shell asked for in its output reach the
+  terminal as they are); only Ctrl+O is looked for (byte 0x0F or kitty's
+  `CSI 111;5u`), bytes that came with it wait until the shell's screen is
+  back, and a resize is noticed by polling `terminal::size()` (crossterm,
+  which hears SIGWINCH, is not reading). `keys::encode` remains for what the
+  panels type themselves.
   Windows' limit: the shell sits behind two conhosts (farsh's console and
   the shell's ConPTY), whatever the system's ConPTY drops on the way is
   dropped (Windows defaults only).

@@ -38,6 +38,8 @@ mod modkeys;
 mod optmenu;
 mod options;
 mod mouse;
+#[cfg(unix)]
+mod rawinput;
 #[cfg(windows)]
 mod rawkeys;
 mod palette;
@@ -266,6 +268,13 @@ struct App {
     clock: String,
     /// Whether the mouse is taken from the terminal (None: not set yet).
     mouse: Option<bool>,
+    /// The console's input records, read for the shell (Windows).
+    #[cfg(windows)]
+    raw: rawkeys::Reader,
+    /// What the terminal sent after a Ctrl+O that opened the panels, for the
+    /// shell when they are gone (unix).
+    #[cfg(unix)]
+    held_input: Vec<u8>,
     /// Whether the terminal is on its alternate screen, where the panels are.
     on_alt: bool,
     /// What the shell wrote while the panels were up, for the main screen.
@@ -320,6 +329,10 @@ impl App {
             maximized: false,
             clock: String::new(),
             mouse: None,
+            #[cfg(windows)]
+            raw: rawkeys::Reader::default(),
+            #[cfg(unix)]
+            held_input: Vec::new(),
             on_alt: false,
             pending: Vec::new(),
             pending_lost: false,
@@ -335,9 +348,6 @@ impl App {
         let mut screen = Grid::unknown(cols, rows);
         let mut frame = Grid::new(cols, rows);
         let mut dirty = true;
-        #[cfg(windows)]
-        let mut raw = rawkeys::Reader::default();
-
         while !self.quit {
             if self.shell.pump() {
                 dirty = true;
@@ -395,12 +405,10 @@ impl App {
                 || matches!(&self.overlay, Overlay::Find(results) if results.busy())
                 || (self.panels_visible && self.panels.busy());
             let wait = if busy { 50 } else { 10 };
-            // Without panels the console's input records go to the shell as they are.
-            #[cfg(windows)]
+            // Without panels what the terminal sends goes to the shell as it is.
+            #[cfg(any(windows, unix))]
             if !self.on_alt {
-                if rawkeys::wait(Duration::from_millis(5))?
-                    && let Some((cols, rows)) = self.on_raw_records(&mut raw)
-                {
+                if let Some((cols, rows)) = self.read_for_shell()? {
                     self.size = (cols, rows);
                     self.shell.resize(cols, rows);
                     screen = Grid::unknown(cols, rows);
@@ -749,7 +757,9 @@ impl App {
         let wanted = settings::bool("Interface.Mouse")
             && (self.panels_visible
                 || !matches!(self.overlay, Overlay::None)
-                || self.shell.mouse_mode().0 != vt100::MouseProtocolMode::None);
+                // Windows: the console's mouse records are turned into the reports a
+                // program asked for; elsewhere its own request reaches the terminal
+                || (cfg!(windows) && self.shell.mouse_mode().0 != vt100::MouseProtocolMode::None));
         if self.mouse != Some(wanted) && mouse_capture(wanted).is_ok() {
             self.mouse = Some(wanted);
         }
@@ -818,9 +828,12 @@ impl App {
     /// terminal made goes to the shell's ConPTY as it is (see `rawkeys`),
     /// except Ctrl+O at a prompt. Returns the new size if the window changed.
     #[cfg(windows)]
-    fn on_raw_records(&mut self, reader: &mut rawkeys::Reader) -> Option<(u16, u16)> {
+    fn read_for_shell(&mut self) -> std::io::Result<Option<(u16, u16)>> {
+        if !rawkeys::wait(Duration::from_millis(5))? {
+            return Ok(None);
+        }
         let mut resized = None;
-        while let Some(record) = reader.read() {
+        while let Some(record) = self.raw.read() {
             match &record {
                 rawkeys::Record::Resize => {
                     if let Ok(size) = terminal::size() {
@@ -848,7 +861,44 @@ impl App {
                 }
             }
         }
-        resized
+        Ok(resized)
+    }
+
+    /// The same on a Unix terminal: its bytes go to the shell as they came,
+    /// except a Ctrl+O at a prompt (the bytes after it wait for the shell's
+    /// screen to be back). The window's size is looked at here: crossterm,
+    /// which hears SIGWINCH, is not reading.
+    #[cfg(unix)]
+    fn read_for_shell(&mut self) -> std::io::Result<Option<(u16, u16)>> {
+        let resized = terminal::size().ok().filter(|size| *size != self.size);
+        let ready = rawinput::wait(Duration::from_millis(5))?;
+        if ready || !self.held_input.is_empty() {
+            let mut bytes = std::mem::take(&mut self.held_input);
+            // read only what poll announced: a read with nothing there waits for a key
+            if ready {
+                match rawinput::read()? {
+                    Some(more) => bytes.extend(more),
+                    None => {
+                        self.quit = true;
+                        return Ok(resized);
+                    }
+                }
+            }
+            if let Some((start, end)) = rawinput::find_ctrl_o(&bytes)
+                && self.shell.ctrl_o_is_ours()
+            {
+                self.held_input = bytes.split_off(end);
+                bytes.truncate(start);
+                self.panels_visible = true;
+            }
+            if !bytes.is_empty() {
+                self.shell.send_raw(&bytes);
+                if !rawinput::is_report(&bytes) {
+                    self.shell.note_keypress(rawinput::has_enter(&bytes));
+                }
+            }
+        }
+        Ok(resized)
     }
 
     /// Whether a left click at (`col`, `row`) now is the second of a double click.
