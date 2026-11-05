@@ -175,6 +175,25 @@ over the shell screen.
   Windows' limit: the shell sits behind two conhosts (farsh's console and
   the shell's ConPTY), whatever the system's ConPTY drops on the way is
   dropped (Windows defaults only).
+- farsh can be the user's login shell on Linux/macOS (`src/login.rs`: put its
+  path in `/etc/shells`, `chsh -s`). The real shell is `$FARSH_SHELL`, the
+  profile's `Shell.Program`, or `$SHELL`, the first that is not farsh (with
+  farsh as the login shell `$SHELL` is farsh), else bash / zsh; farsh is never
+  its own shell. Only an interactive session on a terminal is farsh's: `-c
+  cmd` (ssh, scp, rsync, `make`, vim's `:!`), a script, `-s`, any argument it
+  does not know, or stdin/stdout that is not a terminal make farsh `exec` the
+  real shell with the same arguments, printing nothing. `-farsh` as argv[0],
+  `-l` and `--login` make the session a login one: the shell under farsh
+  reads the login files in a login shell's order (zsh gets stubs for
+  `.zprofile`/`.zlogin`; bash gets an rcfile that reads /etc/profile and the
+  first of ~/.bash_profile, ~/.bash_login, ~/.profile, then the hook: a real
+  `bash -l` ignores `--rcfile`, and a prompt tool that replaces
+  `PROMPT_COMMAND` would take the hook away; differences: `shopt login_shell`
+  is off, `.bash_logout` runs from a trap). The shell under farsh gets
+  `SHELL` = the real shell (vim's `:sh`, tmux windows are not farsh). A login
+  session never ends because farsh broke: if farsh cannot start its session
+  or panics, the terminal is put right and the real shell takes over (`exec`
+  as `-bash`). A debug build panics on `FARSH_DEBUG_PANIC` to show that.
 - The mouse is farsh's only while the panels or something over them are
   shown, or a program in the shell asked for it (`App::sync_mouse`; on
   Windows just ENABLE_MOUSE_INPUT, with QuickEdit when it is off). Without

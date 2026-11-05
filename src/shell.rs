@@ -68,7 +68,8 @@ impl Shell {
         // A shell that cannot be hooked still works, its directory just is not followed.
         let scratch = std::env::temp_dir().join(format!("farsh-{}", std::process::id()));
         let mut hooked_ok = false;
-        if let Ok(hooked) = cwd::integration(kind, &scratch) {
+        let login = crate::login::login();
+        if let Ok(hooked) = cwd::integration(kind, &scratch, login) {
             hooked_ok = kind != Kind::Other;
             command.args(hooked.args);
             for (name, value) in hooked.env {
@@ -78,6 +79,9 @@ impl Shell {
         command.env("TERM", "xterm-256color");
         command.env("COLORTERM", "truecolor");
         command.env("FARSH", "1");
+        // what the shell starts (vim's :sh, a tmux window) is the shell, not farsh
+        #[cfg(unix)]
+        command.env("SHELL", program);
         if let Ok(dir) = std::env::current_dir() {
             command.cwd(dir);
         }
@@ -349,8 +353,8 @@ fn color(color: vt100::Color) -> Color {
 
 /// `$FARSH_SHELL` or `$SHELL`; otherwise bash on Linux, zsh on macOS and
 /// PowerShell on Windows.
-fn shell_program() -> String {
-    if let Ok(shell) = std::env::var("FARSH_SHELL").or_else(|_| std::env::var("SHELL")) {
+pub fn shell_program() -> String {
+    if let Some(shell) = crate::login::chosen_shell() {
         return shell;
     }
     if cfg!(windows) {

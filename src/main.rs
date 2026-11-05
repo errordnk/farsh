@@ -38,6 +38,7 @@ mod modkeys;
 mod optmenu;
 mod options;
 mod mouse;
+mod login;
 #[cfg(unix)]
 mod rawinput;
 #[cfg(windows)]
@@ -83,6 +84,23 @@ fn main() -> Result<()> {
     if args.first().map(String::as_str) == Some("--elevation") {
         return Ok(elevation::serve(&args[1..])?);
     }
+    // As the user's shell (/etc/shells, passwd): only an interactive session
+    // on a terminal is farsh's; `-c cmd`, a script, a pipe is the real shell's.
+    #[cfg(unix)]
+    {
+        let argv0 = std::env::args().next().unwrap_or_default();
+        let login = login::is_login(&argv0, &args);
+        let tty = unsafe { libc::isatty(0) == 1 && libc::isatty(1) == 1 };
+        if login::wants_plain_shell(&args) || !tty {
+            let error = login::exec_real_shell(login, &args);
+            eprintln!("farsh: cannot start {}: {error}", shell::shell_program());
+            std::process::exit(127);
+        }
+        login::set_login(login);
+        if login {
+            login::install_panic_fallback();
+        }
+    }
     let (cols, rows) = terminal::size()?;
     terminal::enable_raw_mode()?;
     let output_mode = vt_output();
@@ -94,6 +112,13 @@ fn main() -> Result<()> {
         Err(error) => {
             restore_output(output_mode);
             let _ = terminal::disable_raw_mode();
+            // a login shell that cannot start farsh's session is still a shell
+            #[cfg(unix)]
+            if login::login() {
+                eprintln!("farsh: {error:#}");
+                let error = login::exec_real_shell(true, &[]);
+                eprintln!("farsh: cannot start {}: {error}", shell::shell_program());
+            }
             return Err(error);
         }
     };
@@ -348,6 +373,12 @@ impl App {
         let mut screen = Grid::unknown(cols, rows);
         let mut frame = Grid::new(cols, rows);
         let mut dirty = true;
+        // a debug build can be made to fail, to see a login session survive it
+        #[cfg(debug_assertions)]
+        if std::env::var_os("FARSH_DEBUG_PANIC").is_some() {
+            panic!("FARSH_DEBUG_PANIC");
+        }
+
         while !self.quit {
             if self.shell.pump() {
                 dirty = true;

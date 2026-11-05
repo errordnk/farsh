@@ -37,31 +37,46 @@ pub struct Integration {
 /// The arguments and environment that make `program` print OSC 7 before each
 /// prompt; `dir` is a scratch folder for the start-up files bash and zsh need.
 /// The user's own start-up files still run first.
-pub fn integration(kind: Kind, dir: &Path) -> std::io::Result<Integration> {
+///
+/// `login`: the shell is a login shell (farsh is the user's shell), which
+/// reads the user's login files. A real `bash -l` ignores `--rcfile`, and a
+/// prompt tool of the user's (starship...) replaces a `PROMPT_COMMAND` given
+/// in the environment, so bash's hook must come after the user's files:
+/// the rcfile reads what a login bash reads, in its order, then the hook (the
+/// differences: `shopt login_shell` is off, `.bash_logout` is run by a trap).
+/// zsh gets stubs for `.zprofile` and `.zlogin` that read the user's.
+pub fn integration(kind: Kind, dir: &Path, login: bool) -> std::io::Result<Integration> {
     Ok(match kind {
         Kind::PowerShell => Integration {
             // Runs after the profile, so the prompt it wraps is the user's own.
-            args: vec!["-NoExit".into(), "-Command".into(), POWERSHELL_HOOK.into()],
+            args: [if login { vec!["-Login".to_string()] } else { vec![] }, vec!["-NoExit".into(), "-Command".into(), POWERSHELL_HOOK.into()]].concat(),
             env: vec![],
         },
         Kind::Bash => {
             std::fs::create_dir_all(dir)?;
             let rc = dir.join("bashrc");
-            std::fs::write(&rc, format!("{DIR_FN}{BASH_RC}"))?;
+            let init = if login { BASH_LOGIN } else { BASH_USER_RC };
+            std::fs::write(&rc, format!("{DIR_FN}{init}{BASH_HOOK}"))?;
             Integration { args: vec!["--rcfile".into(), rc.display().to_string(), "-i".into()], env: vec![] }
         }
         Kind::Zsh => {
             std::fs::create_dir_all(dir)?;
-            for (name, text) in [(".zshenv", ZSH_ENV.to_string()), (".zshrc", format!("{DIR_FN}{ZSH_RC}"))] {
+            let stub = |file: &str| format!("[ -f \"${{FARSH_ZDOTDIR:-$HOME}}/{file}\" ] && . \"${{FARSH_ZDOTDIR:-$HOME}}/{file}\"\n");
+            for (name, text) in [
+                (".zshenv", ZSH_ENV.to_string()),
+                (".zprofile", stub(".zprofile")),
+                (".zshrc", format!("{DIR_FN}{ZSH_RC}")),
+                (".zlogin", stub(".zlogin")),
+            ] {
                 std::fs::write(dir.join(name), text)?;
             }
             let real = std::env::var("ZDOTDIR").unwrap_or_else(|_| std::env::var("HOME").unwrap_or_default());
             Integration {
-                args: vec![],
+                args: if login { vec!["-l".into()] } else { vec![] },
                 env: vec![("ZDOTDIR".into(), dir.display().to_string()), ("FARSH_ZDOTDIR".into(), real)],
             }
         }
-        Kind::Other => Integration::default(),
+        Kind::Other => Integration { args: if login { vec!["-l".into()] } else { vec![] }, env: vec![] },
     })
 }
 
@@ -78,8 +93,17 @@ $p = (Get-Location).ProviderPath -replace '\\\\', '/'; \
 const DIR_FN: &str = "__farsh_cygpath=$(command -v cygpath 2>/dev/null)\n\
 __farsh_dir() { if [ -n \"$__farsh_cygpath\" ]; then printf '/%s' \"$(cygpath -m \"$PWD\")\"; else printf '%s' \"$PWD\"; fi; }\n";
 
-const BASH_RC: &str = "[ -f ~/.bashrc ] && . ~/.bashrc\n\
-__farsh_osc7() { printf '\\033]7;file://%s%s\\007' \"$HOSTNAME\" \"$(__farsh_dir)\"; }\n\
+const BASH_USER_RC: &str = "[ -f ~/.bashrc ] && . ~/.bashrc\n";
+
+/// What a login bash reads: /etc/profile, then the first of the user's three files.
+const BASH_LOGIN: &str = "[ -f /etc/profile ] && . /etc/profile\n\
+if [ -f ~/.bash_profile ]; then . ~/.bash_profile\n\
+elif [ -f ~/.bash_login ]; then . ~/.bash_login\n\
+elif [ -f ~/.profile ]; then . ~/.profile\n\
+fi\n\
+trap '[ -f ~/.bash_logout ] && . ~/.bash_logout' EXIT\n";
+
+const BASH_HOOK: &str = "__farsh_osc7() { printf '\\033]7;file://%s%s\\007' \"$HOSTNAME\" \"$(__farsh_dir)\"; }\n\
 PROMPT_COMMAND=\"__farsh_osc7${PROMPT_COMMAND:+;$PROMPT_COMMAND}\"\n";
 
 const ZSH_ENV: &str = "[ -f \"${FARSH_ZDOTDIR:-$HOME}/.zshenv\" ] && . \"${FARSH_ZDOTDIR:-$HOME}/.zshenv\"\n";
