@@ -163,7 +163,8 @@ over the shell screen.
     Ctrl+Shift+Enter, RightCtrl/Ctrl+Shift+0..9, Ctrl+Shift+F3/F4,
     Alt+Shift+F9 are left out, Alt++ is the keypad's (the main keyboard's
     `+` takes Shift), and the key bar changes only for Shift, Ctrl or Alt
-    alone. AltGr's characters (Ctrl+Alt + a non-Latin key) are typed text.
+    alone: held by itself for 150 ms, and after two held together not until
+    all are let go (`src/modkeys.rs`), so a chord never flickers it. AltGr's characters (Ctrl+Alt + a non-Latin key) are typed text.
   - Ctrl+I (the filters, `src/filter.rs`: filefilter.cpp, the dialog of
     filefilterparams.cpp without the highlighting part) is often sent as
     Tab by terminals: then the menu is the way. Each panel keeps its marks

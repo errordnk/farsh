@@ -7,36 +7,89 @@
 //! modifier key goes to it unseen. A terminal sends these keys in
 //! win32-input-mode (Windows Terminal, Som). Elsewhere there is no way to
 //! hear them, and the key bar stays plain.
+//!
+//! The key bar follows one modifier alone, never two: a modifier shows once
+//! it has been held by itself for [`SETTLE`] (the second key of Ctrl+Shift
+//! comes a moment after the first), and after two or more held together
+//! nothing shows until all of them are let go (they are let go one by one).
 
-use std::sync::atomic::{AtomicU8, Ordering};
-use std::time::Duration;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 pub const SHIFT: u8 = 1;
 pub const CTRL: u8 = 2;
 pub const ALT: u8 = 4;
 
-static HELD: AtomicU8 = AtomicU8::new(0);
+/// How long a modifier is held alone before the key bar shows it.
+const SETTLE: Duration = Duration::from_millis(150);
 
-/// The modifiers held now (`SHIFT | CTRL | ALT`).
-pub fn held() -> u8 {
-    HELD.load(Ordering::Relaxed)
+#[derive(Clone, Copy)]
+struct State {
+    /// The modifiers held now.
+    held: u8,
+    /// What the key bar shows.
+    shown: u8,
+    /// Two or more were held together since all were last let go.
+    chord: bool,
+    /// When `held` last changed.
+    since: Instant,
 }
 
-fn set(state: u8) -> bool {
-    HELD.swap(state, Ordering::Relaxed) != state
+static STATE: Mutex<Option<State>> = Mutex::new(None);
+
+impl State {
+    fn new(now: Instant) -> Self {
+        Self { held: 0, shown: 0, chord: false, since: now }
+    }
+
+    fn set(&mut self, held: u8, now: Instant) {
+        if held != self.held {
+            self.held = held;
+            self.since = now;
+        }
+        if held.count_ones() > 1 {
+            self.chord = true;
+        } else if held == 0 {
+            self.chord = false;
+        }
+    }
+
+    /// Settles `shown`; true when it changed.
+    fn settle(&mut self, now: Instant) -> bool {
+        let shown = if self.chord || self.held.count_ones() != 1 {
+            0
+        } else if now.duration_since(self.since) >= SETTLE {
+            self.held
+        } else {
+            self.shown & self.held
+        };
+        std::mem::replace(&mut self.shown, shown) != shown
+    }
+}
+
+fn with<T>(f: impl FnOnce(&mut State) -> T) -> T {
+    let mut state = STATE.lock().unwrap_or_else(|e| e.into_inner());
+    f(state.get_or_insert_with(|| State::new(Instant::now())))
+}
+
+/// The modifier the key bar shows (`SHIFT`, `CTRL`, `ALT` or none).
+pub fn held() -> u8 {
+    with(|state| state.shown)
+}
+
+#[cfg_attr(not(windows), allow(dead_code))]
+fn set(held: u8) {
+    with(|state| state.set(held, Instant::now()));
 }
 
 /// Waits up to `timeout` for input. Returns (input for crossterm is there,
-/// the modifiers changed).
+/// what the key bar shows changed).
 pub fn wait(timeout: Duration) -> std::io::Result<(bool, bool)> {
     #[cfg(windows)]
-    {
-        system::wait(timeout)
-    }
+    let input = system::wait(timeout)?;
     #[cfg(not(windows))]
-    {
-        Ok((crossterm::event::poll(timeout)?, false))
-    }
+    let input = crossterm::event::poll(timeout)?;
+    Ok((input, with(|state| state.settle(Instant::now()))))
 }
 
 /// The modifiers in a console's control key state.
@@ -98,16 +151,15 @@ mod system {
         }) as HANDLE
     }
 
-    pub fn wait(timeout: Duration) -> std::io::Result<(bool, bool)> {
+    pub fn wait(timeout: Duration) -> std::io::Result<bool> {
         let handle = input();
         if handle == INVALID_HANDLE_VALUE {
-            return Ok((crossterm::event::poll(timeout)?, false));
+            return crossterm::event::poll(timeout);
         }
         let millis = timeout.as_millis().min(u32::MAX as u128 - 1) as u32;
         if unsafe { WaitForSingleObject(handle, millis) } != WAIT_OBJECT_0 {
-            return Ok((false, false));
+            return Ok(false);
         }
-        let mut changed = false;
         loop {
             let mut record: INPUT_RECORD = unsafe { std::mem::zeroed() };
             let mut count = 0u32;
@@ -115,30 +167,30 @@ mod system {
                 return Err(std::io::Error::last_os_error());
             }
             if count == 0 {
-                return Ok((false, changed));
+                return Ok(false);
             }
             match u32::from(record.EventType) {
                 KEY_EVENT => {
                     let key = unsafe { record.Event.KeyEvent };
                     let down = key.bKeyDown != 0;
                     if let Some(held) = super::after_modifier_key(key.wVirtualKeyCode, down, key.dwControlKeyState) {
-                        changed |= super::set(held);
+                        super::set(held);
                         // crossterm would only throw it away
                         let mut taken = 0u32;
                         unsafe { ReadConsoleInputW(handle, &mut record, 1, &mut taken) };
                         continue;
                     }
-                    changed |= super::set(super::from_control_state(key.dwControlKeyState));
+                    super::set(super::from_control_state(key.dwControlKeyState));
                 }
                 MOUSE_EVENT => {
                     let mouse = unsafe { record.Event.MouseEvent };
-                    changed |= super::set(super::from_control_state(mouse.dwControlKeyState));
+                    super::set(super::from_control_state(mouse.dwControlKeyState));
                 }
                 // keys let go elsewhere are never heard of
-                FOCUS_EVENT => changed |= super::set(0),
+                FOCUS_EVENT => super::set(0),
                 _ => {}
             }
-            return Ok((true, changed));
+            return Ok(true);
         }
     }
 }
@@ -156,5 +208,35 @@ mod tests {
         assert_eq!(after_modifier_key(0x70, true, 0), None);
         assert_eq!(from_control_state(0x04 | 0x01), CTRL | ALT);
         assert_eq!(from_control_state(0x100), 0);
+    }
+
+    #[test]
+    fn one_modifier_alone_shows_two_never() {
+        let t0 = Instant::now();
+        let at = |ms| t0 + Duration::from_millis(ms);
+        let mut state = State::new(t0);
+        // Ctrl alone, held long enough
+        state.set(CTRL, at(0));
+        assert!(!state.settle(at(100)));
+        assert!(state.settle(at(150)));
+        assert_eq!(state.shown, CTRL);
+        state.set(0, at(300));
+        assert!(state.settle(at(300)));
+        assert_eq!(state.shown, 0);
+        // Ctrl, then Shift a moment later, let go one by one: nothing shows
+        state.set(CTRL, at(1000));
+        state.set(CTRL | SHIFT, at(1060));
+        state.set(SHIFT, at(1500));
+        assert!(!state.settle(at(2000)));
+        state.set(0, at(2100));
+        assert!(!state.settle(at(2100)));
+        // Ctrl shown, then Alt added: back to plain, and stays plain
+        state.set(CTRL, at(3000));
+        assert!(state.settle(at(3200)));
+        state.set(CTRL | ALT, at(3300));
+        assert!(state.settle(at(3300)));
+        state.set(CTRL, at(3400));
+        assert!(!state.settle(at(4000)));
+        assert_eq!(state.shown, 0);
     }
 }
