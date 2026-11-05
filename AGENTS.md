@@ -145,6 +145,12 @@ over the shell screen.
   (select/unselect all), the read-only Descript.ion question is an error.
 - A left click on the top row (the panels' frame) opens the menu bar, on
   the title under the mouse, as in Far with the menu bar hidden.
+- The mouse is farsh's only while the panels or something over them are
+  shown, or a program in the shell asked for it (`App::sync_mouse`; on
+  Windows just ENABLE_MOUSE_INPUT, with QuickEdit when it is off). Over the
+  shell's own output (Ctrl+O) the terminal selects, copies and pastes with a
+  right click itself; over the panels it selects with Shift (Som, Windows
+  Terminal). Interface.Mouse off leaves the mouse to the terminal.
 - The Commands menu is whole. Its lists are Far's VMenu (`src/vmenu.rs`:
   centered, MaxHeight, scroll bar, `&` and AssignHighlights hot keys, a
   bottom title, keys it does not use go back to the caller); a dialog a

@@ -59,7 +59,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use crossterm::event::{
-    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton,
+    self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton,
     MouseEvent, MouseEventKind,
 };
 use crossterm::terminal;
@@ -84,9 +84,13 @@ fn main() -> Result<()> {
 
     terminal::enable_raw_mode()?;
     let mut out = std::io::stdout();
-    crossterm::execute!(out, terminal::EnterAlternateScreen, EnableMouseCapture, crossterm::cursor::Hide)?;
+    // the mouse is taken only while farsh needs it (`App::sync_mouse`)
+    crossterm::execute!(out, terminal::EnterAlternateScreen, crossterm::cursor::Hide)?;
     let result = app.run(cols, rows);
-    crossterm::execute!(out, crossterm::cursor::Show, DisableMouseCapture, terminal::LeaveAlternateScreen)?;
+    if app.mouse == Some(true) {
+        let _ = mouse_capture(false);
+    }
+    crossterm::execute!(out, crossterm::cursor::Show, terminal::LeaveAlternateScreen)?;
     terminal::disable_raw_mode()?;
     result
 }
@@ -102,6 +106,46 @@ fn system_dlls_only() {
 
 #[cfg(not(windows))]
 fn system_dlls_only() {}
+
+/// Takes the mouse from the terminal (`on`) or gives it back, so that it
+/// selects text itself. On Windows only the console's mouse flag changes:
+/// crossterm's DisableMouseCapture would put back the mode it found, without
+/// ENABLE_WINDOW_INPUT, and the resizes would be lost. Without the mouse a
+/// plain console gets its QuickEdit selection back; ConPTY tells its terminal
+/// to stop reporting the mouse.
+#[cfg(windows)]
+fn mouse_capture(on: bool) -> std::io::Result<()> {
+    use windows_sys::Win32::System::Console::{
+        ENABLE_EXTENDED_FLAGS, ENABLE_MOUSE_INPUT, ENABLE_QUICK_EDIT_MODE, ENABLE_WINDOW_INPUT, GetConsoleMode, GetStdHandle,
+        STD_INPUT_HANDLE, SetConsoleMode,
+    };
+    unsafe {
+        let input = GetStdHandle(STD_INPUT_HANDLE);
+        let mut mode = 0;
+        if GetConsoleMode(input, &mut mode) == 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        mode |= ENABLE_EXTENDED_FLAGS | ENABLE_WINDOW_INPUT;
+        if on {
+            mode = (mode | ENABLE_MOUSE_INPUT) & !ENABLE_QUICK_EDIT_MODE;
+        } else {
+            mode = (mode | ENABLE_QUICK_EDIT_MODE) & !ENABLE_MOUSE_INPUT;
+        }
+        if SetConsoleMode(input, mode) == 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn mouse_capture(on: bool) -> std::io::Result<()> {
+    if on {
+        crossterm::execute!(std::io::stdout(), event::EnableMouseCapture)
+    } else {
+        crossterm::execute!(std::io::stdout(), event::DisableMouseCapture)
+    }
+}
 
 /// What is on top of the shell and the panels.
 enum Overlay {
@@ -165,6 +209,8 @@ struct App {
     maximized: bool,
     /// The minute the clock showed last.
     clock: String,
+    /// Whether the mouse is taken from the terminal (None: not set yet).
+    mouse: Option<bool>,
     /// A highlighting group whose color dialog is open, and the part a new one goes to.
     hl_pending: Option<(highlight::Group, usize, bool)>,
     hl_section: u8,
@@ -212,6 +258,7 @@ impl App {
             find_after_drive: false,
             maximized: false,
             clock: String::new(),
+            mouse: None,
             hl_pending: None,
             hl_section: 0,
             screens: Vec::new(),
@@ -254,6 +301,7 @@ impl App {
                 dirty = true;
             }
             self.after_event();
+            self.sync_mouse();
             // the clock moves on
             let minute = chrono::Local::now().format("%H:%M").to_string();
             if self.panels_visible && minute != self.clock {
@@ -599,6 +647,22 @@ impl App {
                     self.shell.write(&bytes, false);
                 }
             }
+        }
+    }
+
+    /// The mouse is farsh's while the panels or something over them are shown,
+    /// or a program in the shell asked for it (forwarded by `on_mouse`). Over
+    /// the shell's own output it stays the terminal's: it selects text into
+    /// the clipboard and pastes with a right click, as anywhere in Som. Over
+    /// the panels the terminal selects with Shift held (Som, Windows
+    /// Terminal). Far's Interface.Mouse off leaves it to the terminal always.
+    fn sync_mouse(&mut self) {
+        let wanted = settings::bool("Interface.Mouse")
+            && (self.panels_visible
+                || !matches!(self.overlay, Overlay::None)
+                || self.shell.mouse_mode().0 != vt100::MouseProtocolMode::None);
+        if self.mouse != Some(wanted) && mouse_capture(wanted).is_ok() {
+            self.mouse = Some(wanted);
         }
     }
 
