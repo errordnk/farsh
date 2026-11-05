@@ -12,6 +12,9 @@
 //! rights" (System.ElevationMode) says for what: modification (1), reading (2).
 //! A farsh already elevated asks nothing. Windows only.
 
+// elsewhere only the questions' types are used
+#![cfg_attr(not(windows), allow(dead_code))]
+
 use std::io;
 use std::path::{Path, PathBuf};
 
@@ -37,7 +40,6 @@ impl Why {
     }
 
     /// System.ElevationMode's bit: ELEVATION_MODIFY_REQUEST or ELEVATION_READ_REQUEST.
-    #[cfg_attr(not(windows), allow(dead_code))]
     fn mode(self) -> i64 {
         match self {
             Why::List | Why::GetAttributes => 2,
@@ -199,7 +201,6 @@ trait ReadExt: io::Read {
 
 impl<R: io::Read + ?Sized> ReadExt for R {}
 
-#[cfg_attr(not(windows), allow(dead_code))]
 fn decode(input: &mut impl io::Read) -> io::Result<Request> {
     let op = input.u8()?;
     let attributes = input.u32()?;
@@ -216,7 +217,6 @@ fn decode(input: &mut impl io::Read) -> io::Result<Request> {
 }
 
 /// A reply: the error code (0: done), then what was asked for.
-#[cfg_attr(not(windows), allow(dead_code))]
 fn encode_reply(result: &io::Result<Reply>) -> Vec<u8> {
     let mut out = Vec::new();
     match result {
@@ -243,7 +243,6 @@ fn encode_reply(result: &io::Result<Reply>) -> Vec<u8> {
     out
 }
 
-#[cfg_attr(not(windows), allow(dead_code))]
 fn decode_reply(request: &Request, input: &mut impl io::Read) -> io::Result<Reply> {
     let code = input.u32()?;
     if code != 0 {
