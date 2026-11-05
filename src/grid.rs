@@ -40,6 +40,15 @@ impl Grid {
         Self { cols, rows, cells: vec![cell; cols as usize * rows as usize] }
     }
 
+    /// The terminal scrolled its screen up by `n` rows: what is left moves up,
+    /// the new rows at the bottom are not known.
+    pub fn scroll_up(&mut self, n: usize) {
+        let n = n.min(self.rows as usize) * self.cols as usize;
+        self.cells.drain(..n);
+        let cell = Cell { text: "\u{FFFF}".into(), ..Cell::default() };
+        self.cells.extend(std::iter::repeat_n(cell, n));
+    }
+
     /// A copy of one row's cells.
     pub fn row(&self, row: u16) -> Vec<Cell> {
         let start = row as usize * self.cols as usize;

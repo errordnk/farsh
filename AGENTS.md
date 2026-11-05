@@ -151,6 +151,13 @@ over the shell screen.
   shell's own output (Ctrl+O) the terminal selects, copies and pastes with a
   right click itself; over the panels it selects with Shift (Som, Windows
   Terminal). Interface.Mouse off leaves the mouse to the terminal.
+- The shell is drawn on the terminal's MAIN screen (its alternate one only
+  while a program in the shell is on its alternate screen), so the terminal's
+  own scrollback holds the shell's output: the wheel scrolls it with the
+  panels hidden. vt100's `on_scroll` hands over the rows the shell pushes off
+  its top; `push_scrolled` writes each over a top row and scrolls it away with
+  a newline on the bottom row. While the panels or something over the shell
+  are shown the rows wait (up to 10000), so the order stays the shell's.
 - The Commands menu is whole. Its lists are Far's VMenu (`src/vmenu.rs`:
   centered, MaxHeight, scroll bar, `&` and AssignHighlights hot keys, a
   bottom title, keys it does not use go back to the caller); a dialog a

@@ -84,13 +84,25 @@ fn main() -> Result<()> {
 
     terminal::enable_raw_mode()?;
     let mut out = std::io::stdout();
+    // The shell is drawn on the terminal's main screen, so that what it
+    // prints goes into the terminal's own scrollback (`App::sync_screen`).
+    // What was on the screen goes there first: the rows above the cursor,
+    // and its own row unless the cursor starts it (an empty line).
+    let bottom = rows.saturating_sub(1);
+    let used = crossterm::cursor::position().map_or(rows, |(col, row)| row.min(bottom) + u16::from(col > 0));
+    crossterm::execute!(
+        out,
+        crossterm::cursor::Hide,
+        crossterm::cursor::MoveTo(0, bottom),
+        crossterm::style::Print("\n".repeat(used as usize))
+    )?;
     // the mouse is taken only while farsh needs it (`App::sync_mouse`)
-    crossterm::execute!(out, terminal::EnterAlternateScreen, crossterm::cursor::Hide)?;
     let result = app.run(cols, rows);
     if app.mouse == Some(true) {
         let _ = mouse_capture(false);
     }
-    crossterm::execute!(out, crossterm::cursor::Show, terminal::LeaveAlternateScreen)?;
+    let _ = app.leave(&mut out);
+    crossterm::execute!(out, crossterm::cursor::Show)?;
     terminal::disable_raw_mode()?;
     result
 }
@@ -106,6 +118,24 @@ fn system_dlls_only() {
 
 #[cfg(not(windows))]
 fn system_dlls_only() {}
+
+/// Puts `rows` into the terminal's scrollback: each is written over a top
+/// row, which the screen then scrolls away (a newline on the bottom row),
+/// as many at a time as the screen holds. Autowrap is off meanwhile, so a
+/// row wider than the screen (made before it shrank) is cut, not wrapped.
+fn push_scrolled(rows: &[String], height: u16, out: &mut impl Write) -> std::io::Result<()> {
+    use crossterm::cursor::MoveTo;
+    use crossterm::style::Print;
+    let height = height.max(1);
+    crossterm::queue!(out, Print("\x1b[?7l"))?;
+    for chunk in rows.chunks(height as usize) {
+        for (row, text) in chunk.iter().enumerate() {
+            crossterm::queue!(out, MoveTo(0, row as u16), Print("\x1b[m\x1b[2K"), Print(text), Print("\x1b[m"))?;
+        }
+        crossterm::queue!(out, MoveTo(0, height - 1), Print("\n".repeat(chunk.len())))?;
+    }
+    crossterm::queue!(out, Print("\x1b[?7h"))
+}
 
 /// Takes the mouse from the terminal (`on`) or gives it back, so that it
 /// selects text itself. On Windows only the console's mouse flag changes:
@@ -211,6 +241,10 @@ struct App {
     clock: String,
     /// Whether the mouse is taken from the terminal (None: not set yet).
     mouse: Option<bool>,
+    /// Whether the terminal shows its alternate screen (as the shell does).
+    alternate: bool,
+    /// Rows the shell pushed off its screen, not yet in the terminal's scrollback.
+    scrolled: std::collections::VecDeque<String>,
     /// A highlighting group whose color dialog is open, and the part a new one goes to.
     hl_pending: Option<(highlight::Group, usize, bool)>,
     hl_section: u8,
@@ -259,6 +293,8 @@ impl App {
             maximized: false,
             clock: String::new(),
             mouse: None,
+            alternate: false,
+            scrolled: std::collections::VecDeque::new(),
             hl_pending: None,
             hl_section: 0,
             screens: Vec::new(),
@@ -267,7 +303,8 @@ impl App {
 
     fn run(&mut self, cols: u16, rows: u16) -> Result<()> {
         let mut out = std::io::stdout();
-        let mut screen = Grid::new(cols, rows);
+        // the main screen shows what `main` scrolled away: not known
+        let mut screen = Grid::unknown(cols, rows);
         let mut frame = Grid::new(cols, rows);
         let mut dirty = true;
 
@@ -302,6 +339,9 @@ impl App {
             }
             self.after_event();
             self.sync_mouse();
+            if self.sync_screen(&mut screen, &mut out)? {
+                dirty = true;
+            }
             // the clock moves on
             let minute = chrono::Local::now().format("%H:%M").to_string();
             if self.panels_visible && minute != self.clock {
@@ -664,6 +704,57 @@ impl App {
         if self.mouse != Some(wanted) && mouse_capture(wanted).is_ok() {
             self.mouse = Some(wanted);
         }
+    }
+
+    /// The terminal follows the shell: its alternate screen while a program
+    /// there uses one, else its main screen, where the rows the shell pushes
+    /// off the top go into the terminal's own scrollback (the mouse wheel and
+    /// selection reach them there). While the panels or something over the
+    /// shell are shown the rows wait and go when it is in sight again, so the
+    /// scrollback keeps the shell's order. Returns whether the screen changed.
+    fn sync_screen(&mut self, screen: &mut Grid, out: &mut impl Write) -> std::io::Result<bool> {
+        let mut changed = false;
+        let alternate = self.shell.alternate_screen();
+        if alternate != self.alternate {
+            if alternate {
+                crossterm::queue!(out, terminal::EnterAlternateScreen)?;
+            } else {
+                crossterm::queue!(out, terminal::LeaveAlternateScreen)?;
+            }
+            self.alternate = alternate;
+            *screen = Grid::unknown(screen.cols, screen.rows);
+            changed = true;
+        }
+        self.scrolled.extend(self.shell.take_scrolled());
+        let excess = self.scrolled.len().saturating_sub(10_000);
+        self.scrolled.drain(..excess);
+        let shell_in_sight = !self.panels_visible && matches!(self.overlay, Overlay::None) && self.under.is_empty();
+        if self.alternate || !shell_in_sight || self.scrolled.is_empty() {
+            return Ok(changed);
+        }
+        let rows: Vec<String> = self.scrolled.drain(..).collect();
+        push_scrolled(&rows, screen.rows, out)?;
+        screen.scroll_up(rows.len());
+        Ok(true)
+    }
+
+    /// farsh ends: the terminal is left with the shell's screen, without the
+    /// panels, and the cursor at the start of the shell's line if that is
+    /// empty, else of the line under it.
+    fn leave(&mut self, out: &mut impl Write) -> std::io::Result<()> {
+        if self.alternate {
+            crossterm::queue!(out, terminal::LeaveAlternateScreen)?;
+        }
+        let (cols, rows) = self.size;
+        let mut frame = Grid::new(cols, rows);
+        self.shell.paint(&mut frame);
+        frame.flush(&mut Grid::unknown(cols, rows), None, out)?;
+        let row = self.shell.cursor_row();
+        crossterm::queue!(out, crossterm::cursor::MoveTo(0, row))?;
+        if !self.shell.cursor_line().0.is_empty() {
+            crossterm::queue!(out, crossterm::style::Print("\n"))?;
+        }
+        out.flush()
     }
 
     /// Whether a left click at (`col`, `row`) now is the second of a double click.

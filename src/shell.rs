@@ -17,7 +17,7 @@ pub struct Shell {
     writer: Box<dyn Write + Send>,
     child: Box<dyn Child + Send + Sync>,
     output: Receiver<Vec<u8>>,
-    parser: vt100::Parser,
+    parser: vt100::Parser<Scrolled>,
     /// The cursor line as the shell drew it when it last showed a bare prompt;
     /// the command line is empty while the line still equals this.
     prompt_line: String,
@@ -72,7 +72,7 @@ impl Shell {
                 }
             }
         });
-        Ok(Self { master: pair.master, writer, child, output, parser: vt100::Parser::new(nz(rows), nz(cols), 0), prompt_line: String::new(), awaiting_prompt: true, kind, osc7: Osc7::default(), cwd: None, first_output: true, prompts: 0 })
+        Ok(Self { master: pair.master, writer, child, output, parser: vt100::Parser::new_with_callbacks(nz(rows), nz(cols), 0, Scrolled::default()), prompt_line: String::new(), awaiting_prompt: true, kind, osc7: Osc7::default(), cwd: None, first_output: true, prompts: 0 })
     }
 
     /// Feeds what the shell wrote to the screen; reports whether there was any.
@@ -195,6 +195,20 @@ impl Shell {
     pub fn resize(&mut self, cols: u16, rows: u16) {
         let _ = self.master.resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 });
         self.parser.set_size(nz(rows), nz(cols));
+        // A lower screen pushes rows off the top here; the terminal did the
+        // same with its own picture (its reflow), so they are not sent again.
+        self.parser.callbacks_mut().rows.clear();
+    }
+
+    /// The rows of the shell's main screen that went off its top since the
+    /// last call, oldest first, as text with SGR attributes.
+    pub fn take_scrolled(&mut self) -> Vec<String> {
+        self.parser.callbacks_mut().rows.drain(..).collect()
+    }
+
+    /// Whether a program in the shell switched to the alternate screen.
+    pub fn alternate_screen(&self) -> bool {
+        self.parser.screen().alternate_screen()
     }
 
     pub fn cursor(&self) -> Option<(u16, u16)> {
@@ -229,6 +243,31 @@ impl Shell {
                 }
             }
         }
+    }
+}
+
+/// Rows the shell's main screen pushed off its top, kept for the terminal's
+/// own scrollback (`App::push_scrolled`).
+#[derive(Default)]
+struct Scrolled {
+    rows: std::collections::VecDeque<String>,
+}
+
+/// Rows kept while nothing takes them (the panels are shown); older ones go.
+const SCROLLED_MAX: usize = 10_000;
+
+impl vt100::Callbacks for Scrolled {
+    fn on_scroll(&mut self, contents: vt100::capture::RowContents<'_>, alternate_screen: bool) {
+        if alternate_screen {
+            return;
+        }
+        let mut row = String::new();
+        let _ = contents.write_formatted_basic(&mut row, &mut Default::default());
+        // the state is new for every row: no newline pending from a previous one
+        if self.rows.len() == SCROLLED_MAX {
+            self.rows.pop_front();
+        }
+        self.rows.push_back(row);
     }
 }
 
