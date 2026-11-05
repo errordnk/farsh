@@ -10,6 +10,8 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
+use crate::elevation::{self, Approval, Reply, Request, Why};
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     Copy,
@@ -119,6 +121,8 @@ pub enum Question {
     /// Extracting: arclite's "Overwrite file" (the new and the old: size, time).
     /// `update`: adding to an archive (Overwrite or Skip only).
     Exists { path: PathBuf, new: (u64, Option<SystemTime>), old: (u64, Option<SystemTime>), update: bool },
+    /// "Access denied": the operation needs administrator rights (`crate::elevation`).
+    Elevate { why: Why, path: PathBuf },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -135,6 +139,8 @@ pub enum Answer {
     Rename { remember: bool },
     /// Extracting: the new one written at the end of the old.
     Append { remember: bool },
+    /// "Access denied": OK or Skip, and the two check boxes.
+    Elevate(Approval),
     Cancel,
 }
 
@@ -370,6 +376,7 @@ impl Worker {
             Kind::Move => self.move_all(items),
             Kind::Pack | Kind::Unpack | Kind::Update | Kind::Test => Ok(()),
             Kind::Delete | Kind::Wipe => {
+                elevation::reset();
                 self.delete_folders |= !self.options.confirm_folders;
                 if !self.options.confirm_read_only {
                     self.read_only = Some(true);
@@ -541,20 +548,75 @@ impl Worker {
     /// takes it all at once (Far's RemoveToRecycleBin).
     fn recycle(&mut self, path: &Path) -> std::io::Result<()> {
         self.check_cancel()?;
-        let meta = fs::symlink_metadata(path)?;
-        if meta.is_dir() && !self.delete_folders && fs::read_dir(path)?.next().is_some() {
-            match self.ask(Question::FolderNotEmpty(path.to_path_buf()))? {
-                Answer::All => self.delete_folders = true,
-                Answer::Skip { .. } | Answer::SkipAll => return Ok(()),
-                _ => {}
+        let Some(meta) = self.stat(path)? else { return Ok(()) };
+        if meta.dir && !self.delete_folders {
+            let Some(children) = self.list(path)? else { return Ok(()) };
+            if !children.is_empty() {
+                match self.ask(Question::FolderNotEmpty(path.to_path_buf()))? {
+                    Answer::All => self.delete_folders = true,
+                    Answer::Skip { .. } | Answer::SkipAll => return Ok(()),
+                    _ => {}
+                }
             }
         }
         self.progress.from = path.display().to_string();
         self.send(false);
-        recycle_bin(path)?;
+        if !self.elevated(recycle_bin(path), Request::Recycle(path.to_path_buf()))? {
+            return Ok(());
+        }
         self.progress.files_done += 1;
         self.send(false);
         Ok(())
+    }
+
+    /// `request` failed with `error`: done with administrator rights, as
+    /// Far's elevation does, asking first. `Ok(None)`: the user said Skip.
+    fn elevate(&mut self, request: Request, error: std::io::Error) -> std::io::Result<Option<Reply>> {
+        elevation::retry(request, error, |why, path| {
+            Ok(match self.ask(Question::Elevate { why, path: path.to_path_buf() })? {
+                Answer::Elevate(approval) => approval,
+                _ => Approval { ok: false, for_all: true, dont_ask: false },
+            })
+        })
+    }
+
+    /// The outcome of a change: done (`true`), elevated when it was denied,
+    /// or skipped (`false`, and what holds it stays).
+    fn elevated(&mut self, result: std::io::Result<()>, request: Request) -> std::io::Result<bool> {
+        let Err(error) = result else { return Ok(true) };
+        let done = self.elevate(request, error)?.is_some();
+        self.kept |= !done;
+        Ok(done)
+    }
+
+    /// What `path` is (`None`: skipped).
+    fn stat(&mut self, path: &Path) -> std::io::Result<Option<Info>> {
+        match fs::symlink_metadata(path) {
+            Ok(meta) => Ok(Some(Info::of(&meta))),
+            Err(error) => match self.elevate(Request::Attributes(path.to_path_buf()), error)? {
+                Some(Reply::Attributes(attributes)) => Ok(Some(Info::from_attributes(attributes))),
+                _ => {
+                    self.kept = true;
+                    Ok(None)
+                }
+            },
+        }
+    }
+
+    /// What is in the folder `path`, by name (`None`: skipped).
+    fn list(&mut self, path: &Path) -> std::io::Result<Option<Vec<PathBuf>>> {
+        let mut names: Vec<std::ffi::OsString> = match fs::read_dir(path).and_then(|listing| listing.map(|e| e.map(|e| e.file_name())).collect()) {
+            Ok(names) => names,
+            Err(error) => match self.elevate(Request::List(path.to_path_buf()), error)? {
+                Some(Reply::List(entries)) => entries.into_iter().map(|(name, _)| name.into()).collect(),
+                _ => {
+                    self.kept = true;
+                    return Ok(None);
+                }
+            },
+        };
+        names.sort();
+        Ok(Some(names.into_iter().map(|name| path.join(name)).collect()))
     }
 
     /// Delete/Wipe of `path` and everything in it, as Far's ShellDelete
@@ -562,10 +624,10 @@ impl Worker {
     /// a read-only file too; the folder goes after what was in it.
     fn remove(&mut self, path: &Path) -> std::io::Result<()> {
         self.check_cancel()?;
-        let meta = fs::symlink_metadata(path)?;
-        if meta.is_dir() {
-            let has_something = fs::read_dir(path)?.next().is_some();
-            if has_something && !self.delete_folders {
+        let Some(meta) = self.stat(path)? else { return Ok(()) };
+        if meta.dir {
+            let Some(children) = self.list(path)? else { return Ok(()) };
+            if !children.is_empty() && !self.delete_folders {
                 match self.ask(Question::FolderNotEmpty(path.to_path_buf()))? {
                     Answer::All => self.delete_folders = true,
                     Answer::Skip { .. } | Answer::SkipAll => {
@@ -575,20 +637,27 @@ impl Worker {
                     _ => {}
                 }
             }
-            let mut children: Vec<_> = fs::read_dir(path)?.collect::<Result<_, _>>()?;
-            children.sort_by_key(|child| child.file_name());
             for child in children {
-                self.remove(&child.path())?;
+                self.remove(&child)?;
             }
             self.progress.from = path.display().to_string();
             self.send(false);
-            let removed = if self.kind == Kind::Wipe { erase_dir(path) } else { fs::remove_dir(path) };
+            let kept = self.kept;
+            let removed = if self.kind == Kind::Wipe {
+                erase_dir(path)
+            } else {
+                match fs::remove_dir(path) {
+                    // something in it stays: no use asking for rights
+                    Err(error) if kept => Err(error),
+                    removed => self.elevated(removed, Request::RemoveDirectory(path.to_path_buf())).map(|_| ()),
+                }
+            };
             return match removed {
-                Err(_) if self.kept => Ok(()),
+                Err(_) if kept => Ok(()),
                 other => other,
             };
         }
-        if is_read_only(&meta) {
+        if meta.read_only {
             let go = match self.read_only {
                 Some(all) => all,
                 None => match self.ask(Question::ReadOnly(path.to_path_buf()))? {
@@ -608,17 +677,16 @@ impl Worker {
                 self.kept = true;
                 return Ok(());
             }
-            let mut permissions = meta.permissions();
-            #[allow(clippy::permissions_set_readonly_false)]
-            permissions.set_readonly(false);
-            fs::set_permissions(path, permissions)?;
+            if !self.elevated(clear_read_only(path), Request::SetAttributes(path.to_path_buf(), meta.attributes & !FILE_ATTRIBUTE_READONLY))? {
+                return Ok(());
+            }
         }
         self.progress.from = path.display().to_string();
-        self.progress.file_size = meta.len();
+        self.progress.file_size = meta.len;
         self.progress.file_done = 0;
         self.send(false);
         // Far's confirm_erase_file_with_hardlinks: wiping voids every other name of it
-        if self.kind == Kind::Wipe && !meta.file_type().is_symlink() && link_count(path) > 1 {
+        if self.kind == Kind::Wipe && !meta.link && link_count(path) > 1 {
             let go = match self.hard_links {
                 Some(all) => all,
                 None => match self.ask(Question::HardLinks(path.to_path_buf()))? {
@@ -639,12 +707,14 @@ impl Worker {
                 return Ok(());
             }
         }
-        if is_dir_link(&meta) {
-            fs::remove_dir(path)?;
-        } else if self.kind == Kind::Wipe && !meta.file_type().is_symlink() {
+        if meta.dir_link {
+            if !self.elevated(fs::remove_dir(path), Request::RemoveDirectory(path.to_path_buf()))? {
+                return Ok(());
+            }
+        } else if self.kind == Kind::Wipe && !meta.link {
             self.erase_file(path)?;
-        } else {
-            fs::remove_file(path)?;
+        } else if !self.elevated(fs::remove_file(path), Request::DeleteFile(path.to_path_buf()))? {
+            return Ok(());
         }
         self.progress.files_done += 1;
         self.send(false);
@@ -712,7 +782,7 @@ impl Worker {
 
 /// SHFileOperation(FO_DELETE, FOF_ALLOWUNDO): into the Recycle Bin.
 #[cfg(windows)]
-fn recycle_bin(path: &Path) -> std::io::Result<()> {
+pub(crate) fn recycle_bin(path: &Path) -> std::io::Result<()> {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::UI::Shell::{SHFileOperationW, FOF_ALLOWUNDO, FOF_NOCONFIRMATION, FOF_NOERRORUI, FOF_SILENT, FO_DELETE, SHFILEOPSTRUCTW};
     let from: Vec<u16> = path.as_os_str().encode_wide().chain([0, 0]).collect();
@@ -721,6 +791,10 @@ fn recycle_bin(path: &Path) -> std::io::Result<()> {
     op.pFrom = from.as_ptr();
     op.fFlags = (FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_SILENT) as u16;
     let result = unsafe { SHFileOperationW(&mut op) };
+    // ERROR_ACCESS_DENIED, DE_ACCESSDENIEDSRC: the elevated farsh may do it
+    if result == 5 || result == 0x78 {
+        return Err(std::io::Error::from_raw_os_error(5));
+    }
     if result != 0 || op.fAnyOperationsAborted != 0 {
         return Err(std::io::Error::other(format!("{}: cannot move to the Recycle Bin ({result:#x})", path.display())));
     }
@@ -728,7 +802,7 @@ fn recycle_bin(path: &Path) -> std::io::Result<()> {
 }
 
 #[cfg(not(windows))]
-fn recycle_bin(path: &Path) -> std::io::Result<()> {
+pub(crate) fn recycle_bin(path: &Path) -> std::io::Result<()> {
     if fs::symlink_metadata(path)?.is_dir() { fs::remove_dir_all(path) } else { fs::remove_file(path) }
 }
 
@@ -769,6 +843,51 @@ fn link_count(path: &Path) -> u32 {
         use std::os::unix::fs::MetadataExt;
         fs::metadata(path).map_or(1, |m| m.nlink() as u32)
     }
+}
+
+const FILE_ATTRIBUTE_READONLY: u32 = 0x1;
+const FILE_ATTRIBUTE_DIRECTORY: u32 = 0x10;
+const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+
+/// What a delete needs to know of an item: from its metadata, or from the
+/// attributes the elevated farsh saw.
+#[derive(Clone, Copy, Debug)]
+struct Info {
+    /// A folder to go into (not a link to one).
+    dir: bool,
+    /// A symbolic link or a junction.
+    link: bool,
+    /// A link to a folder: removed as a folder on Windows.
+    dir_link: bool,
+    read_only: bool,
+    len: u64,
+    /// The Windows attributes (0 elsewhere).
+    attributes: u32,
+}
+
+impl Info {
+    fn of(meta: &fs::Metadata) -> Self {
+        #[cfg(windows)]
+        let attributes = std::os::windows::fs::MetadataExt::file_attributes(meta);
+        #[cfg(not(windows))]
+        let attributes = 0;
+        Self { dir: meta.is_dir(), link: meta.file_type().is_symlink(), dir_link: is_dir_link(meta), read_only: is_read_only(meta), len: meta.len(), attributes }
+    }
+
+    fn from_attributes(found: elevation::Attributes) -> Self {
+        let a = found.attributes;
+        let link = a & FILE_ATTRIBUTE_REPARSE_POINT != 0;
+        let dir = a & FILE_ATTRIBUTE_DIRECTORY != 0;
+        Self { dir: dir && !link, link, dir_link: dir && link, read_only: a & FILE_ATTRIBUTE_READONLY != 0 && !link, len: found.size, attributes: a }
+    }
+}
+
+/// Takes the read-only attribute off.
+fn clear_read_only(path: &Path) -> std::io::Result<()> {
+    let mut permissions = fs::symlink_metadata(path)?.permissions();
+    #[allow(clippy::permissions_set_readonly_false)]
+    permissions.set_readonly(false);
+    fs::set_permissions(path, permissions)
 }
 
 fn is_read_only(meta: &fs::Metadata) -> bool {
@@ -976,6 +1095,7 @@ mod tests {
                     Question::ReadOnly(path) => format!("read only {}", path.file_name().unwrap().to_string_lossy()),
                     Question::HardLinks(path) => format!("hard links {}", path.file_name().unwrap().to_string_lossy()),
                     Question::Exists { path, .. } => format!("exists {}", path.display()),
+                    Question::Elevate { path, .. } => format!("elevate {}", path.file_name().unwrap().to_string_lossy()),
                 });
                 job.answer(answers.get(asked.len() - 1).copied().unwrap_or(Answer::Cancel));
             }
@@ -996,6 +1116,26 @@ mod tests {
         result.unwrap();
         assert_eq!(asked, ["folder a"], "All: no more questions");
         assert!(!dir.join("a").exists());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A file nobody may delete (nor delete from its folder): "Access
+    /// denied" is asked about, Skip leaves it and the folders holding it.
+    #[cfg(windows)]
+    #[test]
+    fn a_denied_file_asks_for_rights_and_skip_keeps_it() {
+        let icacls = |args: &[&str]| assert!(std::process::Command::new("icacls").args(args).output().unwrap().status.success());
+        let dir = scratch("denied");
+        let (folder, file) = (dir.join("a"), dir.join("a").join("x.txt"));
+        icacls(&[file.to_str().unwrap(), "/deny", "*S-1-1-0:(D)"]);
+        icacls(&[folder.to_str().unwrap(), "/deny", "*S-1-1-0:(DC)"]);
+        let skip = Answer::Elevate(Approval { ok: false, for_all: true, dont_ask: false });
+        let (result, asked) = answering(start(Kind::Delete, vec![(folder.clone(), folder.clone())], Options::default()), &[Answer::All, skip]);
+        icacls(&[folder.to_str().unwrap(), "/remove:d", "*S-1-1-0"]);
+        icacls(&[file.to_str().unwrap(), "/remove:d", "*S-1-1-0"]);
+        result.unwrap();
+        assert_eq!(asked, ["folder a", "elevate x.txt"]);
+        assert!(file.exists() && !folder.join("sub").exists());
         fs::remove_dir_all(dir).unwrap();
     }
 

@@ -37,6 +37,7 @@ pub const RED: u8 = 4;
 pub const BROWN: u8 = 6;
 pub const LIGHT_GRAY: u8 = 7;
 pub const DARK_GRAY: u8 = 8;
+pub const LIGHT_BLUE: u8 = 9;
 pub const LIGHT_GREEN: u8 = 10;
 #[allow(dead_code)]
 pub const LIGHT_CYAN: u8 = 11;

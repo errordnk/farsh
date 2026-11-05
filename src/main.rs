@@ -13,6 +13,7 @@ mod colors;
 mod commands;
 mod cwd;
 mod dialog;
+mod elevation;
 mod diz;
 mod drives;
 mod editor;
@@ -73,6 +74,11 @@ use viewer::Viewer;
 
 fn main() -> Result<()> {
     system_dlls_only();
+    // the copy of farsh UAC started to do what needs administrator rights
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().map(String::as_str) == Some("--elevation") {
+        return Ok(elevation::serve(&args[1..])?);
+    }
     let (cols, rows) = terminal::size()?;
     let mut app = App::new(cols, rows)?;
 
@@ -383,6 +389,7 @@ impl App {
                     fileops::Question::ReadOnly(path) => Dialog::read_only(path, wipe),
                     fileops::Question::HardLinks(path) => Dialog::hard_links(path),
                     fileops::Question::Exists { path, new, old, update } => arcdialog::overwrite(path, *new, *old, *update),
+                    fileops::Question::Elevate { why, path } => Dialog::elevation(*why, path),
                 });
                 return true;
             }
@@ -639,7 +646,7 @@ impl App {
         self.send_to_shell(key);
     }
 
-    /// F1: Far's help at 	opic.
+    /// F1: Far's help at `topic`.
     fn open_help(&mut self, topic: &str) {
         let (cols, rows) = self.size;
         self.overlay = Overlay::Help(Box::new(help::Help::new(topic, cols, rows)));
@@ -1211,8 +1218,17 @@ impl App {
 fn answer(job: &mut Job, dialog: Dialog, outcome: dialog::Outcome) -> Option<Dialog> {
     match outcome {
         dialog::Outcome::Open => Some(dialog),
+        // Esc on "Access denied" is Skip, as in Far
+        dialog::Outcome::Closed if matches!(job.question, Some(fileops::Question::Elevate { .. })) => {
+            job.answer(Answer::Elevate(elevation::Approval { ok: false, for_all: true, dont_ask: false }));
+            None
+        }
         dialog::Outcome::Closed => {
             job.answer(Answer::Cancel);
+            None
+        }
+        dialog::Outcome::Pressed(_, id, values) if matches!(job.question, Some(fileops::Question::Elevate { .. })) => {
+            job.answer(Answer::Elevate(elevation::Approval { ok: id == "ok", for_all: values.checked("for_all"), dont_ask: values.checked("dont_ask") }));
             None
         }
         dialog::Outcome::Pressed(_, id, values) => {

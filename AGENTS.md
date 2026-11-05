@@ -75,6 +75,16 @@ over the shell screen.
   to nothing, renamed to `F3T*.tmp` and removed; a folder is renamed, then
   removed. The progress box is Far's delete_progress (76 wide, the wipe
   bar, "Files:", no total bar: DelShowTotal is off by default).
+- "Access denied" during a delete is Far's elevation (`src/elevation.rs`,
+  elevation.cpp): the 64x12 dialog (OK with the UAC shield `▀▄`, Skip; "Do
+  this for all current objects" on, "Do not ask again in the current
+  session"), then on OK a copy of farsh started through UAC (`farsh
+  --elevation <pipe> <pid>`, kept for the session) deletes, removes folders,
+  clears read-only, lists, reads attributes and recycles over a named pipe
+  only administrators may open, and serves only the pid that started it.
+  System.ElevationMode says for what (1 change, 2 read). Esc/Skip leaves the
+  item and the folders holding it. Windows only; copy and move are not
+  elevated yet.
 - Archives are arclite's (Far's archive plugin, plugins/arclite of Far
   3.0.6446), for 7z, zip, tar and gzip only (`src/archive.rs`: sevenz-rust2,
   zip, tar, flate2, all pure Rust). arclite's dialogs are laid out by its

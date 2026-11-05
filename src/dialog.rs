@@ -312,6 +312,10 @@ pub enum Outcome {
 
 // ---------------------------------------------------------------- building
 
+/// DIF_SETSHIELD: Far puts `▀▄ ` before the button's text and colours the
+/// two cells light blue on yellow.
+pub(crate) const SHIELD_OK: &str = "\u{2580}\u{2584} OK";
+
 pub(crate) fn text(text: impl Into<String>) -> Item {
     Item::Text { text: text.into(), align: Align::Left, highlight: false }
 }
@@ -469,6 +473,28 @@ impl Dialog {
             button("&Cancel", "cancel", false),
         ];
         Self::warning("Error", lines, buttons)
+    }
+
+    /// "Access denied" (elevation.cpp's ElevationApproveDlg, 64 by 12): what
+    /// is wanted, the object, "Do this for all current objects" (on), "Do not
+    /// ask again in the current session" (focused), OK with the UAC shield, Skip.
+    pub fn elevation(why: crate::elevation::Why, path: &std::path::Path) -> Self {
+        let (dlg_x, dlg_y) = (64u16, 12u16);
+        // a read-only edit with the cursor after the text: a long one shows its end
+        let object: Vec<char> = path.display().to_string().chars().collect();
+        let fits = usize::from(dlg_x - 6 - 5);
+        let object: String = object[object.len().saturating_sub(fits)..].iter().collect();
+        let items = vec![
+            text("You need to provide administrator permission"),
+            text(why.text()),
+            text(object),
+            Item::Check { id: "for_all", label: "Do this for &all current objects", checked: true, enabled: true },
+            Item::Check { id: "dont_ask", label: "Do not ask again in the current session", checked: false, enabled: true },
+            Item::Separator(None),
+            Item::Buttons(vec![button(SHIELD_OK, "ok", true), button("Skip", "skip", false)]),
+        ];
+        let places = vec![at(5, 2), at(5, 3), span(5, 4, dlg_x - 6), at(5, 6), at(5, 7), at(-1, dlg_y - 4), at(-1, dlg_y - 3)];
+        Self::placed("Access denied".into(), (dlg_x, dlg_y), items, places, 4, None, Action::Conflict)
     }
 
     /// Far's Message(MSG_WARNING): the lines centered, a separator, the buttons.
@@ -1449,6 +1475,9 @@ impl Dialog {
                         let (open, close) = if b.default { ('{', '}') } else { ('[', ']') };
                         grid.put(*bx, y, &format!("{open} "), fg, bg);
                         put_label(grid, *bx + 2, y, b.label, fg, bg, hot);
+                        if b.label == SHIELD_OK {
+                            grid.put(*bx + 2, y, "\u{2580}\u{2584}", palette::fg(palette::LIGHT_BLUE), palette::bg(palette::YELLOW));
+                        }
                         grid.put(*bx + 2 + label_len(b.label), y, &format!(" {close}"), fg, bg);
                     }
                 }
