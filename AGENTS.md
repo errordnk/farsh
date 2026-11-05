@@ -78,7 +78,8 @@ over the shell screen.
 - "Access denied" during a delete is Far's elevation (`src/elevation.rs`,
   elevation.cpp): the 64x12 dialog (OK with the UAC shield `▀▄`, Skip; "Do
   this for all current objects" on, "Do not ask again in the current
-  session"), then on OK a copy of farsh started through UAC (`farsh
+  session"; the focus is on OK, the user's choice: Far focuses "Do not ask
+  again"), then on OK a copy of farsh started through UAC (`farsh
   --elevation <pipe> <pid>`, kept for the session) deletes, removes folders,
   clears read-only, lists, reads attributes and recycles over a named pipe
   only administrators may open, and serves only the pid that started it.

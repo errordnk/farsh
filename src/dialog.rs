@@ -477,7 +477,8 @@ impl Dialog {
 
     /// "Access denied" (elevation.cpp's ElevationApproveDlg, 64 by 12): what
     /// is wanted, the object, "Do this for all current objects" (on), "Do not
-    /// ask again in the current session" (focused), OK with the UAC shield, Skip.
+    /// ask again in the current session", OK with the UAC shield (focused:
+    /// the user's choice; Far focuses "Do not ask again"), Skip.
     pub fn elevation(why: crate::elevation::Why, path: &std::path::Path) -> Self {
         let (dlg_x, dlg_y) = (64u16, 12u16);
         // a read-only edit with the cursor after the text: a long one shows its end
@@ -494,7 +495,7 @@ impl Dialog {
             Item::Buttons(vec![button(SHIELD_OK, "ok", true), button("Skip", "skip", false)]),
         ];
         let places = vec![at(5, 2), at(5, 3), span(5, 4, dlg_x - 6), at(5, 6), at(5, 7), at(-1, dlg_y - 4), at(-1, dlg_y - 3)];
-        Self::placed("Access denied".into(), (dlg_x, dlg_y), items, places, 4, None, Action::Conflict)
+        Self::placed("Access denied".into(), (dlg_x, dlg_y), items, places, 6, None, Action::Conflict)
     }
 
     /// Far's Message(MSG_WARNING): the lines centered, a separator, the buttons.
