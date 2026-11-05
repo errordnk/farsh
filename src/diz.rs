@@ -122,7 +122,6 @@ impl Diz {
     }
 }
 
-#[cfg(windows)]
 /// Options > File descriptions: the description list names.
 pub fn list_names() -> Vec<String> {
     crate::settings::string("Descriptions.ListNames").split(',').map(|n| n.trim().to_string()).filter(|n| !n.is_empty()).collect()
@@ -142,6 +141,7 @@ fn is_hidden(_: &Path) -> bool {
     false
 }
 
+#[cfg(windows)]
 fn set_hidden(path: &Path, hidden: bool) {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Storage::FileSystem::{FILE_ATTRIBUTE_HIDDEN, GetFileAttributesW, INVALID_FILE_ATTRIBUTES, SetFileAttributesW};
