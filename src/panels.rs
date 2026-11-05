@@ -661,6 +661,40 @@ impl Panel {
         (self.stripes * self.height).max(1)
     }
 
+    /// Far's `FileList::FindPartName`: the cursor to the next (`direct` 1) or
+    /// previous (-1) name that begins with `typed` (from the cursor itself unless
+    /// `next`), wrapping round; `..` is never found. Whether there is one.
+    pub fn find_part(&mut self, typed: &str, next: bool, direct: isize) -> bool {
+        let (mask, folders_only) = crate::fastfind::mask(typed);
+        let hit = |entry: &Entry| !entry.is_up() && (!folders_only || entry.is_dir) && crate::masks::name_matches(&mask, &entry.name);
+        let n = self.entries.len() as isize;
+        let cursor = self.cursor as isize;
+        let mut found = None;
+        let mut i = cursor + if next { direct } else { 0 };
+        while i >= 0 && i < n {
+            if hit(&self.entries[i as usize]) {
+                found = Some(i);
+                break;
+            }
+            i += direct;
+        }
+        if found.is_none() {
+            // round the end to the start (or the other way) up to the cursor
+            let mut i = if direct > 0 { 0 } else { n - 1 };
+            while if direct > 0 { i < cursor } else { i > cursor } {
+                if hit(&self.entries[i as usize]) {
+                    found = Some(i);
+                    break;
+                }
+                i += direct;
+            }
+        }
+        let Some(i) = found else { return false };
+        self.cursor = i as usize;
+        self.top = self.cursor.saturating_sub(self.height.saturating_sub(1) / 2);
+        true
+    }
+
     /// Far's PgUp / PgDn: a page less one, the list moving with the cursor.
     fn page_move(&mut self, down: bool) {
         let n = self.page().saturating_sub(1).max(1);
@@ -1248,6 +1282,10 @@ pub struct Panels {
     screen: (u16, u16),
     /// Where each key of the key bar ends (exclusive), at the last paint.
     key_ends: Vec<u16>,
+    /// Alt and a letter opened the quick search box (Far's FastFind): what is typed in it.
+    fast: Option<String>,
+    /// Where the box was last drawn: its cursor.
+    fast_cursor: Option<(u16, u16)>,
 }
 
 impl Panels {
@@ -1255,7 +1293,7 @@ impl Panels {
         let mut right = Panel::new(dir.clone());
         right.filter_area = 1;
         right.reload(None);
-        Self { left: Panel::new(dir), right, right_active: false, info: None, qview: None, screen: (0, 0), key_ends: Vec::new() }
+        Self { left: Panel::new(dir), right, right_active: false, info: None, qview: None, screen: (0, 0), key_ends: Vec::new(), fast: None, fast_cursor: None }
     }
 
     /// Save setup: each panel's folder, view and sort (Far's Panel.Left / Panel.Right).
@@ -1685,6 +1723,13 @@ impl Panels {
     /// typed command) is the shell's own command line; while that line is
     /// empty Enter, Home and End also belong to the panel.
     pub fn key(&mut self, key: KeyEvent, line_is_empty: bool) -> Key {
+        // the quick search box takes the keys while it is open (and goes with the panel it searched)
+        if self.fast.is_some() {
+            if self.active_ref().visible && self.active_ref().kind == Kind::Files {
+                return self.fast_key(key, line_is_empty);
+            }
+            self.fast = None;
+        }
         let plain = !key.modifiers.contains(KeyModifiers::CONTROL);
         let ctrl_only = key.modifiers == KeyModifiers::CONTROL;
         let alt_only = key.modifiers == KeyModifiers::ALT;
@@ -1750,6 +1795,8 @@ impl Panels {
             KeyCode::Char('+' | '=') if alt_only => return Key::Ask(Request::SelectGroup(true)),
             KeyCode::Char('-') if alt_only => return Key::Ask(Request::SelectGroup(false)),
             KeyCode::Char('*' | '8') if alt_only => self.invert_marks(),
+            // Far's FastFind: any other Alt and a character starts the quick search
+            KeyCode::Char(c) if alt_only && c != ' ' => return self.fast_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::ALT), line_is_empty),
             KeyCode::Char('m') if ctrl_only => self.restore_selection(),
             KeyCode::Char('g') if ctrl_only => return self.apply_command_request(),
             KeyCode::Char('z') if ctrl_only => return self.describe_request(),
@@ -1788,9 +1835,55 @@ impl Panels {
         Key::Taken
     }
 
+    /// Far's quick search (fastfind.cpp): what is typed goes to the box and the
+    /// cursor to the first name it begins; Ctrl+Enter goes to the next one;
+    /// Esc or F10 closes it; any other key closes it and is the panel's own.
+    fn fast_key(&mut self, key: KeyEvent, line_is_empty: bool) -> Key {
+        let typed = self.fast.clone();
+        let opening = typed.is_none();
+        let text = typed.unwrap_or_default();
+        self.fast = Some(text.clone());
+        let ctrl_only = key.modifiers == KeyModifiers::CONTROL;
+        match key.code {
+            KeyCode::Esc | KeyCode::F(10) if !opening => self.fast = None,
+            KeyCode::Enter if ctrl_only => {
+                self.active().find_part(&text, true, 1);
+            }
+            KeyCode::Char('y') if ctrl_only => self.fast = Some(String::new()),
+            KeyCode::Backspace if key.modifiers.is_empty() => {
+                let mut shorter = text.clone();
+                shorter.pop();
+                if self.active().find_part(&shorter, false, 1) {
+                    self.fast = Some(shorter);
+                }
+            }
+            // a character: with Alt (the first one) in lower case, as Far does
+            KeyCode::Char(c) if !key.modifiers.intersects(KeyModifiers::CONTROL) => {
+                let c = if key.modifiers.contains(KeyModifiers::ALT) { c.to_lowercase().next().unwrap_or(c) } else { c };
+                let longer = crate::fastfind::with_char(&text, c);
+                if self.active().find_part(&longer, false, 1) {
+                    self.fast = Some(longer);
+                }
+            }
+            _ => {
+                self.fast = None;
+                if opening {
+                    return Key::Pass;
+                }
+                return self.key(key, line_is_empty);
+            }
+        }
+        Key::Taken
+    }
+
     /// Handles a mouse event over the panels. `double` is a second click on
     /// the same spot in quick succession.
     pub fn mouse(&mut self, event: MouseEvent, double: bool) -> Key {
+        // a click closes the quick search box, and is nothing else
+        if self.fast.is_some() && matches!(event.kind, MouseEventKind::Down(_)) {
+            self.fast = None;
+            return Key::Taken;
+        }
         let (cols, rows) = self.screen;
         let col = event.column;
         // the panels are a row lower under the menu bar (not the key bar)
@@ -2058,12 +2151,20 @@ impl Panels {
         } else {
             self.key_ends.clear();
         }
+        // Far's quick search box, over the bottom of the panel that is searched
+        self.fast_cursor = None;
+        if let Some(text) = self.fast.clone() {
+            let (left, _, _, panel_height) = self.active_ref().area;
+            let bottom = (panel_height + u16::from(menu_bar)).saturating_sub(1);
+            let (x, y) = crate::fastfind::place(left, bottom, grid.cols, grid.rows);
+            self.fast_cursor = Some(crate::fastfind::paint(grid, x, y, &text));
+        }
         // Interface settings: Clock (Far's in the top right corner)
         if crate::settings::bool("Screen.Clock") {
             let clock = chrono::Local::now().format("%H:%M").to_string();
             grid.put(grid.cols.saturating_sub(5), 0, &clock, crate::colors::fg("Clock"), crate::colors::bg("Clock"));
         }
-        Some((cursor_col.min(grid.cols - 1), row))
+        Some(self.fast_cursor.unwrap_or((cursor_col.min(grid.cols - 1), row)))
     }
 
     /// Whether the panels start one row lower (the menu bar always shown).
@@ -2337,6 +2438,75 @@ mod tests {
         panels.key(key(KeyCode::Up), true);
         panels.key(key(KeyCode::Insert), true);
         assert_eq!(panels.active_ref().sources(), [dir.join("Alpha")]);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn quick_search_follows_what_is_typed_and_gives_the_other_keys_back() {
+        let dir = scratch("fast");
+        let mut panels = Panels::new(dir.clone());
+        let alt = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::ALT);
+        let name = |panels: &mut Panels| panels.active().current().map(|e| e.name.clone()).unwrap();
+        // Alt and a letter open the box and go to the first name with it, case ignored
+        assert_eq!(panels.key(alt('z'), true), Key::Taken);
+        assert_eq!(panels.fast.as_deref(), Some("z"));
+        assert_eq!(name(&mut panels), "zeta.txt");
+        // a letter that no name continues with is not taken into the text
+        panels.key(key(KeyCode::Char('x')), true);
+        assert_eq!(panels.fast.as_deref(), Some("z"));
+        // Backspace shortens it, Esc closes the box and leaves the cursor
+        panels.key(key(KeyCode::Backspace), true);
+        assert_eq!(panels.fast.as_deref(), Some(""));
+        panels.key(key(KeyCode::Esc), true);
+        assert_eq!(panels.fast, None);
+        assert_eq!(name(&mut panels), "zeta.txt");
+        // the next letters narrow the search; from the cursor on, then round the end
+        panels.key(alt('a'), true);
+        assert_eq!(name(&mut panels), "Alpha");
+        panels.key(key(KeyCode::Char('p')), true);
+        assert_eq!(panels.fast.as_deref(), Some("ap"));
+        assert_eq!(name(&mut panels), "apple.txt");
+        // Ctrl+Enter goes to the next such name: there is none, the cursor stays
+        panels.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL), true);
+        assert_eq!(name(&mut panels), "apple.txt");
+        // any other key closes the box and is the panel's: Up moves the cursor
+        panels.key(key(KeyCode::Up), true);
+        assert_eq!(panels.fast, None);
+        assert_eq!(name(&mut panels), "beta");
+        // a letter nothing begins with opens an empty box
+        panels.key(alt('q'), true);
+        assert_eq!(panels.fast.as_deref(), Some(""));
+        assert_eq!(name(&mut panels), "beta");
+        panels.key(key(KeyCode::Esc), true);
+        // a closing separator asks for folders
+        panels.key(alt('b'), true);
+        for c in "eta\\".chars() {
+            panels.key(key(KeyCode::Char(c)), true);
+        }
+        assert_eq!(panels.fast.as_deref(), Some("beta\\"));
+        panels.key(key(KeyCode::Esc), true);
+        // Alt+Minus is still the group mark, not a search
+        assert!(matches!(panels.key(alt('-'), true), Key::Ask(Request::SelectGroup(false))));
+        assert_eq!(panels.fast, None);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn quick_search_box_is_drawn_over_the_panel_bottom_with_the_cursor_in_it() {
+        let dir = scratch("fastbox");
+        let mut panels = Panels::new(dir.clone());
+        panels.key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::ALT), true);
+        let mut grid = Grid::new(100, 30);
+        let line = vec![Cell::default(); 100];
+        let cursor = panels.paint(&mut grid, &line, 0).unwrap();
+        // the left panel's bottom row is row 27 (one for the command line, one for the key bar)
+        assert_eq!(grid.cell_mut(9, 27).unwrap().text, "\u{2554}");
+        assert_eq!(grid.cell_mut(10, 28).unwrap().text, " ");
+        assert_eq!(grid.cell_mut(11, 28).unwrap().text, "a");
+        assert_eq!(cursor, (12, 28));
+        panels.key(key(KeyCode::Esc), true);
+        let cursor = panels.paint(&mut grid, &line, 3).unwrap();
+        assert_eq!(cursor, (3, 28), "the command line's cursor is back");
         std::fs::remove_dir_all(dir).unwrap();
     }
 

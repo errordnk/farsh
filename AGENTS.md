@@ -54,6 +54,18 @@ over the shell screen.
   (`Shell::clear_line`: Esc for PSReadLine/cmd on Windows, Ctrl+E Ctrl+U for
   readline, zle and PSReadLine's Emacs mode). Every OSC 7 re-learns the bare
   prompt, since keys typed into a running program stop `write` waiting for it.
+- Alt and a character over a file panel is Far's quick search (`src/fastfind.rs`,
+  fastfind.cpp and `FileList::FindPartName` of 3.0.6446): a 22 by 3 "Search"
+  box over the panel's bottom border, the command line and the key bar, from the
+  panel's ninth column; the first Alt character is lower-cased, what is typed
+  after it narrows the search to names that begin with it (case ignored, `*` and
+  `?` are wildcards, brackets plain, a closing `\` or `/` asks for folders; a
+  character no name continues with is not taken); Backspace shortens, Ctrl+Y
+  clears, Ctrl+Enter goes to the next such name, Esc or F10 or a click closes it,
+  any other key closes it and is the panel's own (Enter enters, the arrows move).
+  Alt+Plus, Alt+Minus and Alt+* stay the group marks (`Panels::fast_key`). Not
+  done: Ctrl+Shift+Enter (previous; two modifiers), paste into the box, Alt+Shift
+  as the first key (the one-modifier rule drops it).
 - Ctrl+A is Far's Attributes dialog (setattr.cpp of Far 3.0.6446, the
   user's build): `Layout::Placed` puts every item at Far's own X1/Y1/X2
   (80 by 21, C1 = 5, C2 = 32, the `┬│┴` and `├─╢` user separators, a row

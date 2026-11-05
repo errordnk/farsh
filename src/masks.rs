@@ -102,6 +102,13 @@ impl Masks {
     }
 }
 
+/// Whether `name` matches `pattern` (wildcards `*` and `?` and sets, case ignored), Far's CmpName.
+pub fn name_matches(pattern: &str, name: &str) -> bool {
+    let pattern: Vec<char> = pattern.chars().collect();
+    let name: Vec<char> = name.chars().collect();
+    cmp_name(&pattern, &name)
+}
+
 fn upper(c: char) -> char {
     c.to_uppercase().next().unwrap_or(c)
 }

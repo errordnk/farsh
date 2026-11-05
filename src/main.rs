@@ -40,6 +40,7 @@ mod options;
 mod mouse;
 mod login;
 mod srp;
+mod fastfind;
 #[cfg(unix)]
 mod rawinput;
 #[cfg(windows)]
