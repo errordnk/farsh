@@ -336,6 +336,7 @@ impl Shell {
                         bold: source.bold(),
                         underline: source.underline(),
                         reverse: source.inverse(),
+                        ul: None,
                     };
                 }
             }

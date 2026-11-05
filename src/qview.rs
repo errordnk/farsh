@@ -73,13 +73,18 @@ impl State {
             });
             info
         });
-        let viewer = if is_dir { None } else { Viewer::open(&path).ok() };
+        let viewer = if is_dir { None } else { Viewer::open_quick(&path).ok() };
         let file_type = if is_dir { String::new() } else { file_type(&path) };
         Self { path, viewer, file_type, scan }
     }
 
     pub fn viewer(&mut self) -> Option<&mut Viewer> {
         self.viewer.as_mut()
+    }
+
+    /// The placement of the file shown changed (a new track) and is not drawn yet.
+    pub fn viewer_busy(&self) -> bool {
+        self.viewer.as_ref().is_some_and(Viewer::busy)
     }
 
     pub fn scanning(&self) -> bool {

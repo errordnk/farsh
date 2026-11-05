@@ -194,6 +194,55 @@ over the shell screen.
   session never ends because farsh broke: if farsh cannot start its session
   or panics, the terminal is put right and the real shell takes over (`exec`
   as `-bash`). A debug build panics on `FARSH_DEBUG_PANIC` to show that.
+- F3 and the quick view (Ctrl+Q) show what Som shows through SRP, its
+  rich-content protocol, when farsh runs in Som (`SOM_WINDOW_ID`; `FARSH_SRP=1`
+  forces it): `src/srp/`. A placement is placeholder cells farsh draws
+  (`Grid::place`: U+10EEEE with a row and a column mark, foreground = session
+  id, underline color SGR 58 = file id, so `Cell` has `ul`) and the file's
+  bytes sent to the `somsrv` daemon on this machine (JSON `PutChunk`s over
+  its pipe/socket). Som fits the picture into the rectangle itself, so farsh
+  never asks the terminal for the cell size. The protocol is a small copy of
+  Som's (`srp/wire.rs`, `srp/pipe.rs`, `srp/placeholder.rs`; names and shape
+  must match `somsrv::protocol`, the wire test says what it looks like); the
+  copy and what Som could change so that none is needed are in
+  `docs/srp-findings.md`. farsh only connects to a running daemon: it never
+  starts or replaces one (a new `somsrv` ends every session, farsh lives in
+  one). The transfer runs in a thread (the file is read and sent while the
+  placement is already drawn: grid first, then bytes); dropping the viewer
+  cancels it; the quick view waits 150 ms on a file first. Done: pictures
+  (png, jpg, gif) and audio (mp3, flac, ogg, oga). Audio is played by Som
+  (decoding and speakers are there): farsh reads the shape, length and tags
+  from the headers (symphonia, `srp/audio.rs`), announces the track
+  (`AnnounceTrack`, `len: 0` = no playlist), sends the first 256 KiB, registers
+  a second connection as the range responder and answers Som's
+  `RequestByteRange` from the open file until `EndPlayback` or until the viewer
+  is dropped (then `StopPlayback`; the responder's blocked read is cut by
+  `Connection::close`). The whole viewer rectangle is the placement: Som
+  centers its 40x1 widget in it. Video (mp4, mkv, avi) goes the same way,
+  without a track announce and with the file's last 4 MiB sent along with its
+  front; its size, rate and codec are not probed (zeros, as `somsrp` off
+  Windows: Som reads the real ones and letterboxes). `.m3u`/`.m3u8` and `.cue`
+  (`srp/play.rs`, `srp/cue.rs`, ported from somsrp): each track is a placement
+  of its own (`Shared.ids` changes, `Media::busy` makes the viewer redraw), the
+  list runner moves on at `EndPlayback` or at the widget's previous/next
+  (`PlaylistStep`) or `n`/`p` in F3; http(s) entries are fetched by the daemon
+  (`FetchResource`); a cue sheet's track list is announced (`AnnounceCue`). Not
+  yet: HLS. A playlist line naming Yandex (`yandex:wave`) is the service's radio
+  (`srp/radio.rs`, ported from somsrp: My Wave in batches fetched through the
+  daemon's linked account, feedback and likes reported, the widget's like and
+  wave icons via `RadioControl`, `n`/`p` and the history kept in farsh); it
+  needs the account linked in `somsrv`, and a test daemon made from the user's
+  build uses that account too, so radio is not covered by daemon tests. Markdown
+  (`.md`, `run_markdown`): the file is sent with its folder, a second connection
+  registered with `RegisterMarkdownGrower` hears `GrowMarkdownRows` and
+  `Shared.rows` grows; F3 shows it over the whole screen with no bars (Som paints
+  a document over everything below its first cell, not only over its cells) and
+  scrolls by drawing a window of the placement's rows (`Grid::place_from`); the
+  last rows of a long document are reached with PgDn/arrows (the window may go
+  down to one row: Som paints more than the rows it asks for), not with End; see
+  `docs/srp-findings.md` item 14. A video's audio/subtitle stream is chosen with
+  `a`/`s` and a digit in F3 (the video restarts with that FFmpeg stream number;
+  farsh cannot list streams).
 - The mouse is farsh's only while the panels or something over them are
   shown, or a program in the shell asked for it (`App::sync_mouse`; on
   Windows just ENABLE_MOUSE_INPUT, with QuickEdit when it is off). Without

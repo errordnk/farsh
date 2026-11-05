@@ -39,6 +39,7 @@ mod optmenu;
 mod options;
 mod mouse;
 mod login;
+mod srp;
 #[cfg(unix)]
 mod rawinput;
 #[cfg(windows)]
@@ -433,6 +434,7 @@ impl App {
             }
             // A copy in progress, or a folder the quick view is counting, redraws as it goes.
             let busy = matches!(self.overlay, Overlay::Job(..))
+                || matches!(&self.overlay, Overlay::Viewer(viewer) if viewer.busy())
                 || matches!(&self.overlay, Overlay::Find(results) if results.busy())
                 || (self.panels_visible && self.panels.busy());
             let wait = if busy { 50 } else { 10 };
@@ -447,6 +449,16 @@ impl App {
                     dirty = true;
                 }
                 continue;
+            }
+            // Som resizes the pseudo-console without always sending the resize
+            // record (seen: the screen stayed at the old size until a key came),
+            // so the size is also looked at here.
+            if let Some((cols, rows)) = terminal::size().ok().filter(|size| *size != self.size) {
+                self.size = (cols, rows);
+                self.shell.resize(cols, rows);
+                screen = Grid::unknown(cols, rows);
+                frame = Grid::new(cols, rows);
+                dirty = true;
             }
             // Shift/Ctrl/Alt on their own change the key bar
             let (input, held_changed) = modkeys::wait(Duration::from_millis(wait))?;

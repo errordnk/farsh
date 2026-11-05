@@ -1,4 +1,5 @@
-//! F3: a plain text viewer over the whole screen.
+//! F3: a plain text viewer over the whole screen; pictures (and what else Som
+//! plays) are shown through SRP when farsh runs in Som.
 
 use std::io::Read;
 use std::path::Path;
@@ -54,6 +55,16 @@ pub struct Viewer {
     left: usize,
     /// Rows of text on the last screen painted.
     page: usize,
+    /// The placement of a file Som shows (SRP), instead of text.
+    media: Option<crate::srp::Media>,
+    /// The first row of a document's cells that is on the screen (a document is scrolled by its rows).
+    media_top: usize,
+    /// Scroll to the end of a document when it is next drawn (its rows are known then).
+    media_end: bool,
+    path: std::path::PathBuf,
+    streams: crate::srp::Streams,
+    /// `a` or `s` was pressed: the next digit is a stream number.
+    stream_key: Option<char>,
 }
 
 pub enum Outcome {
@@ -63,6 +74,22 @@ pub enum Outcome {
 
 impl Viewer {
     pub fn open(path: &Path) -> std::io::Result<Self> {
+        Self::open_for(path, false)
+    }
+
+    /// For the quick view: a file's transfer starts only after the cursor
+    /// has stayed on it a moment.
+    pub fn open_quick(path: &Path) -> std::io::Result<Self> {
+        Self::open_for(path, true)
+    }
+
+    fn open_for(path: &Path, quick: bool) -> std::io::Result<Self> {
+        if let Some(media) = crate::srp::Media::start(path, quick) {
+            let mut viewer = Self::from_text(&path.display().to_string(), "");
+            viewer.media = Some(media);
+            viewer.path = path.to_path_buf();
+            return Ok(viewer);
+        }
         let mut bytes = Vec::new();
         let file = std::fs::File::open(path)?;
         let size = file.metadata()?.len();
@@ -84,7 +111,48 @@ impl Viewer {
             top: 0,
             left: 0,
             page: 20,
+            media: None,
+            media_top: 0,
+            media_end: false,
+            path: std::path::PathBuf::new(),
+            streams: crate::srp::Streams::default(),
+            stream_key: None,
         }
+    }
+
+    /// Paints a placement (or why there is none) into a rectangle; false if
+    /// this viewer shows text.
+    fn paint_media(&mut self, grid: &mut Grid, x: u16, y: u16, width: u16, height: u16) -> bool {
+        let Some(media) = &self.media else { return false };
+        match media.status() {
+            crate::srp::Status::Failed(message) => {
+                let shown: String = message.chars().take(width as usize).collect();
+                grid.put(x, y, &shown, FG(), BG());
+            }
+            _ if media.kind == crate::srp::Kind::Markdown => {
+                // the rows of cells Som has asked for so far, seen through a window of the screen's height
+                let total = media.rows() as usize;
+                if std::mem::take(&mut self.media_end) {
+                    self.media_top = total.saturating_sub(height as usize);
+                }
+                // Som paints a little more than the rows it asked for: the last of them may be scrolled
+                // up to the top, so that the end of the text can be seen
+                self.media_top = self.media_top.min(total.saturating_sub(1));
+                let shown = total.saturating_sub(self.media_top).min(height as usize) as u16;
+                grid.place_from(x, y, width, shown, self.media_top as u16, media.ids());
+            }
+            _ => grid.place(x, y, width, height, media.ids()),
+        }
+        true
+    }
+
+    fn shows_document(&self) -> bool {
+        self.media.as_ref().is_some_and(|media| media.kind == crate::srp::Kind::Markdown)
+    }
+
+    /// Something of the transfer to Som changed (status, the track of a list) that is not drawn yet.
+    pub fn busy(&self) -> bool {
+        self.media.as_ref().is_some_and(crate::srp::Media::busy)
     }
 
     /// The file's name, as the screens list shows it.
@@ -93,6 +161,11 @@ impl Viewer {
     }
 
     fn scroll(&mut self, rows: isize) {
+        if self.shows_document() {
+            // clamped when painted, when the number of rows and the height are known
+            self.media_top = (self.media_top as isize + rows).max(0) as usize;
+            return;
+        }
         let last = self.lines.len().saturating_sub(1) as isize;
         self.top = (self.top as isize + rows).clamp(0, last) as usize;
     }
@@ -106,19 +179,56 @@ impl Viewer {
         }
     }
 
+    /// `a` or `s` and a digit choose the audio or subtitle stream of a video (as
+    /// `somsrp -a <n> -s <n>`): the video starts again with them.
+    fn choose_stream(&mut self, key: KeyCode) -> bool {
+        let is_video = self.media.as_ref().is_some_and(|media| media.kind == crate::srp::Kind::Video);
+        match (key, self.stream_key.take()) {
+            (KeyCode::Char(letter @ ('a' | 's')), _) if is_video => {
+                self.stream_key = Some(letter);
+                true
+            }
+            (KeyCode::Char(digit), Some(letter)) if digit.is_ascii_digit() => {
+                let number = Some(digit.to_digit(10).unwrap_or(0));
+                match letter {
+                    'a' => self.streams.audio = number,
+                    _ => self.streams.subtitle = number,
+                }
+                // the old placement is dropped (and stopped) when the new one takes its place
+                self.media = crate::srp::Media::start_with(&self.path, false, self.streams);
+                true
+            }
+            _ => false,
+        }
+    }
+
     pub fn key(&mut self, key: KeyEvent) -> Outcome {
+        if self.choose_stream(key.code) {
+            return Outcome::Open;
+        }
         let page = self.page.max(1) as isize;
         match key.code {
             KeyCode::Esc | KeyCode::F(3) | KeyCode::F(10) | KeyCode::Char('q') => return Outcome::Closed,
+            // the previous and next track of a list, as in somsrp
+            KeyCode::Char('n' | 'N') if self.media.as_ref().is_some_and(crate::srp::Media::is_list) => {
+                self.media.as_ref().inspect(|media| media.step(1));
+            }
+            KeyCode::Char('p' | 'P') if self.media.as_ref().is_some_and(crate::srp::Media::is_list) => {
+                self.media.as_ref().inspect(|media| media.step(-1));
+            }
             KeyCode::Up => self.scroll(-1),
             KeyCode::Down | KeyCode::Enter => self.scroll(1),
             KeyCode::PageUp => self.scroll(-page),
             KeyCode::PageDown | KeyCode::Char(' ') => self.scroll(page),
             KeyCode::Home => {
+                self.media_top = 0;
                 self.top = 0;
                 self.left = 0;
             }
-            KeyCode::End => self.top = self.lines.len().saturating_sub(self.page),
+            KeyCode::End => {
+                self.media_end = true;
+                self.top = self.lines.len().saturating_sub(self.page);
+            }
             KeyCode::Left => self.left = self.left.saturating_sub(8),
             KeyCode::Right => self.left += 8,
             _ => {}
@@ -130,6 +240,9 @@ impl Viewer {
     /// view's viewer: Far's ViewerIsWrap is on by default), no bars.
     pub fn paint_area(&mut self, grid: &mut Grid, x: u16, y: u16, width: u16, height: u16) {
         self.page = height as usize;
+        if self.paint_media(grid, x, y, width, height) {
+            return;
+        }
         let width = width.max(1) as usize;
         let mut row = 0u16;
         'lines: for line in self.lines.iter().skip(self.top) {
@@ -152,6 +265,13 @@ impl Viewer {
 
     pub fn paint(&mut self, grid: &mut Grid) {
         grid.fill_with(0, 0, grid.cols, grid.rows, FG(), BG());
+        // Som paints a document over everything below its first cell, not only over the
+        // cells it has: without bars to cover the whole screen is its place (as in somsrp)
+        if self.shows_document() && matches!(self.media.as_ref().map(crate::srp::Media::status), Some(crate::srp::Status::Sent | crate::srp::Status::Sending)) {
+            self.page = grid.rows as usize;
+            self.paint_media(grid, 0, 0, grid.cols, grid.rows);
+            return;
+        }
         if grid.rows < 3 {
             return;
         }
@@ -159,6 +279,25 @@ impl Viewer {
         let title: String = self.name.chars().take(grid.cols as usize).collect();
         grid.fill_with(0, 0, grid.cols, 1, BAR_FG(), BAR_BG());
         grid.put(0, 0, &title, BAR_FG(), BAR_BG());
+        if self.paint_media(grid, 0, 1, grid.cols, grid.rows - 2) {
+            let state = match self.media.as_ref().map(crate::srp::Media::status) {
+                Some(crate::srp::Status::Sending) => "sending...",
+                Some(crate::srp::Status::Failed(_)) => "failed",
+                _ => "shown by Som",
+            };
+            let track = match self.media.as_ref().and_then(crate::srp::Media::position) {
+                Some((index, len)) => format!(" track {}/{len} (n, p) --", index + 1),
+                None => String::new(),
+            };
+            let streams = match self.media.as_ref() {
+                Some(media) if media.kind == crate::srp::Kind::Video => " -- a/s + digit: audio/subtitle stream",
+                _ => "",
+            };
+            let status = format!(" {state}{track}{streams} -- Esc, F3 or F10 closes");
+            grid.fill_with(0, grid.rows - 1, grid.cols, 1, BAR_FG(), BAR_BG());
+            grid.put(0, grid.rows - 1, &status, BAR_FG(), BAR_BG());
+            return;
+        }
         for (row, line) in self.lines.iter().skip(self.top).take(self.page).enumerate() {
             let shown: String = line.chars().skip(self.left).take(grid.cols as usize).collect();
             grid.put(0, 1 + row as u16, &shown, FG(), BG());

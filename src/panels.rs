@@ -1483,7 +1483,8 @@ impl Panels {
     /// Whether something is still being counted for the quick view.
     pub fn busy(&self) -> bool {
         let shown = |panel: &Panel| panel.visible && panel.kind == Kind::QuickView;
-        (shown(&self.left) || shown(&self.right)) && self.qview.as_ref().is_some_and(crate::qview::State::scanning)
+        (shown(&self.left) || shown(&self.right))
+            && self.qview.as_ref().is_some_and(|state| state.scanning() || state.viewer_busy())
     }
 
     /// The panels' kinds, visibility and long names, for the menu.
