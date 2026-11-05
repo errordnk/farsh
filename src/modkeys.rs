@@ -21,7 +21,7 @@ pub const CTRL: u8 = 2;
 pub const ALT: u8 = 4;
 
 /// How long a modifier is held alone before the key bar shows it.
-const SETTLE: Duration = Duration::from_millis(150);
+const SETTLE: Duration = Duration::from_millis(50);
 
 #[derive(Clone, Copy)]
 struct State {
@@ -217,15 +217,15 @@ mod tests {
         let mut state = State::new(t0);
         // Ctrl alone, held long enough
         state.set(CTRL, at(0));
-        assert!(!state.settle(at(100)));
-        assert!(state.settle(at(150)));
+        assert!(!state.settle(at(30)));
+        assert!(state.settle(at(50)));
         assert_eq!(state.shown, CTRL);
         state.set(0, at(300));
         assert!(state.settle(at(300)));
         assert_eq!(state.shown, 0);
         // Ctrl, then Shift a moment later, let go one by one: nothing shows
         state.set(CTRL, at(1000));
-        state.set(CTRL | SHIFT, at(1060));
+        state.set(CTRL | SHIFT, at(1030));
         state.set(SHIFT, at(1500));
         assert!(!state.settle(at(2000)));
         state.set(0, at(2100));
