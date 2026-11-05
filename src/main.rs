@@ -38,6 +38,8 @@ mod modkeys;
 mod optmenu;
 mod options;
 mod mouse;
+#[cfg(windows)]
+mod rawkeys;
 mod palette;
 mod panels;
 mod profile;
@@ -80,29 +82,31 @@ fn main() -> Result<()> {
         return Ok(elevation::serve(&args[1..])?);
     }
     let (cols, rows) = terminal::size()?;
-    let mut app = App::new(cols, rows)?;
-
     terminal::enable_raw_mode()?;
+    let output_mode = vt_output();
+    // The shell starts where the terminal's cursor is (its ConPTY asks).
+    let (col, row) = crossterm::cursor::position().unwrap_or((0, 0));
+    shell::set_start_cursor(col, row.min(rows.saturating_sub(1)));
+    let mut app = match App::new(cols, rows) {
+        Ok(app) => app,
+        Err(error) => {
+            restore_output(output_mode);
+            let _ = terminal::disable_raw_mode();
+            return Err(error);
+        }
+    };
     let mut out = std::io::stdout();
-    // The shell is drawn on the terminal's main screen, so that what it
-    // prints goes into the terminal's own scrollback (`App::sync_screen`).
-    // What was on the screen goes there first: the rows above the cursor,
-    // and its own row unless the cursor starts it (an empty line).
-    let bottom = rows.saturating_sub(1);
-    let used = crossterm::cursor::position().map_or(rows, |(col, row)| row.min(bottom) + u16::from(col > 0));
-    crossterm::execute!(
-        out,
-        crossterm::cursor::Hide,
-        crossterm::cursor::MoveTo(0, bottom),
-        crossterm::style::Print("\n".repeat(used as usize))
-    )?;
-    // the mouse is taken only while farsh needs it (`App::sync_mouse`)
+    // Without panels the shell owns the terminal's main screen: its output
+    // goes there as it wrote it. The panels are on the alternate screen
+    // (`App::sync_screen`), the mouse is taken only while farsh needs it
+    // (`App::sync_mouse`).
     let result = app.run(cols, rows);
     if app.mouse == Some(true) {
         let _ = mouse_capture(false);
     }
-    let _ = app.leave(&mut out);
+    let _ = app.finish(&mut out);
     crossterm::execute!(out, crossterm::cursor::Show)?;
+    restore_output(output_mode);
     terminal::disable_raw_mode()?;
     result
 }
@@ -119,23 +123,44 @@ fn system_dlls_only() {
 #[cfg(not(windows))]
 fn system_dlls_only() {}
 
-/// Puts `rows` into the terminal's scrollback: each is written over a top
-/// row, which the screen then scrolls away (a newline on the bottom row),
-/// as many at a time as the screen holds. Autowrap is off meanwhile, so a
-/// row wider than the screen (made before it shrank) is cut, not wrapped.
-fn push_scrolled(rows: &[String], height: u16, out: &mut impl Write) -> std::io::Result<()> {
-    use crossterm::cursor::MoveTo;
-    use crossterm::style::Print;
-    let height = height.max(1);
-    crossterm::queue!(out, Print("\x1b[?7l"))?;
-    for chunk in rows.chunks(height as usize) {
-        for (row, text) in chunk.iter().enumerate() {
-            crossterm::queue!(out, MoveTo(0, row as u16), Print("\x1b[m\x1b[2K"), Print(text), Print("\x1b[m"))?;
+/// Windows: the console's output understands the shell's escape sequences,
+/// which are passed on as they are. Returns the mode it had, to put back.
+#[cfg(windows)]
+fn vt_output() -> Option<u32> {
+    use windows_sys::Win32::System::Console::{
+        ENABLE_PROCESSED_OUTPUT, ENABLE_VIRTUAL_TERMINAL_PROCESSING, GetConsoleMode, GetStdHandle, STD_OUTPUT_HANDLE,
+        SetConsoleMode,
+    };
+    unsafe {
+        let handle = GetStdHandle(STD_OUTPUT_HANDLE);
+        let mut mode = 0;
+        if GetConsoleMode(handle, &mut mode) == 0 {
+            return None;
         }
-        crossterm::queue!(out, MoveTo(0, height - 1), Print("\n".repeat(chunk.len())))?;
+        SetConsoleMode(handle, mode | ENABLE_PROCESSED_OUTPUT | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+        Some(mode)
     }
-    crossterm::queue!(out, Print("\x1b[?7h"))
 }
+
+#[cfg(windows)]
+fn restore_output(mode: Option<u32>) {
+    use windows_sys::Win32::System::Console::{GetStdHandle, STD_OUTPUT_HANDLE, SetConsoleMode};
+    if let Some(mode) = mode {
+        unsafe { SetConsoleMode(GetStdHandle(STD_OUTPUT_HANDLE), mode) };
+    }
+}
+
+#[cfg(not(windows))]
+fn vt_output() -> Option<u32> {
+    None
+}
+
+#[cfg(not(windows))]
+fn restore_output(_: Option<u32>) {}
+
+/// What the shell may write while the panels are up before the main screen is
+/// redrawn from farsh's copy of it instead.
+const PENDING_MAX: usize = 16 * 1024 * 1024;
 
 /// Takes the mouse from the terminal (`on`) or gives it back, so that it
 /// selects text itself. On Windows only the console's mouse flag changes:
@@ -241,10 +266,12 @@ struct App {
     clock: String,
     /// Whether the mouse is taken from the terminal (None: not set yet).
     mouse: Option<bool>,
-    /// Whether the terminal shows its alternate screen (as the shell does).
-    alternate: bool,
-    /// Rows the shell pushed off its screen, not yet in the terminal's scrollback.
-    scrolled: std::collections::VecDeque<String>,
+    /// Whether the terminal is on its alternate screen, where the panels are.
+    on_alt: bool,
+    /// What the shell wrote while the panels were up, for the main screen.
+    pending: Vec<u8>,
+    /// More came than `PENDING_MAX`: the screen is redrawn from farsh's copy.
+    pending_lost: bool,
     /// A highlighting group whose color dialog is open, and the part a new one goes to.
     hl_pending: Option<(highlight::Group, usize, bool)>,
     hl_section: u8,
@@ -293,8 +320,9 @@ impl App {
             maximized: false,
             clock: String::new(),
             mouse: None,
-            alternate: false,
-            scrolled: std::collections::VecDeque::new(),
+            on_alt: false,
+            pending: Vec::new(),
+            pending_lost: false,
             hl_pending: None,
             hl_section: 0,
             screens: Vec::new(),
@@ -307,12 +335,16 @@ impl App {
         let mut screen = Grid::unknown(cols, rows);
         let mut frame = Grid::new(cols, rows);
         let mut dirty = true;
+        #[cfg(windows)]
+        let mut raw = rawkeys::Reader::default();
 
         while !self.quit {
             if self.shell.pump() {
                 dirty = true;
             }
             if self.shell.exited() {
+                self.shell.drain_after_exit();
+                self.sync_screen(&mut screen, &mut out)?;
                 return Ok(());
             }
             // The shell changed directory (a typed `cd`, a script): the panel follows.
@@ -349,10 +381,13 @@ impl App {
                 dirty = true;
             }
             if dirty {
-                frame.clear();
-                let cursor = self.paint(&mut frame);
-                frame.flush(&mut screen, cursor, &mut out)?;
-                out.flush()?;
+                // the panels are drawn on the alternate screen; the main one is the shell's
+                if self.on_alt {
+                    frame.clear();
+                    let cursor = self.paint(&mut frame);
+                    frame.flush(&mut screen, cursor, &mut out)?;
+                    out.flush()?;
+                }
                 dirty = false;
             }
             // A copy in progress, or a folder the quick view is counting, redraws as it goes.
@@ -360,6 +395,20 @@ impl App {
                 || matches!(&self.overlay, Overlay::Find(results) if results.busy())
                 || (self.panels_visible && self.panels.busy());
             let wait = if busy { 50 } else { 10 };
+            // Without panels the console's input records go to the shell as they are.
+            #[cfg(windows)]
+            if !self.on_alt {
+                if rawkeys::wait(Duration::from_millis(5))?
+                    && let Some((cols, rows)) = self.on_raw_records(&mut raw)
+                {
+                    self.size = (cols, rows);
+                    self.shell.resize(cols, rows);
+                    screen = Grid::unknown(cols, rows);
+                    frame = Grid::new(cols, rows);
+                    dirty = true;
+                }
+                continue;
+            }
             // Shift/Ctrl/Alt on their own change the key bar
             let (input, held_changed) = modkeys::wait(Duration::from_millis(wait))?;
             if held_changed && self.panels_visible {
@@ -706,55 +755,100 @@ impl App {
         }
     }
 
-    /// The terminal follows the shell: its alternate screen while a program
-    /// there uses one, else its main screen, where the rows the shell pushes
-    /// off the top go into the terminal's own scrollback (the mouse wheel and
-    /// selection reach them there). While the panels or something over the
-    /// shell are shown the rows wait and go when it is in sight again, so the
-    /// scrollback keeps the shell's order. Returns whether the screen changed.
+    /// What the shell wrote goes to the terminal as it wrote it, on its main
+    /// screen, where the terminal keeps its history, reflows and selects. The
+    /// panels (and anything over them) are on the alternate screen; what the
+    /// shell writes meanwhile waits, and goes to the main screen when it is
+    /// back, so the terminal gets the same stream as without farsh. Returns
+    /// whether the screen farsh draws changed.
     fn sync_screen(&mut self, screen: &mut Grid, out: &mut impl Write) -> std::io::Result<bool> {
+        let want = self.panels_visible || !matches!(self.overlay, Overlay::None) || !self.under.is_empty();
+        let bytes = self.shell.take_out();
         let mut changed = false;
-        let alternate = self.shell.alternate_screen();
-        if alternate != self.alternate {
-            if alternate {
-                crossterm::queue!(out, terminal::EnterAlternateScreen)?;
-            } else {
-                crossterm::queue!(out, terminal::LeaveAlternateScreen)?;
-            }
-            self.alternate = alternate;
+        if want && !self.on_alt {
+            out.write_all(&bytes)?;
+            out.write_all(b"\x1b[?1049h")?;
+            self.on_alt = true;
             *screen = Grid::unknown(screen.cols, screen.rows);
             changed = true;
+        } else if !want && self.on_alt {
+            self.leave_alt(out)?;
+            out.write_all(&bytes)?;
+            out.write_all(if self.shell.cursor_shown() { b"\x1b[?25h" } else { b"\x1b[?25l" })?;
+            changed = true;
+        } else if self.on_alt {
+            if self.pending.len() + bytes.len() > PENDING_MAX {
+                self.pending.clear();
+                self.pending_lost = true;
+            } else if !self.pending_lost {
+                self.pending.extend_from_slice(&bytes);
+            }
+        } else {
+            out.write_all(&bytes)?;
         }
-        self.scrolled.extend(self.shell.take_scrolled());
-        let excess = self.scrolled.len().saturating_sub(10_000);
-        self.scrolled.drain(..excess);
-        let shell_in_sight = !self.panels_visible && matches!(self.overlay, Overlay::None) && self.under.is_empty();
-        if self.alternate || !shell_in_sight || self.scrolled.is_empty() {
-            return Ok(changed);
-        }
-        let rows: Vec<String> = self.scrolled.drain(..).collect();
-        push_scrolled(&rows, screen.rows, out)?;
-        screen.scroll_up(rows.len());
-        Ok(true)
+        out.flush()?;
+        Ok(changed)
     }
 
-    /// farsh ends: the terminal is left with the shell's screen, without the
-    /// panels, and the cursor at the start of the shell's line if that is
-    /// empty, else of the line under it.
-    fn leave(&mut self, out: &mut impl Write) -> std::io::Result<()> {
-        if self.alternate {
-            crossterm::queue!(out, terminal::LeaveAlternateScreen)?;
+    /// Back to the main screen, with what the shell wrote meanwhile.
+    fn leave_alt(&mut self, out: &mut impl Write) -> std::io::Result<()> {
+        out.write_all(b"\x1b[?1049l")?;
+        self.on_alt = false;
+        if std::mem::take(&mut self.pending_lost) {
+            out.write_all(&self.shell.screen_bytes())?;
+        } else {
+            out.write_all(&self.pending)?;
         }
-        let (cols, rows) = self.size;
-        let mut frame = Grid::new(cols, rows);
-        self.shell.paint(&mut frame);
-        frame.flush(&mut Grid::unknown(cols, rows), None, out)?;
-        let row = self.shell.cursor_row();
-        crossterm::queue!(out, crossterm::cursor::MoveTo(0, row))?;
-        if !self.shell.cursor_line().0.is_empty() {
-            crossterm::queue!(out, crossterm::style::Print("\n"))?;
+        self.pending.clear();
+        Ok(())
+    }
+
+    /// farsh ends: the terminal is left on its main screen with the shell's
+    /// last words, as if the shell had ended by itself.
+    fn finish(&mut self, out: &mut impl Write) -> std::io::Result<()> {
+        let bytes = self.shell.take_out();
+        if self.on_alt {
+            self.leave_alt(out)?;
         }
+        out.write_all(&bytes)?;
         out.flush()
+    }
+
+    /// A key sent to the shell, Windows' way: every console input record the
+    /// terminal made goes to the shell's ConPTY as it is (see `rawkeys`),
+    /// except Ctrl+O at a prompt. Returns the new size if the window changed.
+    #[cfg(windows)]
+    fn on_raw_records(&mut self, reader: &mut rawkeys::Reader) -> Option<(u16, u16)> {
+        let mut resized = None;
+        while let Some(record) = reader.read() {
+            match &record {
+                rawkeys::Record::Resize => {
+                    if let Ok(size) = terminal::size() {
+                        resized = Some(size);
+                    }
+                }
+                rawkeys::Record::Mouse(event) => {
+                    let (mode, encoding) = self.shell.mouse_mode();
+                    if let Some(bytes) = mouse::encode(*event, mode, encoding) {
+                        self.shell.send_raw(&bytes);
+                    }
+                }
+                rawkeys::Record::Key { .. } => {
+                    if record.is_ctrl_o_down() && self.shell.ctrl_o_is_ours() {
+                        // its release, and what follows, are read as panel keys
+                        self.panels_visible = true;
+                        break;
+                    }
+                    if let Some(bytes) = record.win32_input() {
+                        self.shell.send_raw(&bytes);
+                    }
+                    if !record.is_modifier() && matches!(&record, rawkeys::Record::Key { down: true, .. }) {
+                        self.shell.note_keypress(record.is_enter_down());
+                    }
+                }
+            }
+        }
+        resized
     }
 
     /// Whether a left click at (`col`, `row`) now is the second of a double click.
@@ -769,7 +863,10 @@ impl App {
     }
 
     fn on_panel_or_shell_key(&mut self, key: KeyEvent) {
-        if key.code == KeyCode::Char('o') && key.modifiers.contains(KeyModifiers::CONTROL) {
+        if key.code == KeyCode::Char('o')
+            && key.modifiers.contains(KeyModifiers::CONTROL)
+            && (self.panels_visible || self.shell.ctrl_o_is_ours())
+        {
             self.panels_visible = !self.panels_visible;
             return;
         }

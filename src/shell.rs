@@ -17,7 +17,7 @@ pub struct Shell {
     writer: Box<dyn Write + Send>,
     child: Box<dyn Child + Send + Sync>,
     output: Receiver<Vec<u8>>,
-    parser: vt100::Parser<Scrolled>,
+    parser: vt100::Parser,
     /// The cursor line as the shell drew it when it last showed a bare prompt;
     /// the command line is empty while the line still equals this.
     prompt_line: String,
@@ -33,6 +33,26 @@ pub struct Shell {
     first_output: bool,
     /// How many prompts the shell has shown (each one reports its directory).
     prompts: u64,
+    /// What the shell wrote since `take_out`, as the terminal should get it.
+    out: Vec<u8>,
+    /// The shell reports its prompts (OSC 7), so `idle` can be known.
+    hooked: bool,
+    /// The shell shows a prompt and no command runs: set by the prompt's
+    /// report, cleared by Enter.
+    idle: bool,
+}
+
+/// Where the terminal's cursor was when farsh started, 0-based (column, row).
+static START_CURSOR: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// Remembers the terminal's cursor at start: the shell's ConPTY asks for it.
+pub fn set_start_cursor(col: u16, row: u16) {
+    START_CURSOR.store(u32::from(col) << 16 | u32::from(row), std::sync::atomic::Ordering::Relaxed);
+}
+
+fn start_cursor() -> (u16, u16) {
+    let value = START_CURSOR.load(std::sync::atomic::Ordering::Relaxed);
+    ((value >> 16) as u16, value as u16)
 }
 
 impl Shell {
@@ -47,7 +67,9 @@ impl Shell {
         let mut command = CommandBuilder::new(program);
         // A shell that cannot be hooked still works, its directory just is not followed.
         let scratch = std::env::temp_dir().join(format!("farsh-{}", std::process::id()));
+        let mut hooked_ok = false;
         if let Ok(hooked) = cwd::integration(kind, &scratch) {
+            hooked_ok = kind != Kind::Other;
             command.args(hooked.args);
             for (name, value) in hooked.env {
                 command.env(name, value);
@@ -72,7 +94,27 @@ impl Shell {
                 }
             }
         });
-        Ok(Self { master: pair.master, writer, child, output, parser: vt100::Parser::new_with_callbacks(nz(rows), nz(cols), 0, Scrolled::default()), prompt_line: String::new(), awaiting_prompt: true, kind, osc7: Osc7::default(), cwd: None, first_output: true, prompts: 0 })
+        let mut parser = vt100::Parser::new(nz(rows), nz(cols), 0);
+        // the shell's screen starts with the cursor where the terminal's is
+        let (col, row) = start_cursor();
+        parser.process(format!("\x1b[{};{}H", row + 1, col + 1).as_bytes());
+        Ok(Self {
+            master: pair.master,
+            writer,
+            child,
+            output,
+            parser,
+            prompt_line: String::new(),
+            awaiting_prompt: true,
+            kind,
+            osc7: Osc7::default(),
+            cwd: None,
+            first_output: true,
+            prompts: 0,
+            out: Vec::new(),
+            hooked: hooked_ok,
+            idle: false,
+        })
     }
 
     /// Feeds what the shell wrote to the screen; reports whether there was any.
@@ -80,15 +122,18 @@ impl Shell {
         let mut any = false;
         while let Ok(mut bytes) = self.output.try_recv() {
             if std::mem::take(&mut self.first_output) && bytes.starts_with(CURSOR_QUERY) {
-                // the screen is new: the cursor is at the top left
-                let _ = self.writer.write_all(b"\x1b[1;1R");
+                // the shell's screen starts where the terminal's cursor is
+                let (col, row) = start_cursor();
+                let _ = self.writer.write_all(format!("\x1b[{};{}R", row + 1, col + 1).as_bytes());
                 let _ = self.writer.flush();
                 bytes.drain(..CURSOR_QUERY.len());
             }
             self.parser.process(&bytes);
+            self.out.extend_from_slice(&bytes);
             if let Some(dir) = self.osc7.feed(&bytes) {
                 self.cwd = Some(dir);
                 self.prompts += 1;
+                self.idle = true;
                 // The hook runs before the prompt is drawn: what follows is
                 // the bare prompt, even if keys went to the command meanwhile
                 // (an editor's) and `write` stopped waiting for it.
@@ -106,10 +151,71 @@ impl Shell {
         matches!(self.child.try_wait(), Ok(Some(_)))
     }
 
+    /// What the shell wrote since the last call, exactly as it wrote it.
+    pub fn take_out(&mut self) -> Vec<u8> {
+        std::mem::take(&mut self.out)
+    }
+
+    /// After the shell has ended: waits a moment for the last of its output.
+    pub fn drain_after_exit(&mut self) {
+        let end = std::time::Instant::now() + std::time::Duration::from_millis(300);
+        while std::time::Instant::now() < end {
+            match self.output.recv_timeout(std::time::Duration::from_millis(20)) {
+                Ok(bytes) => {
+                    self.parser.process(&bytes);
+                    self.out.extend_from_slice(&bytes);
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            }
+        }
+    }
+
+    /// Whether Ctrl+O is farsh's: the shell sits at a prompt (Far's console
+    /// is the program's while one runs), or cannot tell (no hook), and no
+    /// program of it uses the alternate screen.
+    pub fn ctrl_o_is_ours(&self) -> bool {
+        !self.parser.screen().alternate_screen() && (self.idle || !self.hooked)
+    }
+
+    /// Bytes for the shell that farsh has not parsed (the terminal's own
+    /// input, passed on as it came): nothing about the prompt is touched.
+    pub fn send_raw(&mut self, bytes: &[u8]) {
+        let _ = self.writer.write_all(bytes);
+        let _ = self.writer.flush();
+    }
+
+    /// A key that types (or Enter, which runs the line) went to the shell
+    /// by `send_raw`: what `write` records about the prompt.
+    pub fn note_keypress(&mut self, enter: bool) {
+        self.awaiting_prompt = enter;
+        if enter {
+            self.idle = false;
+        }
+    }
+
+    /// The shell's screen as the terminal should show it, and where its cursor is.
+    pub fn screen_bytes(&self) -> Vec<u8> {
+        let screen = self.parser.screen();
+        let mut bytes = b"\x1b[m\x1b[2J\x1b[H".to_vec();
+        bytes.extend(screen.contents_formatted().bytes());
+        let (row, col) = screen.cursor_position();
+        bytes.extend(format!("\x1b[m\x1b[{};{}H", row + 1, col + 1).into_bytes());
+        bytes
+    }
+
+    /// Whether the shell's cursor is shown.
+    pub fn cursor_shown(&self) -> bool {
+        !self.parser.screen().hide_cursor()
+    }
+
     /// Passes a key's bytes to the shell. `runs` marks Enter: what the shell
     /// prints next ends in a fresh prompt, which becomes the empty command line.
     pub fn write(&mut self, bytes: &[u8], runs: bool) {
         self.awaiting_prompt = runs;
+        if runs {
+            self.idle = false;
+        }
         let _ = self.writer.write_all(bytes);
         let _ = self.writer.flush();
     }
@@ -195,21 +301,8 @@ impl Shell {
     pub fn resize(&mut self, cols: u16, rows: u16) {
         let _ = self.master.resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 });
         self.parser.set_size(nz(rows), nz(cols));
-        // A lower screen pushes rows off the top here; the terminal did the
-        // same with its own picture (its reflow), so they are not sent again.
-        self.parser.callbacks_mut().rows.clear();
     }
 
-    /// The rows of the shell's main screen that went off its top since the
-    /// last call, oldest first, as text with SGR attributes.
-    pub fn take_scrolled(&mut self) -> Vec<String> {
-        self.parser.callbacks_mut().rows.drain(..).collect()
-    }
-
-    /// Whether a program in the shell switched to the alternate screen.
-    pub fn alternate_screen(&self) -> bool {
-        self.parser.screen().alternate_screen()
-    }
 
     pub fn cursor(&self) -> Option<(u16, u16)> {
         let screen = self.parser.screen();
@@ -243,31 +336,6 @@ impl Shell {
                 }
             }
         }
-    }
-}
-
-/// Rows the shell's main screen pushed off its top, kept for the terminal's
-/// own scrollback (`App::push_scrolled`).
-#[derive(Default)]
-struct Scrolled {
-    rows: std::collections::VecDeque<String>,
-}
-
-/// Rows kept while nothing takes them (the panels are shown); older ones go.
-const SCROLLED_MAX: usize = 10_000;
-
-impl vt100::Callbacks for Scrolled {
-    fn on_scroll(&mut self, contents: vt100::capture::RowContents<'_>, alternate_screen: bool) {
-        if alternate_screen {
-            return;
-        }
-        let mut row = String::new();
-        let _ = contents.write_formatted_basic(&mut row, &mut Default::default());
-        // the state is new for every row: no newline pending from a previous one
-        if self.rows.len() == SCROLLED_MAX {
-            self.rows.pop_front();
-        }
-        self.rows.push_back(row);
     }
 }
 

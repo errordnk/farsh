@@ -145,19 +145,35 @@ over the shell screen.
   (select/unselect all), the read-only Descript.ion question is an error.
 - A left click on the top row (the panels' frame) opens the menu bar, on
   the title under the mouse, as in Far with the menu bar hidden.
+- Without panels (Ctrl+O hides them) farsh is the shell itself, nothing
+  else (plan: `docs/shell-passthrough-plan.md`). The shell owns the terminal's
+  MAIN screen: what it writes goes to the terminal exactly as it wrote it
+  (`App::sync_screen`), so the terminal's own history, reflow, selection,
+  wheel, OSC (cwd, title, links) and mouse modes work as without farsh. farsh
+  only keeps a copy of the shell's screen (`vt100`) for the panels. The
+  panels are on the ALTERNATE screen: Ctrl+O enters it, what the shell
+  writes meanwhile waits (`App::pending`, up to 16 MB, then the screen is
+  redrawn from the copy) and goes to the main screen when the panels leave.
+  The shell's ConPTY starts with a cursor query: it is answered with the
+  terminal's real cursor (`shell::set_start_cursor`), so what was on the
+  screen stays.
+- Input without panels (Windows, `src/rawkeys.rs`): every console input
+  record goes to the shell's ConPTY as it came, in win32-input-mode
+  (releases, modifier keys alone, scan codes, AltGr), the mouse as the
+  reports the shell's program asked for, a resize as a resize. Only Ctrl+O
+  is farsh's, and only at a prompt (`Shell::ctrl_o_is_ours`: the prompt hook
+  reported it and no command runs, no program of the shell is on its
+  alternate screen; a shell without the hook always gives Ctrl+O to farsh).
+  Elsewhere the keys still go through crossterm (`keys::encode`): not done.
+  Windows' limit: the shell sits behind two conhosts (farsh's console and
+  the shell's ConPTY), whatever the system's ConPTY drops on the way is
+  dropped (Windows defaults only).
 - The mouse is farsh's only while the panels or something over them are
   shown, or a program in the shell asked for it (`App::sync_mouse`; on
-  Windows just ENABLE_MOUSE_INPUT, with QuickEdit when it is off). Over the
-  shell's own output (Ctrl+O) the terminal selects, copies and pastes with a
-  right click itself; over the panels it selects with Shift (Som, Windows
-  Terminal). Interface.Mouse off leaves the mouse to the terminal.
-- The shell is drawn on the terminal's MAIN screen (its alternate one only
-  while a program in the shell is on its alternate screen), so the terminal's
-  own scrollback holds the shell's output: the wheel scrolls it with the
-  panels hidden. vt100's `on_scroll` hands over the rows the shell pushes off
-  its top; `push_scrolled` writes each over a top row and scrolls it away with
-  a newline on the bottom row. While the panels or something over the shell
-  are shown the rows wait (up to 10000), so the order stays the shell's.
+  Windows just ENABLE_MOUSE_INPUT, with QuickEdit when it is off). Without
+  that the terminal selects, copies and pastes with a right click itself;
+  over the panels it selects with Shift (Som, Windows Terminal).
+  Interface.Mouse off leaves the mouse to the terminal.
 - The Commands menu is whole. Its lists are Far's VMenu (`src/vmenu.rs`:
   centered, MaxHeight, scroll bar, `&` and AssignHighlights hot keys, a
   bottom title, keys it does not use go back to the caller); a dialog a
