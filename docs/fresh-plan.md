@@ -1,0 +1,171 @@
+# fresh как внутренний редактор и вьюер farsh: план
+
+Цель: fresh работает **внутри процесса farsh** в двух ролях.
+- **F4: редактор.** Сейчас F4 запускает внешний редактор через шелл
+  (`src/editor.rs`: `$FARSH_EDITOR`/`$VISUAL`/`$EDITOR`, иначе micro или
+  fresh из PATH).
+- **F3 и быстрый просмотр (Ctrl+Q) для всего, что не SRP** (текст, код, логи):
+  тот же fresh, только для чтения. Сейчас это собственный текстовый вьюер
+  farsh (`src/viewer.rs`: до `LIMIT` байт, lossy UTF-8, без подсветки).
+  Картинки, звук, видео и `.md` по-прежнему показывает Som через SRP.
+
+Плюс общего движка: подсветка, поиск, кодировки, переносы и большие файлы во
+вьюере такие же, как в редакторе; F3 → F4 (F6 в Far) — тот же сеанс fresh, у
+которого снимается запрет правки, а не новое открытие файла.
+
+## Лицензия: farsh переходит на GPL-3.0 (решение пользователя, 2026-11-06)
+
+fresh — GPL-3.0-or-later (форк `sinelaw/fresh`, права не наши); farsh был под
+MIT. Чтобы встроить fresh библиотекой (а не держать отдельным процессом со
+своим протоколом), farsh становится GPL-3.0-or-later. Права на farsh у
+пользователя, так что смена — его решение; уже выпущенные версии остаются под
+MIT.
+
+## Что есть (проверено в коде, 2026-11-06)
+
+| | farsh | fresh (`errordnk/fresh`, `~/src/fresh`) |
+|---|---|---|
+| Размер | ~29 тыс. строк, `farsh.exe` 9,5 МБ | `fresh-editor` ~321 тыс. строк, `fresh.exe` 48 МБ |
+| Экран | свой `Grid`, поячеечный diff, crossterm 0.29 | ratatui 0.30 поверх crossterm 0.29 |
+| Цикл | один цикл в `App::run` (`main.rs`), опрос ~10 мс, оверлеи (`Overlay::Viewer` …) рисуются в тот же `Grid` | `run_event_loop_common` в `main.rs` fresh: `app::editor_tick`, `Editor::render(&mut Frame)`, `Editor::handle_input_event(fresh_input_parser::Event)`, 60 fps при анимациях |
+| Ввод | crossterm `event::read` + `modkeys` (Shift/Ctrl/Alt отдельно) | свой разбор (`tty_input::TtyReader`, `fresh_winterm::VtInputReader`); есть `impl From<crossterm::event::Event> for fresh_input_parser::Event` |
+| Рантайм | без async | tokio (LSP, файлы, плагины), QuickJS-плагины, tree-sitter |
+| Только чтение | — | `editing_disabled` у буфера (`state.rs`), правки отказывают (`refuse_if_editing_disabled`); двоичные файлы открываются только для чтения |
+| Двоичные файлы | lossy UTF-8 | байты как `<00>` прямо в тексте (`view_pipeline.rs`); **hex-вида нет** ни в ядре, ни в плагинах |
+| Большие файлы | `LIMIT` | свой режим загрузки (`large_file_threshold`, `Buffer`) |
+| Сборка | 2024 edition, обычный release | 2021 edition, toolchain 1.95, release = fat LTO + `opt-level = "z"` (20–30 мин) |
+
+Создание редактора в `fresh::main` — ~150 строк подготовки до
+`Editor::with_working_dir_opts(config, w, h, cwd, dir_context, plugins,
+color_capability, authority, defer_plugin_load, daemon, file_launch)`: конфиг,
+`DirContext`, `Authority`/`SessionScope`, tracing, сокет `local_control`,
+init.ts, хуки плагинов. Всё это в бинарнике (`main.rs` на 7000+ строк), а не в
+библиотеке `fresh`.
+
+## Подход: библиотека в процессе farsh
+
+farsh держит `fresh::embed::Session` и сам решает, когда тикать, рисовать и
+отдавать ей ввод. Редактор — оверлей, как F3: F12 переключает экраны, часы и
+диалоги farsh работают поверх, шелл farsh продолжает читаться
+(`shell.pump()`), пока файл открыт.
+
+Отвергнуто:
+- **Отдать fresh весь экран и его цикл** (вложенный `run_event_loop`): два
+  читателя stdin, шелл farsh не прокачивается, нет F12 и оверлеев.
+- **Отдельный процесс** (PTY или серверный протокол fresh): нужен был только
+  ради MIT; с GPL лишний слой, ConPTY на Windows теряет оформление и мышь.
+
+## Шаги
+
+### 0. Лицензия farsh — СДЕЛАНО 2026-11-06
+`LICENSE` → текст GPL-3.0 (тот же, что у fresh); `Cargo.toml`:
+`license = "GPL-3.0-or-later"`; README: раздел License. Отдельный коммит до
+кода.
+
+### 1. В fresh (наш форк): API для встраивания (`crates/fresh-editor/src/embed.rs`)
+Вынести подготовку `Editor` из `main.rs` в библиотечную функцию, которую
+зовут и бинарник `fresh`, и farsh (один путь создания, не два), и обернуть:
+
+```rust
+pub struct Session { editor: Editor, runtime: tokio::runtime::Runtime, … }
+impl Session {
+    pub fn open(path: &Path, cols: u16, rows: u16, opts: EmbedOptions) -> Result<Self>;
+    pub fn open_other(&mut self, path: &Path) -> Result<()>; // быстрый просмотр: следующий файл
+    pub fn set_read_only(&mut self, read_only: bool);   // F3 ⇄ F4: `editing_disabled`
+    pub fn tick(&mut self) -> bool;                     // app::editor_tick; true = перерисовать
+    pub fn render(&mut self, frame: &mut ratatui::Frame);
+    pub fn handle(&mut self, event: fresh_input_parser::Event) -> Result<bool>;
+    pub fn resize(&mut self, cols: u16, rows: u16);
+    pub fn wants_frame(&self) -> Option<Instant>;       // анимации, спиннер LSP, колесо
+    pub fn should_quit(&self) -> bool;
+    pub fn close(self) -> Result<()>;                   // persist без workspace
+}
+```
+
+`EmbedOptions`: `read_only`; режим «один файл» (`file_launch = true`, без
+workspace/сессии/hot-exit), без `local_control`, без self-update, без
+orchestrator и нескольких окон, без встроенного терминала (шелл есть у farsh);
+плагины и LSP — по флагам (решения ниже). Для вьюера проверить порог больших
+файлов на гигабайтном логе.
+Готово: e2e fresh не хуже базы (19 известных падений); тест `embed::Session`
+на ratatui `TestBackend` (открыть, ввести, сохранить, выйти; только чтение
+отказывает в правке); тесты на test-профиле
+(`feedback_fresh_fast_test_iterations`).
+
+### 2. В farsh: зависимость и сборка
+- `fresh-editor = { git = "https://github.com/errordnk/fresh", rev = "…", default-features = false, features = [<минимум>] }`,
+  как `srp_client`: rev двигается сознательно.
+- Без `self-update`; `http`/`embed-plugins`/`precompiled-plugins` — по
+  решениям ниже.
+- Профиль release farsh: замерить время сборки и размер (ожидание: с 9,5 до
+  ~35–45 МБ); fat LTO fresh не наследовать, если без него терпимо.
+- Toolchain: fresh закреплён на 1.95 — farsh собирается тем же или новее.
+- Linux/mac/pi5: навык som-release уже собирает farsh везде.
+
+### 3. В farsh: мост рендера ratatui → `Grid` (`src/fresh_view.rs`)
+Свой `ratatui::backend::Backend`, который пишет ячейки в прямоугольник
+`Grid` farsh со смещением (весь экран для F3/F4, панель для быстрого
+просмотра), плюс позиция и форма курсора. В `Cell` добавить то, что рисует
+fresh: italic, dim, strikethrough, стиль подчёркивания; широкие символы (у
+ratatui — пустая ячейка-хвост). Тест: кадр `TestBackend` fresh равен кадру
+`Grid`.
+
+### 4. В farsh: F3 и быстрый просмотр через fresh
+- `Viewer::open_for` (`src/viewer.rs`): `srp::Media::start` первым; не медиа —
+  `Session::open(…, read_only)`. Текстовая часть `Viewer` (строки, `LIMIT`,
+  `expand_tabs`, «Line N/M») уходит.
+- **F3:** полноэкранный сеанс только для чтения; F6 и F4 снимают запрет правки
+  в том же сеансе; Esc/F3/F10 закрывают.
+- **Быстрый просмотр:** один сеанс размером с панель на всё время быстрого
+  просмотра; переход курсора — `open_other` с задержкой 150 мс, как у медиа;
+  клавиш не получает (курсор и пробел остаются у панели), колесо
+  прокручивает. Замерить скорость открытия (без LSP и плагинов).
+- **Двоичные файлы:** hex-вида у fresh нет — решение ниже.
+
+### 5. В farsh: F4 через fresh
+- F4 и Shift+F4 (новый файл): сеанс в режиме правки; Alt+F4 и ассоциации
+  остаются внешним редактором (`src/editor.rs`).
+- Цикл `App::run`: `session.tick()` на каждом проходе; тайм-аут из
+  `wants_frame()` (60 fps только пока fresh анимирует).
+- Ввод: событие crossterm → `fresh_input_parser::Event::from` →
+  `session.handle`; farsh перехватывает только F12. Проверить win32-input-mode
+  (Shift/Ctrl/Alt отдельно, `modkeys`), bracketed paste, мышь.
+- Размер окна → `session.resize`.
+- `should_quit` → `close()`, панели обновляются на отредактированном файле,
+  как сейчас после внешнего редактора.
+- F12: редактор — ещё один экран рядом с вьюерами.
+
+### 6. Конфиг, тема, хранение
+- Конфиг fresh свой (`~/.config/fresh/…`), farsh его не дублирует.
+- Диск: ничего сверх того, что fresh пишет и так (история промптов,
+  recovery).
+
+### 7. Тесты и живая проверка
+- farsh: мост рендера; F3 (только чтение, F6 → правка), быстрый просмотр по
+  многим файлам, F4 → ввод → сохранение → выход → курсор панели на файле,
+  F12 между панелями, вьюером и редактором.
+- Живой тест в тестовом Som (без `NO_COLOR`, `SOMSRV_KEEP_DAEMON=1`): правка,
+  поиск, вставка, мышь, ресайз, большой лог, Ctrl+O под редактором.
+- Документация farsh: `AGENTS.md` (F3/F4), `README`.
+
+### Порядок
+0 → 1 (fresh, самое крупное: распутать `main.rs`) и 3 (мост) параллельно → 2 →
+4 (F3: проще, без сохранения) → 5 (F4) → 6 → 7.
+
+## Решения за вами
+
+1. ~~Лицензия~~ — farsh переходит на GPL-3.0 (решено).
+2. **Плагины fresh** (QuickJS, TS-плагины, init.ts) в farsh: включать или нет.
+   Без них farsh меньше и собирается быстрее, но часть возможностей fresh
+   держится на плагинах (diff, часть команд).
+3. **LSP** в farsh: включать (tokio и процесс-сервер на язык) или только
+   подсветка tree-sitter.
+4. **Клавиши:** keymap fresh как есть (одинаково с fresh в Som) или
+   Far-подобные F2/F7/F10 поверх.
+5. **Цвета:** тема fresh или палитра Far (`Editor.*` в настройках farsh).
+6. **Hex для двоичных файлов:** свой hex-вьюер в farsh (только просмотр,
+   смещение | байты | ASCII, как в Far) или hex-режим в fresh (тогда и
+   правка, но большая работа в его движке).
+7. **Быстрый просмотр текста через fresh** (подсветка; сеанс живёт, пока
+   открыт быстрый просмотр) или простой вывод, как сейчас.
+8. **Alt+F4 и ассоциации** остаются внешним редактором — подтверждение.
