@@ -426,20 +426,24 @@ mod tests {
         assert_eq!(row_text(at), format!("{:<42}\u{2502}string \u{2502}$p$g", "Cmdline.PromptFormat"));
         let at = FAR.iter().position(|(k, _, _)| *k == "Viewer.TabSize").unwrap();
         assert!(row_text(at).ends_with("\u{2502}integer\u{2502}8 = 0x8"));
-        let editor = FAR.iter().position(|(k, _, _)| k.starts_with("Editor.")).unwrap();
-        assert!(!ours(editor), "the editor's settings are shown disabled");
+        // of the editor's settings only the external editor is farsh's (its
+        // internal editor is to be fresh, with fresh's own settings)
+        let at = |key: &str| FAR.iter().position(|(k, _, _)| *k == key).unwrap();
+        assert!(!ours(at("Editor.TabSize")), "the internal editor's settings are shown disabled");
+        assert!(ours(at("Editor.UseExternalEditor")) && ours(at("Editor.ExternalEditorName")));
     }
 
     #[test]
     fn keys_skip_the_disabled_rows() {
         let mut config = FarConfig::new();
         assert_eq!(FAR[config.shown[config.selected]].0, "Cmdline.AutoComplete");
-        // from the last code page setting down to the next enabled one, over the editor's
+        // from the last dialog setting down to the next enabled one, over the
+        // internal editor's twelve disabled rows to the external editor's command
         let before = FAR.iter().position(|(k, _, _)| *k == "Dialog.MouseButton").unwrap();
         config.selected = config.shown.iter().position(|&i| i == before).unwrap();
         config.key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
         let next = FAR[config.shown[config.selected]].0;
-        assert!(!next.starts_with("Editor."), "{next}");
+        assert_eq!(next, "Editor.ExternalEditorName");
         assert!(ours(config.shown[config.selected]));
         assert!(matches!(config.key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)), Outcome::Closed));
     }

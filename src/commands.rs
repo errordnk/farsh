@@ -189,12 +189,19 @@ impl App {
         {
             return true;
         }
-        // Alt+F3 without an association: the other viewer
+        // Alt+F3 / Alt+F4 without an association: the other viewer / editor
         if key.code == KeyCode::F(3)
             && alt
             && let Some(file) = self.panels.current_file()
         {
             self.alt_view(&file);
+            return true;
+        }
+        if key.code == KeyCode::F(4)
+            && alt
+            && let Some(file) = self.panels.current_file()
+        {
+            self.alt_edit(&file);
             return true;
         }
         false

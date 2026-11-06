@@ -275,6 +275,19 @@ pub fn viewer() -> Dialog {
     b.build(Settings::Viewer)
 }
 
+/// Options > Editor settings (EditorConfig): the external editor. Far's own
+/// internal-editor options are not here: farsh's internal editor is to be
+/// fresh, which keeps its own settings (docs/fresh-plan.md).
+pub fn editor() -> Dialog {
+    let mut b = Builder::new("Editor");
+    b.separator(Some("External editor"));
+    b.check("Editor.UseExternalEditor", "Use external editor for &F4 instead of Alt+F4");
+    b.text("Editor &command:");
+    b.edit("Editor.ExternalEditorName", 64);
+    b.ok_cancel();
+    b.build(Settings::Editor)
+}
+
 /// Options > Folder description files (SetFolderInfoFiles: GetString with buttons).
 pub fn folder_info() -> Dialog {
     let value = crate::settings::string("System.FolderInfo");
@@ -285,4 +298,20 @@ pub fn folder_info() -> Dialog {
 pub fn save_setup() -> Dialog {
     let lines = [crate::lang::tr("Do you wish to save").to_string(), crate::lang::tr("current setup?").to_string()];
     Dialog::message("Save setup", &lines, &[("Save", "ok"), ("Cancel", "cancel")], false, crate::dialog::Action::SaveSetup)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::builder::Binding;
+    use crate::dialog::Action;
+
+    #[test]
+    fn the_editor_dialog_sets_the_external_editor() {
+        let mut dialog = editor();
+        let Action::Settings(kind, bindings) = dialog.action_mut() else { panic!("an Options dialog") };
+        assert_eq!(*kind, Settings::Editor);
+        assert!(bindings.iter().any(|b| matches!(b, Binding::Bool("Editor.UseExternalEditor"))));
+        assert!(bindings.iter().any(|b| matches!(b, Binding::Str("Editor.ExternalEditorName"))));
+    }
 }

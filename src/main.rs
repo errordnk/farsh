@@ -1057,7 +1057,7 @@ impl App {
         match request {
             // Viewer settings: an external viewer for F3 (Alt+F3 is the other one)
             Request::View(path) if settings::bool("Viewer.UseExternalViewer") && !settings::string("Viewer.ExternalViewerName").trim().is_empty() => {
-                self.external_view(&path);
+                self.external_open(&path, "Viewer.ExternalViewerName", history::Kind::View);
             }
             Request::View(path) => {
                 self.views.add(&path.display().to_string(), history::Kind::View);
@@ -1066,20 +1066,11 @@ impl App {
                     Err(error) => Overlay::Dialog(Dialog::error(&format!("{}: {error}", path.display()))),
                 };
             }
-            Request::Edit(path) => {
-                self.views.add(&path.display().to_string(), history::Kind::Edit);
-                // Whatever was typed gives way to the editor, as with any F-key.
-                self.shell.clear_line();
-                let line = editor::command_line(&editor::editor(), self.shell.kind(), &path);
-                // The panels come back when the editor ends, if the shell
-                // reports its prompts (see `Shell::prompts`); else Ctrl+O does.
-                if self.panels_visible && self.shell.kind() != cwd::Kind::Other {
-                    let name = path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
-                    self.editing = Some(Editing { until: self.shell.prompts() + 1, name: Some(name) });
-                }
-                self.shell.run(&line);
-                self.panels_visible = false;
+            // Editor settings: an external editor for F4 (Alt+F4 is the other one)
+            Request::Edit(path) if settings::bool("Editor.UseExternalEditor") && !settings::string("Editor.ExternalEditorName").trim().is_empty() => {
+                self.external_open(&path, "Editor.ExternalEditorName", history::Kind::Edit);
             }
+            Request::Edit(path) => self.internal_edit(&path),
             // Confirmations > Copy / Move off: straight to the other panel
             Request::Copy(sources, other) if !settings::bool("Confirmations.Copy") => {
                 let dest = default_dest(&sources, &other);
@@ -1431,22 +1422,39 @@ impl App {
         }
     }
 
-    /// The external viewer's command for the file, run in the shell (the
-    /// panels come back after it, as after F4).
-    fn external_view(&mut self, path: &Path) {
-        let command = settings::string("Viewer.ExternalViewerName");
+    /// The external viewer's or editor's command (the setting `key`) for the
+    /// file, run in the shell; the panels come back after it.
+    fn external_open(&mut self, path: &Path, key: &str, kind: history::Kind) {
+        let command = settings::string(key);
         let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let line = if command.contains('!') {
             self.substitute(&command, &name, std::slice::from_ref(&name))
         } else {
             format!("{} {}", command.trim(), editor::quote(self.shell.kind(), &path.display().to_string()))
         };
-        self.views.add(&path.display().to_string(), history::Kind::View);
+        self.views.add(&path.display().to_string(), kind);
+        self.run_until_prompt(&line, name);
+    }
+
+    /// The internal editor. Until fresh is built in (docs/fresh-plan.md) it is
+    /// the default editor (`editor::editor`), run in the shell like an external one.
+    fn internal_edit(&mut self, path: &Path) {
+        self.views.add(&path.display().to_string(), history::Kind::Edit);
+        let line = editor::command_line(&editor::editor(), self.shell.kind(), path);
+        let name = path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
+        self.run_until_prompt(&line, name);
+    }
+
+    /// Runs `line` in the shell over the panels (whatever was typed gives way,
+    /// as with any F-key); the panels come back on `name` when the shell is at
+    /// its next prompt, if it reports its prompts (see `Shell::prompts`), else
+    /// with Ctrl+O.
+    fn run_until_prompt(&mut self, line: &str, name: String) {
         self.shell.clear_line();
         if self.panels_visible && self.shell.kind() != cwd::Kind::Other {
             self.editing = Some(Editing { until: self.shell.prompts() + 1, name: Some(name) });
         }
-        self.shell.run(&line);
+        self.shell.run(line);
         self.panels_visible = false;
     }
 
@@ -1460,7 +1468,17 @@ impl App {
                 Err(error) => Overlay::Dialog(Dialog::error(&format!("{}: {error}", path.display()))),
             };
         } else {
-            self.external_view(path);
+            self.external_open(path, "Viewer.ExternalViewerName", history::Kind::View);
+        }
+    }
+
+    /// Alt+F4: the editor F4 does not use.
+    pub(crate) fn alt_edit(&mut self, path: &Path) {
+        let external = !settings::string("Editor.ExternalEditorName").trim().is_empty();
+        if settings::bool("Editor.UseExternalEditor") || !external {
+            self.internal_edit(path);
+        } else {
+            self.external_open(path, "Editor.ExternalEditorName", history::Kind::Edit);
         }
     }
 

@@ -102,6 +102,7 @@ impl App {
             Opt::Confirmations => options::confirmations(),
             Opt::Descriptions => options::descriptions(),
             Opt::Viewer => options::viewer(),
+            Opt::Editor => options::editor(),
             Opt::FolderInfo => options::folder_info(),
             Opt::SaveSetup => options::save_setup(),
             Opt::Languages => return self.overlay = Overlay::List(Box::new(List::Languages(languages_menu(false), false))),

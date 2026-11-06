@@ -321,6 +321,7 @@ pub enum Settings {
     Confirmations,
     Descriptions,
     Viewer,
+    Editor,
 }
 
 /// OK: every bound item's value into its setting.

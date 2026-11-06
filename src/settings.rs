@@ -145,6 +145,9 @@ const DEFAULTS: &[(&str, Def)] = &[
     ("Viewer.DetectDumpMode", Bool(true)),
     ("Viewer.AutoDetectCodePage", Bool(true)),
     ("Viewer.DefaultCodePage", Int(65001)),
+    // Editor settings
+    ("Editor.UseExternalEditor", Bool(false)),
+    ("Editor.ExternalEditorName", Str("")),
 ];
 
 pub fn path() -> std::path::PathBuf {

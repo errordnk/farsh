@@ -370,7 +370,12 @@ over the shell screen.
     clearing, hotplug removal and exit, the dialogs' history arrows and a
     click outside, the menus' clicks outside, the description list names
     and their hidden attribute, the folder description files, the viewer's
-    tab size and external viewer (F3 / Alt+F3), Save setup (Shift+F9: the
+    tab size and external viewer (F3 / Alt+F3), the external editor (Options >
+    Editor settings: "Use external editor for F4 instead of Alt+F4" and its
+    command, `Editor.UseExternalEditor` / `Editor.ExternalEditorName`; the
+    other key opens the internal editor, which until fresh is built in is the
+    default editor run in the shell; Far's internal-editor settings stay grey,
+    fresh keeps its own), Save setup (Shift+F9: the
     panels' folders, modes and sorting, restored at start; on F10 with
     "Auto save setup"). The rest is kept and shown as Far has it, with
     nothing in farsh for it yet (system copy, elevation, the command line's
