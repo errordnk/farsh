@@ -1,0 +1,6 @@
+# FFmpeg for `ffmpeg-next` (the video streams of the F3 viewer, Windows only)
+# comes from the same local vcpkg tree Som links against; the `vcpkg` crate
+# finds it through VCPKG_ROOT. `force = false`: a VCPKG_ROOT already in the
+# environment wins.
+[env]
+VCPKG_ROOT = { value = "C:/home/dnk/vcpkg-root", force = false }

@@ -10,7 +10,7 @@ use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::{MetadataRevision, StandardTagKey};
 use symphonia::core::probe::{Hint, ProbeResult};
 
-use super::wire::{ContentMetadata, TrackTags};
+use srp_client::protocol::{ContentMetadata, TrackTags};
 
 fn probe(path: &Path) -> Result<ProbeResult, String> {
     let file = std::fs::File::open(path).map_err(|e| format!("opening {}: {e}", path.display()))?;

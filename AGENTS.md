@@ -210,14 +210,19 @@ over the shell screen.
   rich-content protocol, when farsh runs in Som (`SOM_WINDOW_ID`; `FARSH_SRP=1`
   forces it): `src/srp/`. A placement is placeholder cells farsh draws
   (`Grid::place`: U+10EEEE with a row and a column mark, foreground = session
-  id, underline color SGR 58 = file id, so `Cell` has `ul`) and the file's
+  id, underline color SGR 58 = file id, so `Cell` has `ul`; both colors go
+  out as raw SGR, since crossterm drops colors under `NO_COLOR` and the ids
+  with them) and the file's
   bytes sent to the `somsrv` daemon on this machine (JSON `PutChunk`s over
   its pipe/socket). Som fits the picture into the rectangle itself, so farsh
-  never asks the terminal for the cell size. The protocol is a small copy of
-  Som's (`srp/wire.rs`, `srp/pipe.rs`, `srp/placeholder.rs`; names and shape
-  must match `somsrv::protocol`, the wire test says what it looks like); the
-  copy and what Som could change so that none is needed are in
-  `docs/srp-findings.md`. farsh only connects to a running daemon: it never
+  never asks the terminal for the cell size. The protocol is Som's own
+  `srp_client` crate (`som/crates/srp_client`: the message types `somsrv`
+  uses, the pipe/socket framing, the placeholder marks, `SrvChannel`, the
+  `.cue` parser), a git dependency pinned to a rev of `errordnk/som`: bump
+  the rev when Som's protocol changes. What Som could still change is in
+  `docs/srp-findings.md`. A placement in the quick view takes no keys (the
+  user's call): its player is used with the mouse, and Som leaves space and
+  the arrows to farsh for a placement narrower than the terminal. farsh only connects to a running daemon: it never
   starts or replaces one (a new `somsrv` ends every session, farsh lives in
   one). The transfer runs in a thread (the file is read and sent while the
   placement is already drawn: grid first, then bytes); dropping the viewer
@@ -252,9 +257,19 @@ over the shell screen.
   scrolls by drawing a window of the placement's rows (`Grid::place_from`); the
   last rows of a long document are reached with PgDn/arrows (the window may go
   down to one row: Som paints more than the rows it asks for), not with End; see
-  `docs/srp-findings.md` item 14. A video's audio/subtitle stream is chosen with
-  `a`/`s` and a digit in F3 (the video restarts with that FFmpeg stream number;
-  farsh cannot list streams).
+  `docs/srp-findings.md` item 14. In F3 `a` goes to a video's next audio stream and
+  `s` to its next subtitle stream, then to none (the video restarts with it; the
+  status line names it). The streams are listed with FFmpeg on Windows only,
+  as somsrp probes video (the user's call): `src/srp/streams.rs`, avformat,
+  avcodec and avutil delay-loaded, put into farsh.exe (with swresample, which
+  avcodec imports itself: without it the first `a` ended farsh with 0xC06D007E,
+  since `main` limits the DLL search and `cargo test` had hidden it by putting
+  the vcpkg tree on PATH; the stream test limits the search as `main` does) by `build.rs` from the
+  vcpkg tree it links against (`.cargo/config.toml`: VCPKG_ROOT, the same tree
+  as Som; `ffmpeg-sys-next` stays at 9.0.0, as in Som: 9.0.1's build script
+  looks for headers in /usr/include) and written to `%TEMP%\farsh-ffmpeg-<hash>`
+  on the first `a`/`s`. Som's FFmpeg has no `file` protocol, so the file is read
+  through `input_from_stream`. Elsewhere `a`/`s` and a digit choose by number.
 - The mouse is farsh's only while the panels or something over them are
   shown, or a program in the shell asked for it (`App::sync_mouse`; on
   Windows just ENABLE_MOUSE_INPUT, with QuickEdit when it is off). Without

@@ -3,6 +3,9 @@ name = "farsh"
 version = "0.1.0"
 edition = "2024"
 
+[build-dependencies]
+zstd = "0.13"
+
 [dependencies]
 anyhow = "1.0.104"
 chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
@@ -11,16 +14,19 @@ flate2 = "1.1.10"
 portable-pty = "0.9.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# SRP's protocol, as Som's own crate (a rev of Som, moved on deliberately)
+srp_client = { git = "https://github.com/errordnk/som", rev = "8889f4c4cbb896fad08dac202b9af794d1f20e0e" }
 sevenz-rust2 = { version = "0.24.2", features = ["deflate"] }
 tar = "0.4.46"
 vt100 = "0.18.1"
-chardetng = "0.1"
-encoding_rs = "0.8"
 symphonia = { version = "0.5", features = ["mp3", "flac"] }
 image = { version = "0.25.1", default-features = false, features = ["png", "jpeg", "gif"] }
 zip = { version = "9.3.0", default-features = false, features = ["aes-crypto", "deflate", "deflate64", "lzma", "ppmd", "bzip2"] }
 
 [target.'cfg(windows)'.dependencies]
+# the streams of a video (src/srp/streams.rs), as somsrp probes them
+ffmpeg-next = { version = "9", default-features = false, features = ["codec", "format"] }
+zstd = "0.13"
 windows-sys = { version = "0.61", features = ["Win32_Devices_DeviceAndDriverInstallation", "Win32_Foundation", "Win32_Globalization", "Win32_Graphics_Dwm", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_IO", "Win32_NetworkManagement_NetManagement", "Win32_System_Ioctl", "Win32_System_LibraryLoader", "Win32_System_Pipes", "Win32_System_Registry", "Win32_System_SystemInformation", "Win32_System_Threading", "Win32_System_WindowsProgramming", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 
 [target.'cfg(unix)'.dependencies]

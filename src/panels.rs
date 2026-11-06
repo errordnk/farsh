@@ -2230,7 +2230,9 @@ impl Panels {
             }
             KeyCode::F(9 | 10) => return self.function_key(if key.code == KeyCode::F(9) { 9 } else { 10 }),
             KeyCode::Up | KeyCode::Down | KeyCode::PageUp | KeyCode::PageDown | KeyCode::Home | KeyCode::End | KeyCode::Left | KeyCode::Right => {
-                if let Some(viewer) = self.qview.as_mut().and_then(|state| state.viewer()) {
+                // a placement in the quick view takes no keys: Som's player there is used with
+                // the mouse (the user's call), and Som leaves the keys of a preview to farsh
+                if let Some(viewer) = self.qview.as_mut().and_then(|state| state.viewer()).filter(|viewer| !viewer.shows_media()) {
                     viewer.key(key);
                 }
             }

@@ -7,8 +7,8 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use super::wire::{ContentMetadata, ContentType, CueSheet, Incoming, NextTrack, Request, Response, TrackTags};
-use super::{ANNOUNCE_LEN, Channel, Kind, Shared, TAIL_LEN, audio, cue, kind_of, new_ids, send_range, video_metadata};
+use srp_client::protocol::{ContentMetadata, ContentType, CueSheet, NextTrack, SrvRequest, SrvResponse, TrackTags};
+use super::{ANNOUNCE_LEN, Channel, Forwarded as _, Kind, Shared, TAIL_LEN, audio, cue, kind_of, new_ids, send_range, video_metadata};
 
 /// One thing in a list.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -143,18 +143,18 @@ pub fn run_markdown(path: &Path, shared: &Arc<Shared>) -> Result<(), String> {
     }
 
     let grower = Arc::new(Channel::connect()?);
-    grower.send(&Request::RegisterMarkdownGrower { session_id: ids.0, file_id: ids.1 })?;
+    grower.send(&SrvRequest::RegisterMarkdownGrower { session_id: ids.0, file_id: ids.1 })?;
     shared.set_status(super::Status::Sent);
     let ended = Arc::new(AtomicBool::new(false));
     let thread = {
         let (grower, ended, shared) = (grower.clone(), ended.clone(), shared.clone());
         std::thread::spawn(move || {
-            while let Ok(incoming) = grower.next_incoming() {
+            while let Ok(incoming) = grower.next_forwarded() {
                 match incoming {
-                    Incoming::GrowMarkdownRows { session_id, file_id, additional_rows } if (session_id, file_id) == ids => {
+                    SrvRequest::GrowMarkdownRows { session_id, file_id, additional_rows } if (session_id, file_id) == ids => {
                         shared.grow_rows(additional_rows)
                     }
-                    Incoming::EndPlayback { session_id, file_id } if (session_id, file_id) == ids => break,
+                    SrvRequest::EndPlayback { session_id, file_id } if (session_id, file_id) == ids => break,
                     _ => {}
                 }
             }
@@ -164,7 +164,7 @@ pub fn run_markdown(path: &Path, shared: &Arc<Shared>) -> Result<(), String> {
     while !shared.cancelled() && !ended.load(Ordering::Acquire) {
         std::thread::sleep(std::time::Duration::from_millis(50));
     }
-    grower.close();
+    grower.shutdown();
     let _ = thread.join();
     Ok(())
 }
@@ -270,7 +270,7 @@ fn announce(ids: (u32, u32), path: Option<&Path>, target: &str, position: &Posit
         (None, None) => None,
     };
     let result = Channel::connect().and_then(|channel| {
-        channel.send(&Request::AnnounceTrack {
+        channel.send(&SrvRequest::AnnounceTrack {
             session_id: ids.0,
             file_id: ids.1,
             title: position.title.clone(),
@@ -283,7 +283,7 @@ fn announce(ids: (u32, u32), path: Option<&Path>, target: &str, position: &Posit
             next: position.next.clone(),
         })?;
         if let Some(sheet) = &position.cue {
-            channel.send(&Request::AnnounceCue { session_id: ids.0, file_id: ids.1, sheet: sheet.clone() })?;
+            channel.send(&SrvRequest::AnnounceCue { session_id: ids.0, file_id: ids.1, sheet: sheet.clone() })?;
         }
         Ok(())
     });
@@ -301,17 +301,17 @@ fn watch_responder(
     mut serve: impl FnMut(&Channel, u64, u64) + Send + 'static,
 ) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
-        while let Ok(incoming) = responder.next_incoming() {
+        while let Ok(incoming) = responder.next_forwarded() {
             match incoming {
-                Incoming::RequestByteRange { session_id, file_id, offset, len } if (session_id, file_id) == ids => {
+                SrvRequest::RequestByteRange { session_id, file_id, offset, len } if (session_id, file_id) == ids => {
                     serve(&responder, offset, len)
                 }
-                Incoming::EndPlayback { session_id, file_id } if (session_id, file_id) == ids => {
+                SrvRequest::EndPlayback { session_id, file_id } if (session_id, file_id) == ids => {
                     ended.store(true, Ordering::Release);
                     return;
                 }
-                Incoming::PlaylistStep { session_id, file_id, delta } if (session_id, file_id) == ids => shared.step.store(delta.signum(), Ordering::Release),
-                Incoming::RadioControl { session_id, file_id, control } if (session_id, file_id) == ids => {
+                SrvRequest::PlaylistStep { session_id, file_id, delta } if (session_id, file_id) == ids => shared.step.store(delta.signum(), Ordering::Release),
+                SrvRequest::RadioControl { session_id, file_id, control } if (session_id, file_id) == ids => {
                     super::radio::handle_control(&shared, ids, control)
                 }
                 _ => {}
@@ -347,7 +347,7 @@ fn play_file(path: &Path, kind: Kind, position: Option<&Position>, ids: (u32, u3
 
     // the responder: its connection is the one Som's requests for ranges come on
     let responder = Arc::new(Channel::connect()?);
-    responder.send(&Request::RegisterRangeResponder { session_id: ids.0, file_id: ids.1 })?;
+    responder.send(&SrvRequest::RegisterRangeResponder { session_id: ids.0, file_id: ids.1 })?;
     let ended = Arc::new(AtomicBool::new(false));
     let thread = {
         let (file, metadata) = (file.clone(), metadata.clone());
@@ -364,10 +364,10 @@ fn play_file(path: &Path, kind: Kind, position: Option<&Position>, ids: (u32, u3
     shared.set_status(super::Status::Sent);
 
     wait_for_end(shared, &ended);
-    responder.close();
+    responder.shutdown();
     let _ = thread.join();
     // a no-op if the playback already ended
-    let _ = channel.send(&Request::StopPlayback { session_id: ids.0, file_id: ids.1 });
+    let _ = channel.send(&SrvRequest::StopPlayback { session_id: ids.0, file_id: ids.1 });
     Ok(())
 }
 
@@ -379,7 +379,7 @@ pub(super) fn play_url(url: &str, position: &Position, ids: (u32, u32), shared: 
 
     // registered only to hear the end of the playback: the daemon never forwards ranges for a fetched key
     let responder = Arc::new(Channel::connect()?);
-    responder.send(&Request::RegisterRangeResponder { session_id: ids.0, file_id: ids.1 })?;
+    responder.send(&SrvRequest::RegisterRangeResponder { session_id: ids.0, file_id: ids.1 })?;
     let ended = Arc::new(AtomicBool::new(false));
     if position.radio {
         super::radio::announce_state(shared, ids);
@@ -387,12 +387,12 @@ pub(super) fn play_url(url: &str, position: &Position, ids: (u32, u32), shared: 
     let thread = watch_responder(responder.clone(), ids, shared.clone(), ended.clone(), |_, _, _| {});
 
     let failure: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
-    fetch.send(&Request::FetchResource { session_id: ids.0, file_id: ids.1, target: url.to_string(), base_dir: None })?;
+    fetch.send(&SrvRequest::FetchResource { session_id: ids.0, file_id: ids.1, target: url.to_string(), base_dir: None })?;
     let reader = {
         let (fetch, ended, failure) = (fetch.clone(), ended.clone(), failure.clone());
         std::thread::spawn(move || {
             while let Ok(message) = fetch.read_raw() {
-                if let Ok(Response::FetchFailed { reason, .. }) = serde_json::from_slice::<Response>(&message) {
+                if let Ok(SrvResponse::FetchFailed { reason, .. }) = serde_json::from_slice::<SrvResponse>(&message) {
                     *failure.lock().unwrap_or_else(|e| e.into_inner()) = Some(reason);
                     ended.store(true, Ordering::Release);
                     return;
@@ -403,12 +403,12 @@ pub(super) fn play_url(url: &str, position: &Position, ids: (u32, u32), shared: 
     shared.set_status(super::Status::Sent);
 
     wait_for_end(shared, &ended);
-    responder.close();
-    fetch.close();
+    responder.shutdown();
+    fetch.shutdown();
     let _ = thread.join();
     let _ = reader.join();
     if let Ok(channel) = Channel::connect() {
-        let _ = channel.send(&Request::StopPlayback { session_id: ids.0, file_id: ids.1 });
+        let _ = channel.send(&SrvRequest::StopPlayback { session_id: ids.0, file_id: ids.1 });
     }
     match failure.lock().unwrap_or_else(|e| e.into_inner()).take() {
         Some(reason) => Err(format!("fetching: {reason}")),

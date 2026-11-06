@@ -63,8 +63,14 @@ pub struct Viewer {
     media_end: bool,
     path: std::path::PathBuf,
     streams: crate::srp::Streams,
-    /// `a` or `s` was pressed: the next digit is a stream number.
+    /// `a` or `s` was pressed: the next digit is a stream number (when the
+    /// video's streams cannot be listed).
     stream_key: Option<char>,
+    /// The video's streams, read on the first `a` or `s` (`None` inside: they
+    /// cannot be listed here).
+    stream_list: Option<Option<crate::srp::streams::StreamList>>,
+    /// What the last `a` or `s` chose, for the status line.
+    stream_note: Option<String>,
 }
 
 pub enum Outcome {
@@ -117,6 +123,8 @@ impl Viewer {
             path: std::path::PathBuf::new(),
             streams: crate::srp::Streams::default(),
             stream_key: None,
+            stream_list: None,
+            stream_note: None,
         }
     }
 
@@ -144,6 +152,11 @@ impl Viewer {
             _ => grid.place(x, y, width, height, media.ids()),
         }
         true
+    }
+
+    /// Whether Som shows the file (a placement), not this viewer's text.
+    pub fn shows_media(&self) -> bool {
+        self.media.is_some()
     }
 
     fn shows_document(&self) -> bool {
@@ -179,13 +192,20 @@ impl Viewer {
         }
     }
 
-    /// `a` or `s` and a digit choose the audio or subtitle stream of a video (as
-    /// `somsrp -a <n> -s <n>`): the video starts again with them.
+    /// `a` goes to the next audio stream of a video, `s` to the next subtitle
+    /// stream and then to none (as `somsrp -a <n> -s <n>`): the video starts
+    /// again with them. Where the streams cannot be listed, `a` or `s` and a
+    /// digit choose one by its number.
     fn choose_stream(&mut self, key: KeyCode) -> bool {
         let is_video = self.media.as_ref().is_some_and(|media| media.kind == crate::srp::Kind::Video);
         match (key, self.stream_key.take()) {
             (KeyCode::Char(letter @ ('a' | 's')), _) if is_video => {
-                self.stream_key = Some(letter);
+                let path = self.path.clone();
+                let list = self.stream_list.get_or_insert_with(|| crate::srp::streams::list(&path)).clone();
+                match list {
+                    Some(list) => self.next_stream(letter, &list),
+                    None => self.stream_key = Some(letter),
+                }
                 true
             }
             (KeyCode::Char(digit), Some(letter)) if digit.is_ascii_digit() => {
@@ -194,12 +214,48 @@ impl Viewer {
                     'a' => self.streams.audio = number,
                     _ => self.streams.subtitle = number,
                 }
-                // the old placement is dropped (and stopped) when the new one takes its place
-                self.media = crate::srp::Media::start_with(&self.path, false, self.streams);
+                self.restart();
                 true
             }
             _ => false,
         }
+    }
+
+    fn next_stream(&mut self, letter: char, list: &crate::srp::streams::StreamList) {
+        let (labels, what) = if letter == 'a' { (&list.audio, "audio") } else { (&list.subtitle, "subtitles") };
+        let len = labels.len() as u32;
+        let current = if letter == 'a' { self.streams.audio } else { self.streams.subtitle };
+        let next = match (letter, current) {
+            (_, _) if len == 0 => {
+                self.stream_note = Some(format!("no {what}"));
+                return;
+            }
+            ('a', _) if len == 1 => {
+                self.stream_note = Some(format!("the only audio: {}", labels[0]));
+                return;
+            }
+            // Som starts with the first audio stream FFmpeg deems best, usually the first
+            ('a', current) => Some((current.unwrap_or(0) + 1) % len),
+            (_, None) => Some(0),
+            (_, Some(index)) if index + 1 < len => Some(index + 1),
+            _ => None,
+        };
+        self.stream_note = Some(match next {
+            Some(index) => format!("{what} {}/{len}: {}", index + 1, labels[index as usize]),
+            None => "subtitles off".to_string(),
+        });
+        if letter == 'a' {
+            self.streams.audio = next;
+        } else {
+            self.streams.subtitle = next;
+        }
+        self.restart();
+    }
+
+    /// The video again with the streams chosen; the old placement is dropped
+    /// (and stopped) when the new one takes its place.
+    fn restart(&mut self) {
+        self.media = crate::srp::Media::start_with(&self.path, false, self.streams);
     }
 
     pub fn key(&mut self, key: KeyEvent) -> Outcome {
@@ -289,9 +345,11 @@ impl Viewer {
                 Some((index, len)) => format!(" track {}/{len} (n, p) --", index + 1),
                 None => String::new(),
             };
-            let streams = match self.media.as_ref() {
-                Some(media) if media.kind == crate::srp::Kind::Video => " -- a/s + digit: audio/subtitle stream",
-                _ => "",
+            let streams = match (self.media.as_ref(), &self.stream_list, &self.stream_note) {
+                (Some(media), _, Some(note)) if media.kind == crate::srp::Kind::Video => format!(" -- {note} (a, s)"),
+                (Some(media), Some(None), None) if media.kind == crate::srp::Kind::Video => " -- a/s + digit: audio/subtitle stream".to_string(),
+                (Some(media), _, None) if media.kind == crate::srp::Kind::Video => " -- a: audio, s: subtitles".to_string(),
+                _ => String::new(),
             };
             let status = format!(" {state}{track}{streams} -- Esc, F3 or F10 closes");
             grid.fill_with(0, grid.rows - 1, grid.cols, 1, BAR_FG(), BAR_BG());
@@ -317,6 +375,31 @@ mod tests {
 
     fn key(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    #[test]
+    fn a_and_s_go_through_the_streams_the_video_has() {
+        let list = crate::srp::streams::StreamList {
+            audio: vec!["rus, AC3".into(), "eng, AAC".into()],
+            subtitle: vec!["rus, SUBRIP".into()],
+        };
+        let mut viewer = Viewer::from_text("film.mkv", "");
+        viewer.path = "film.mkv".into();
+        viewer.next_stream('a', &list);
+        assert_eq!(viewer.streams.audio, Some(1));
+        assert_eq!(viewer.stream_note.as_deref(), Some("audio 2/2: eng, AAC"));
+        viewer.next_stream('a', &list);
+        assert_eq!(viewer.streams.audio, Some(0));
+        viewer.next_stream('s', &list);
+        assert_eq!((viewer.streams.subtitle, viewer.stream_note.as_deref()), (Some(0), Some("subtitles 1/1: rus, SUBRIP")));
+        viewer.next_stream('s', &list);
+        assert_eq!((viewer.streams.subtitle, viewer.stream_note.as_deref()), (None, Some("subtitles off")));
+
+        let lone = crate::srp::streams::StreamList { audio: vec!["AAC".into()], subtitle: vec![] };
+        viewer.next_stream('a', &lone);
+        assert_eq!(viewer.stream_note.as_deref(), Some("the only audio: AAC"));
+        viewer.next_stream('s', &lone);
+        assert_eq!(viewer.stream_note.as_deref(), Some("no subtitles"));
     }
 
     #[test]

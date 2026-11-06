@@ -10,7 +10,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use super::play::Entry;
-use super::wire::{NextTrack, RadioControl, RadioEvent, RadioTrack, Request, Response};
+use srp_client::protocol::{NextTrack, RadioControl, RadioEvent, RadioTrack, SrvRequest};
 use super::{Channel, Shared, new_ids};
 
 pub const YANDEX: &str = "yandex";
@@ -114,7 +114,7 @@ pub fn announce_state(shared: &Shared, ids: (u32, u32)) {
     let track_wave = shared.radio.track_wave.load(Ordering::Acquire);
     let wave_label = lock(&shared.radio.wave_label).clone();
     let _ = Channel::connect()
-        .and_then(|channel| channel.send(&Request::AnnounceRadioState { session_id: ids.0, file_id: ids.1, liked, track_wave, wave_label }));
+        .and_then(|channel| channel.send(&SrvRequest::AnnounceRadioState { session_id: ids.0, file_id: ids.1, liked, track_wave, wave_label }));
 }
 
 /// A click on one of the radio widget's icons.
@@ -128,7 +128,7 @@ pub fn handle_control(shared: &Shared, ids: (u32, u32), control: RadioControl) {
             });
             if let Some((track_id, liked)) = change {
                 lock(&radio.likes).push((track_id.clone(), liked));
-                let _ = Channel::connect().and_then(|channel| channel.send(&Request::RadioLike { service: YANDEX.to_string(), track_id, liked }));
+                let _ = Channel::connect().and_then(|channel| channel.send(&SrvRequest::RadioLike { service: YANDEX.to_string(), track_id, liked }));
             }
         }
         RadioControl::ToggleTrackWave => {
@@ -153,25 +153,6 @@ pub fn handle_control(shared: &Shared, ids: (u32, u32), control: RadioControl) {
     announce_state(shared, ids);
 }
 
-impl Channel {
-    /// The next tracks of `station` after the track `queue`, and the id of their batch.
-    fn radio_tracks(&self, service: &str, station: &str, queue: Option<&str>) -> Result<(String, Vec<RadioTrack>), String> {
-        self.send(&Request::RadioTracks {
-            service: service.to_string(),
-            station: station.to_string(),
-            queue: queue.map(str::to_string),
-        })?;
-        loop {
-            let message = self.read_raw()?;
-            match serde_json::from_slice::<Response>(&message) {
-                Ok(Response::RadioTracks { batch_id, tracks }) => return Ok((batch_id, tracks)),
-                Ok(Response::RadioFailed { reason }) => return Err(reason),
-                _ => {}
-            }
-        }
-    }
-}
-
 /// The next batch of `station` after the track `queue`, as entries.
 fn fetch_entries(service: &str, station: &str, queue: Option<&str>) -> Result<Vec<RadioEntry>, String> {
     let (batch_id, tracks) = Channel::connect()?.radio_tracks(service, station, queue).map_err(|reason| format!("{station}: {reason}"))?;
@@ -182,7 +163,7 @@ fn fetch_entries(service: &str, station: &str, queue: Option<&str>) -> Result<Ve
 fn feedback(service: &str, entry: Option<&RadioEntry>, station: &str, batch_id: &str, event: RadioEvent, played_seconds: f32) {
     let track_id = entry.map(|entry| entry.track.id.clone()).unwrap_or_default();
     let _ = Channel::connect().and_then(|channel| {
-        channel.send(&Request::RadioFeedback {
+        channel.send(&SrvRequest::RadioFeedback {
             service: service.to_string(),
             station: station.to_string(),
             batch_id: batch_id.to_string(),
@@ -450,7 +431,7 @@ mod tests {
 
     #[test]
     fn a_radios_requests_have_the_shape_somsrv_reads() {
-        let feedback = Request::RadioFeedback {
+        let feedback = SrvRequest::RadioFeedback {
             service: "yandex".into(),
             station: "s".into(),
             batch_id: "b".into(),
@@ -462,7 +443,7 @@ mod tests {
             serde_json::to_string(&feedback).unwrap(),
             r#"{"RadioFeedback":{"service":"yandex","station":"s","batch_id":"b","event":"TrackStarted","track_id":"t","played_seconds":0.0}}"#
         );
-        let control: super::super::wire::Incoming = serde_json::from_str(r#"{"RadioControl":{"session_id":1,"file_id":2,"control":"ToggleLike"}}"#).unwrap();
-        assert!(matches!(control, super::super::wire::Incoming::RadioControl { control: RadioControl::ToggleLike, .. }));
+        let control: SrvRequest = serde_json::from_str(r#"{"RadioControl":{"session_id":1,"file_id":2,"control":"ToggleLike"}}"#).unwrap();
+        assert!(matches!(control, SrvRequest::RadioControl { control: RadioControl::ToggleLike, .. }));
     }
 }

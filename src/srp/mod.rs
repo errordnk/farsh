@@ -1,31 +1,31 @@
 //! SRP, Som's rich-content protocol, for the F3 viewer and the quick view.
 //!
-//! A placement is text: a grid of placeholder cells ([`placeholder`]) that
-//! farsh draws like any other cells, and the file's bytes, which go to the
-//! `somsrv` daemon on this machine over a side-channel ([`pipe`], [`wire`]).
+//! A placement is text: a grid of placeholder cells (`srp_client::placeholder`)
+//! that farsh draws like any other cells, and the file's bytes, which go to
+//! the `somsrv` daemon on this machine over a side-channel ([`Channel`]).
 //! Som finds the cells, asks the daemon for the bytes and paints the picture
 //! (or the player) over them, fitted into the rectangle with its proportions
 //! kept. Only inside Som (`SOM_WINDOW_ID`), and only to a daemon that is
 //! running: farsh never starts or replaces one.
 //!
-//! The protocol is copied from Som (`somsrv::protocol`, its
-//! `SRP_INTEGRATION_GUIDE.md`) in a small subset; `docs/srp-findings.md`
-//! lists what Som could change to make that unnecessary.
+//! The protocol is Som's `srp_client` crate (the types `somsrv` itself uses;
+//! Som's `SRP_INTEGRATION_GUIDE.md` describes it).
 
 pub mod audio;
-pub mod cue;
-pub mod pipe;
-pub mod placeholder;
 pub mod play;
 pub mod radio;
-pub mod wire;
+pub mod streams;
+
+pub use srp_client::channel::SrvChannel as Channel;
+pub use srp_client::cue;
 
 use std::io::{Read as _, Seek as _, SeekFrom};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
-use wire::{ContentMetadata, ContentType, Incoming, Request};
+use srp_client::protocol::{ContentMetadata, ContentType, SrvRequest, VideoCodec};
+use srp_client::channel::Incoming;
 
 /// The size of one `PutChunk`.
 const CHUNK: usize = 64 * 1024;
@@ -108,7 +108,7 @@ pub(super) fn video_metadata(path: &Path, streams: Streams) -> ContentMetadata {
         height_px: 0,
         fps_numerator: 0,
         fps_denominator: 0,
-        codec: wire::VideoCodec::Unknown,
+        codec: VideoCodec::Unknown,
         audio_stream_index: streams.audio,
         subtitle_stream_index: streams.subtitle,
         extension: path.extension().and_then(|e| e.to_str()).unwrap_or("").to_string(),
@@ -125,47 +125,20 @@ pub(super) const TAIL_LEN: u64 = 4 * 1024 * 1024;
 /// sent when Som asks for it.
 pub(super) const ANNOUNCE_LEN: u64 = 256 * 1024;
 
-/// A connection to the daemon that is ready for requests.
-pub struct Channel {
-    connection: pipe::Connection,
+/// What a viewer reads off a connection: the requests the daemon forwards
+/// from Som (`RequestByteRange`, `EndPlayback`, `GrowMarkdownRows`...); the
+/// daemon's own answers on it are skipped. An error is the end of the connection.
+pub trait Forwarded {
+    fn next_forwarded(&self) -> Result<SrvRequest, String>;
 }
 
-impl Channel {
-    pub fn connect() -> Result<Self, String> {
-        let address = pipe::daemon_address();
-        let connection = pipe::Connection::connect(&address)
-            .map_err(|error| format!("no somsrv at {address}: {error}"))?;
-        let channel = Self { connection };
-        channel.connection.write_message(&[wire::KIND_SRV]).map_err(|e| e.to_string())?;
-        channel.send(&Request::Handshake(wire::HandshakeInfo::current()))?;
-        channel.connection.read_message().map_err(|e| format!("somsrv did not answer: {e}"))?;
-        Ok(channel)
-    }
-
-    pub fn send(&self, request: &Request) -> Result<(), String> {
-        let payload = serde_json::to_vec(request).map_err(|e| e.to_string())?;
-        self.connection.write_message(&payload).map_err(|e| format!("somsrv: {e}"))
-    }
-
-    /// The next thing the daemon forwards that a viewer answers; what else it
-    /// says (progress, playlist steps) is skipped. An error is the end of the
-    /// connection.
-    pub(super) fn next_incoming(&self) -> Result<Incoming, String> {
+impl Forwarded for Channel {
+    fn next_forwarded(&self) -> Result<SrvRequest, String> {
         loop {
-            let message = self.connection.read_message().map_err(|e| e.to_string())?;
-            if let Ok(incoming) = serde_json::from_slice::<Incoming>(&message) {
-                return Ok(incoming);
+            if let Incoming::Request(request) = self.read_incoming()? {
+                return Ok(request);
             }
         }
-    }
-
-    pub(super) fn close(&self) {
-        self.connection.close();
-    }
-
-    /// The next message as it came, whatever it is.
-    pub(super) fn read_raw(&self) -> Result<Vec<u8>, String> {
-        self.connection.read_message().map_err(|e| e.to_string())
     }
 }
 
@@ -197,7 +170,7 @@ pub(super) fn send_range(
             file.seek(SeekFrom::Start(at)).map_err(|e| e.to_string())?;
             file.read_exact(&mut buffer[..piece]).map_err(|e| e.to_string())?;
         }
-        channel.send(&Request::PutChunk {
+        channel.send(&SrvRequest::PutChunk {
             session_id: ids.0,
             file_id: ids.1,
             offset: at,
@@ -212,7 +185,7 @@ pub(super) fn send_range(
 }
 
 /// The requests that carry `bytes` of an image: chunks in order.
-pub fn image_requests(ids: (u32, u32), bytes: &[u8], content_type: ContentType, metadata: &ContentMetadata) -> Vec<Request> {
+pub fn image_requests(ids: (u32, u32), bytes: &[u8], content_type: ContentType, metadata: &ContentMetadata) -> Vec<SrvRequest> {
     let total_size = bytes.len() as u64;
     if bytes.is_empty() {
         return Vec::new();
@@ -220,7 +193,7 @@ pub fn image_requests(ids: (u32, u32), bytes: &[u8], content_type: ContentType, 
     bytes
         .chunks(CHUNK)
         .enumerate()
-        .map(|(index, data)| Request::PutChunk {
+        .map(|(index, data)| SrvRequest::PutChunk {
             session_id: ids.0,
             file_id: ids.1,
             offset: (index * CHUNK) as u64,
@@ -311,7 +284,7 @@ impl Shared {
 
     /// Som asked for `more` rows for a document, at most as many as the marks can number.
     fn grow_rows(&self, more: u32) {
-        let rows = self.rows.load(Ordering::Relaxed).saturating_add(more).min(placeholder::MAX_CELLS as u32);
+        let rows = self.rows.load(Ordering::Relaxed).saturating_add(more).min(srp_client::placeholder::MAX_CELLS);
         self.rows.store(rows, Ordering::Relaxed);
         self.touch();
     }
@@ -486,7 +459,7 @@ mod tests {
         let offsets: Vec<u64> = requests
             .iter()
             .map(|r| match r {
-                Request::PutChunk { offset, total_size, session_id: 7, file_id: 8, .. } => {
+                SrvRequest::PutChunk { offset, total_size, session_id: 7, file_id: 8, .. } => {
                     assert_eq!(*total_size, bytes.len() as u64);
                     *offset
                 }
@@ -529,7 +502,7 @@ mod daemon_tests {
         }
         // a daemon that did not like the chunk would have closed the connection by now
         std::thread::sleep(std::time::Duration::from_millis(400));
-        channel.send(&Request::StopPlayback { session_id: 1, file_id: 1 }).unwrap();
+        channel.send(&SrvRequest::StopPlayback { session_id: 1, file_id: 1 }).unwrap();
     }
 
     /// A document is sent and registered for growing; dropping the placement ends
