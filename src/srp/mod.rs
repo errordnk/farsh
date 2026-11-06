@@ -390,7 +390,12 @@ fn transfer(path: &Path, kind: Kind, shared: &Arc<Shared>, debounce: bool) -> Re
     }
 }
 
-fn send_image(path: &Path, content_type: ContentType, shared: &Shared) -> Result<(), String> {
+/// The picture's chunks, then its range responder until the placement goes: Som
+/// may see the cells in the middle of the transfer (its first chunk is then from
+/// the middle) or after it, and asks for the whole file from the start. The
+/// transfer's own connection is only written to, so without a responder that
+/// request was never answered - somsrp's 8 MB GIF showed nothing (2026-11-06).
+fn send_image(path: &Path, content_type: ContentType, shared: &Arc<Shared>) -> Result<(), String> {
     let ids = shared.ids();
     let size = std::fs::metadata(path).map_err(|e| e.to_string())?.len();
     if size > IMAGE_LIMIT {
@@ -398,13 +403,30 @@ fn send_image(path: &Path, content_type: ContentType, shared: &Shared) -> Result
     }
     let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
     let metadata = image_metadata(&bytes, content_type)?;
+    let file = Arc::new(Mutex::new(std::fs::File::open(path).map_err(|e| e.to_string())?));
+    let responder = Arc::new(Channel::connect()?);
+    responder.send(&SrvRequest::RegisterRangeResponder { session_id: ids.0, file_id: ids.1 })?;
+    let ended = Arc::new(AtomicBool::new(false));
+    let thread = {
+        let metadata = metadata.clone();
+        play::watch_responder(responder.clone(), ids, shared.clone(), ended.clone(), move |responder, offset, len| {
+            let _ = send_range(responder, &file, ids, content_type, &metadata, size, offset, len, &|| false);
+        })
+    };
     let channel = Channel::connect()?;
     for request in image_requests(ids, &bytes, content_type, &metadata) {
         if shared.cancelled() {
-            return Ok(());
+            break;
         }
         channel.send(&request)?;
     }
+    drop(channel);
+    shared.set_status(Status::Sent);
+    while !shared.cancelled() && !ended.load(Ordering::Acquire) {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    responder.shutdown();
+    let _ = thread.join();
     Ok(())
 }
 
@@ -503,6 +525,78 @@ mod daemon_tests {
         // a daemon that did not like the chunk would have closed the connection by now
         std::thread::sleep(std::time::Duration::from_millis(400));
         channel.send(&SrvRequest::StopPlayback { session_id: 1, file_id: 1 }).unwrap();
+    }
+
+    /// Som may see a picture's cells in the middle of the transfer, or after it:
+    /// it then asks for the whole file from the start, and farsh answers for as
+    /// long as the placement is shown. The picture is larger than the daemon's
+    /// trailing window (8 MB), so nothing but farsh can answer (before, farsh's
+    /// connection was only written to and then closed; somsrp had the same bug:
+    /// an 8 MB GIF showed nothing, 2026-11-06).
+    #[test]
+    #[ignore = "needs a running test daemon and SOMSRV_INSTANCE set to its name"]
+    fn a_picture_is_sent_again_whole_when_som_asks() {
+        assert!(std::env::var_os("SOMSRV_INSTANCE").is_some(), "never the user's daemon");
+        let path = std::env::temp_dir().join(format!("farsh-daemon-noise-{}.png", std::process::id()));
+        let (width, height) = (2000u32, 1500u32);
+        // noise (xorshift): it does not compress, so the PNG stays this large
+        let mut state = 0x2545_f491u32;
+        let pixels: Vec<u8> = (0..width * height * 3)
+            .map(|_| {
+                state ^= state << 13;
+                state ^= state >> 17;
+                state ^= state << 5;
+                state as u8
+            })
+            .collect();
+        image::RgbImage::from_raw(width, height, pixels).unwrap().save(&path).unwrap();
+        let total = std::fs::metadata(&path).unwrap().len();
+        assert!(total > 8 * 1024 * 1024, "the picture must be larger than the daemon's window");
+
+        // SAFETY: the tests that read the variable all set it to the same value
+        unsafe { std::env::set_var("FARSH_SRP", "1") };
+        let media = Media::start(&path, false).expect("a picture is a kind");
+        let started = std::time::Instant::now();
+        while media.status() == Status::Sending && started.elapsed() < std::time::Duration::from_secs(30) {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert_eq!(media.status(), Status::Sent);
+        let ids = media.shared.ids();
+
+        // Som: subscribed only now, and asking for the whole file
+        let subscriber = Channel::connect().unwrap();
+        subscriber.send(&SrvRequest::SubscribeProgress { session_id: ids.0, file_id: ids.1 }).unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            while let Ok(incoming) = subscriber.read_incoming() {
+                if let Incoming::Response(srp_client::protocol::SrvResponse::Progress { chunk_offset, chunk_data, .. }) = incoming
+                    && tx.send((chunk_offset, chunk_data.len() as u64)).is_err()
+                {
+                    return;
+                }
+            }
+        });
+        Channel::connect()
+            .unwrap()
+            .send(&SrvRequest::RequestByteRange { session_id: ids.0, file_id: ids.1, offset: 0, len: total })
+            .unwrap();
+        let mut next = 0u64;
+        while next < total {
+            let Ok((offset, len)) = rx.recv_timeout(std::time::Duration::from_secs(10)) else { break };
+            if offset == next {
+                next += len;
+            }
+        }
+        assert_eq!(next, total, "the whole file did not come again from the start");
+
+        let shared = media.shared.clone();
+        drop(media);
+        let ended = std::time::Instant::now();
+        while Arc::strong_count(&shared) > 1 && ended.elapsed() < std::time::Duration::from_secs(3) {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert_eq!(Arc::strong_count(&shared), 1, "the transfer thread is still running");
+        std::fs::remove_file(path).unwrap();
     }
 
     /// A document is sent and registered for growing; dropping the placement ends

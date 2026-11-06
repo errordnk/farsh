@@ -226,7 +226,11 @@ over the shell screen.
   starts or replaces one (a new `somsrv` ends every session, farsh lives in
   one). The transfer runs in a thread (the file is read and sent while the
   placement is already drawn: grid first, then bytes); dropping the viewer
-  cancels it; the quick view waits 150 ms on a file first. Done: pictures
+  cancels it; the quick view waits 150 ms on a file first. A picture also gets a
+  range responder until the placement goes: Som may see the cells in the middle
+  of the transfer and asks for the whole file again from the start, and the
+  transfer's own connection is only written to (an 8 MB GIF showed nothing
+  without it, in somsrp too). Done: pictures
   (png, jpg, gif) and audio (mp3, flac, ogg, oga). Audio is played by Som
   (decoding and speakers are there): farsh reads the shape, length and tags
   from the headers (symphonia, `srp/audio.rs`), announces the track

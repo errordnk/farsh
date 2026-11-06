@@ -293,7 +293,7 @@ fn announce(ids: (u32, u32), path: Option<&Path>, target: &str, position: &Posit
 
 /// Reads what Som sends to a placement's responder connection until the track
 /// ends (`ended` is set) or the connection goes. `serve` answers a range request.
-fn watch_responder(
+pub(super) fn watch_responder(
     responder: Arc<Channel>,
     ids: (u32, u32),
     shared: Arc<Shared>,
