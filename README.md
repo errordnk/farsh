@@ -33,3 +33,9 @@ On Linux/macOS farsh can be your login shell: add its path to `/etc/shells` and 
 ## Status
 
 First milestone: shell in a PTY, two panels with navigation, shared command line.
+
+## License
+
+GPL-3.0-or-later (see `LICENSE`), so that the [fresh](https://github.com/errordnk/fresh)
+editor (GPL-3.0) can be built into farsh as its editor and viewer. Versions
+released before this change were MIT.
