@@ -30,8 +30,8 @@ zip = { version = "9.3.0", default-features = false, features = ["aes-crypto", "
 # is), built in as a library through `fresh::embed::Session` - no plugins (farsh
 # will have its own, in Lua), no LSP, no menus. A rev of the fork, moved on
 # deliberately like srp_client's. See docs/fresh-plan.md.
-fresh-editor = { git = "https://github.com/errordnk/fresh", rev = "4d9824fc6812619f413c822899896abd64a43e7a", default-features = false, features = ["runtime", "tree-sitter"] }
-fresh-input-parser = { git = "https://github.com/errordnk/fresh", rev = "4d9824fc6812619f413c822899896abd64a43e7a" }
+fresh-editor = { git = "https://github.com/errordnk/fresh", rev = "c98df16fd", default-features = false, features = ["runtime", "tree-sitter"] }
+fresh-input-parser = { git = "https://github.com/errordnk/fresh", rev = "c98df16fd" }
 ratatui = { version = "0.30.0", default-features = false, features = ["std", "underline-color"] }
 
 [target.'cfg(windows)'.dependencies]

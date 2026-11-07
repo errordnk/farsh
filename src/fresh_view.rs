@@ -22,6 +22,7 @@ use ratatui::style::{Color as RatColor, Modifier};
 use ratatui::Terminal;
 
 use crate::grid::{text_width, Cell, Grid};
+use crate::{colors, palette};
 
 /// A ratatui color as the terminal color farsh's cells carry.
 fn color(color: RatColor) -> Color {
@@ -177,7 +178,60 @@ fn viewer_config(config: &mut fresh::config::Config) {
 
 /// A read-only session for looking at a file.
 pub fn viewer_options() -> EmbedOptions {
-    EmbedOptions { read_only: true, configure: Some(viewer_config), dirs: dirs(), ..EmbedOptions::default() }
+    viewer_options_in("Panel.Text", "Viewer.Text.Selected")
+}
+
+/// The same, in the colors named `text` and `selected` (Options > Colors).
+pub fn viewer_options_in(text: &str, selected: &str) -> EmbedOptions {
+    EmbedOptions {
+        read_only: true,
+        configure: Some(viewer_config),
+        theme_json: Some(theme_json(text, selected)),
+        dirs: dirs(),
+        ..EmbedOptions::default()
+    }
+}
+
+/// What fresh's syntax categories look like on Far's blue: the ONE table of
+/// them (console color indices; farsh's own theme format will replace it).
+const SYNTAX: [(&str, u8); 9] = [
+    ("keyword", palette::WHITE),
+    ("string", palette::LIGHT_GREEN),
+    ("comment", palette::DARK_GRAY),
+    ("function", palette::YELLOW),
+    ("type", palette::LIGHT_MAGENTA),
+    ("variable", palette::LIGHT_CYAN),
+    ("variable_builtin", palette::LIGHT_MAGENTA),
+    ("constant", palette::YELLOW),
+    ("operator", palette::WHITE),
+];
+
+fn json_color(color: Color) -> serde_json::Value {
+    match color {
+        Color::Rgb { r, g, b } => serde_json::json!([r, g, b]),
+        _ => serde_json::json!("Default"),
+    }
+}
+
+/// A fresh theme (JSON, over its dark one) that paints text and selection in
+/// farsh's colors `text` and `selected`: the viewer's panel looks like the file
+/// panel next to it, and syntax categories take the table above.
+pub fn theme_json(text: &str, selected: &str) -> String {
+    let (fg, bg) = (json_color(colors::fg(text)), json_color(colors::bg(text)));
+    let (sel_fg, sel_bg) = (json_color(colors::fg(selected)), json_color(colors::bg(selected)));
+    let syntax: serde_json::Map<String, serde_json::Value> =
+        SYNTAX.iter().map(|(name, index)| ((*name).to_string(), json_color(palette::fg(*index)))).collect();
+    serde_json::json!({
+        "name": "farsh",
+        "extends": "builtin://dark",
+        "editor": {
+            "bg": bg, "after_eof_bg": bg, "fg": fg, "current_line_bg": bg,
+            "selection_bg": sel_bg, "selection_fg": sel_fg,
+            "line_number_bg": bg, "line_number_fg": fg,
+        },
+        "syntax": syntax,
+    })
+    .to_string()
 }
 
 /// Where the embedded editor keeps its config and data: the user's fresh
@@ -287,6 +341,26 @@ mod tests {
 
     fn key(code: KeyCode) -> Event {
         Event::Key(KeyEvent::new(code, KeyModifiers::NONE))
+    }
+
+    #[test]
+    fn the_viewer_text_area_has_the_file_panels_background_down_to_the_last_row() {
+        let temp = tempfile::tempdir().unwrap();
+        let file = temp.path().join("text.txt");
+        std::fs::write(&file, "one line
+").unwrap();
+        let mut options = viewer_options();
+        options.dirs = Some(DirectoryContext::for_testing(&temp.path().join("dirs")));
+        let mut view = EditorView::open(&file, 30, 6, options).unwrap();
+        view.tick().unwrap();
+        let mut grid = Grid::new(30, 6);
+        view.paint(&mut grid, 0, 0).unwrap();
+        let panel = colors::bg("Panel.Text");
+        assert_eq!(panel, Color::Rgb { r: 0, g: 0, b: 128 }, "Far's blue");
+        // the line, the empty rows past the file and the rest of the line: all the panel's
+        for (x, y) in [(0, 0), (5, 0), (29, 0), (0, 3), (29, 5)] {
+            assert_eq!(grid.cell_mut(x, y).unwrap().bg, panel, "cell ({x}, {y})");
+        }
     }
 
     #[test]
