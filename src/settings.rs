@@ -134,6 +134,8 @@ const DEFAULTS: &[(&str, Def)] = &[
     ("Viewer.ExternalViewerName", Str("")),
     ("Viewer.PersistentBlocks", Bool(true)),
     ("Viewer.TabSize", Int(8)),
+    ("Editor.TabSize", Int(8)),
+    ("Editor.ShowKeyBar", Bool(true)),
     ("Viewer.ShowArrows", Bool(true)),
     ("Viewer.Visible0x00", Bool(false)),
     ("Viewer.ShowScrollbar", Bool(false)),

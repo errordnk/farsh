@@ -426,10 +426,11 @@ mod tests {
         assert_eq!(row_text(at), format!("{:<42}\u{2502}string \u{2502}$p$g", "Cmdline.PromptFormat"));
         let at = FAR.iter().position(|(k, _, _)| *k == "Viewer.TabSize").unwrap();
         assert!(row_text(at).ends_with("\u{2502}integer\u{2502}8 = 0x8"));
-        // of the editor's settings only the external editor is farsh's (its
-        // internal editor is to be fresh, with fresh's own settings)
+        // of the editor's settings farsh does the external editor, the tab size
+        // and the key bar (F4 is fresh; the rest of Far's settings follow)
         let at = |key: &str| FAR.iter().position(|(k, _, _)| *k == key).unwrap();
-        assert!(!ours(at("Editor.TabSize")), "the internal editor's settings are shown disabled");
+        assert!(ours(at("Editor.TabSize")) && ours(at("Editor.ShowKeyBar")));
+        assert!(!ours(at("Editor.UndoDataSize")), "the rest of the editor's settings are shown disabled");
         assert!(ours(at("Editor.UseExternalEditor")) && ours(at("Editor.ExternalEditorName")));
     }
 

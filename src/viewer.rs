@@ -1,7 +1,8 @@
-//! F3: a viewer over the whole screen, as in Far: a status bar at the top, the
+//! F3 and F4: a viewer or an editor over the whole screen, as in Far: a status bar at the top, the
 //! key bar at the bottom. Text is fresh, read-only (`fresh_view`); pictures (and
 //! what else Som plays) are shown through SRP when farsh runs in Som; a binary
-//! file is an error, not a hex view.
+//! file is an error, not a hex view. F4 is the same screen with the session
+//! editable; F6 switches between the two, as in Far.
 
 use std::path::Path;
 
@@ -31,8 +32,10 @@ fn BAR_BG() -> Color {
 
 pub struct Viewer {
     name: String,
-    /// The text, in fresh (read-only).
+    /// The text, in fresh (read-only, or editable: `edit`).
     editor: Option<EditorView>,
+    /// F4: the text can be changed (F2 saves).
+    edit: bool,
     /// The file's size, for the status bar.
     size: u64,
     /// Rows of the space for a document on the last screen painted (it is scrolled by rows).
@@ -58,6 +61,8 @@ pub struct Viewer {
 pub enum Outcome {
     Open,
     Closed,
+    /// Esc or F10 with unsaved changes: Far asks what to do with them.
+    AskSave,
 }
 
 impl Viewer {
@@ -69,6 +74,29 @@ impl Viewer {
     /// has stayed on it a moment.
     pub fn open_quick(path: &Path) -> std::io::Result<Self> {
         Self::open_for(path, true)
+    }
+
+    /// F4: the file in the editor (a file that is not there yet is a new one).
+    pub fn open_edit(path: &Path) -> std::io::Result<Self> {
+        let mut viewer = Self::empty(&path.display().to_string());
+        viewer.path = path.to_path_buf();
+        viewer.size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+        let editor = EditorView::open(path, 80, 24, crate::fresh_view::editor_options()).map_err(std::io::Error::other)?;
+        viewer.editor = Some(editor);
+        viewer.edit = true;
+        Ok(viewer)
+    }
+
+    /// Whether there are changes not saved.
+    pub fn modified(&mut self) -> bool {
+        self.editor.as_mut().is_some_and(|editor| editor.session().modified())
+    }
+
+    /// F2: writes the file (Ctrl+S of the editor).
+    pub fn save(&mut self) {
+        if let Some(editor) = &mut self.editor {
+            let _ = editor.event(Event::Key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL)), 0, 1);
+        }
     }
 
     fn open_for(path: &Path, quick: bool) -> std::io::Result<Self> {
@@ -92,6 +120,7 @@ impl Viewer {
         Self {
             name: name.into(),
             editor: None,
+            edit: false,
             size: 0,
             page: 20,
             media: None,
@@ -248,8 +277,12 @@ impl Viewer {
             return Outcome::Open;
         }
         let plain = key.modifiers.is_empty();
+        if self.edit {
+            return self.edit_key(key);
+        }
         match key.code {
-            KeyCode::Esc | KeyCode::F(3) | KeyCode::F(10) | KeyCode::Char('q') if plain => return Outcome::Closed,
+            KeyCode::F(6) if plain && self.editor.is_some() => self.switch_edit(true),
+            KeyCode::Esc | KeyCode::F(3) | KeyCode::F(10) | KeyCode::Char('q') if plain => return if self.modified() { Outcome::AskSave } else { Outcome::Closed },
             // the previous and next track of a list, as in somsrp
             KeyCode::Char('n' | 'N') if self.media.as_ref().is_some_and(crate::srp::Media::is_list) => {
                 self.media.as_ref().inspect(|media| media.step(1));
@@ -284,6 +317,39 @@ impl Viewer {
         Outcome::Open
     }
 
+    /// F6: the text editable, or read-only again.
+    fn switch_edit(&mut self, edit: bool) {
+        if let Some(editor) = &mut self.editor {
+            editor.session().set_read_only(!edit);
+            self.edit = edit;
+        }
+    }
+
+    /// A key in the editor: Far's, then the editor's own.
+    fn edit_key(&mut self, key: KeyEvent) -> Outcome {
+        let shift = key.modifiers == KeyModifiers::SHIFT;
+        let plain = key.modifiers.is_empty();
+        match key.code {
+            KeyCode::F(2) if plain => self.save(),
+            // Shift+F10: save and quit
+            KeyCode::F(10) if shift => {
+                self.save();
+                return if self.modified() { Outcome::Open } else { Outcome::Closed };
+            }
+            KeyCode::F(6) if plain => {
+                // to the viewer: the changes stay in the buffer, and are asked about at the end
+                self.switch_edit(false);
+            }
+            KeyCode::Esc | KeyCode::F(10) if plain => return if self.modified() { Outcome::AskSave } else { Outcome::Closed },
+            _ => {
+                if let Some(editor) = &mut self.editor {
+                    let _ = editor.event(Event::Key(key), 0, 1);
+                }
+            }
+        }
+        Outcome::Open
+    }
+
     /// A window of the screen for what Som shows (the quick view's text is
     /// fresh itself, drawn by `qview`), no bars.
     pub fn paint_area(&mut self, grid: &mut Grid, x: u16, y: u16, width: u16, height: u16, bg: Color) {
@@ -292,8 +358,10 @@ impl Viewer {
     }
 
     /// What the top bar says on its right: the file's size, or what Som is doing with it.
-    fn top_note(&self) -> String {
-        let Some(media) = &self.media else { return format!("{}", self.size) };
+    fn top_note(&self, modified: bool) -> String {
+        let Some(media) = &self.media else {
+            return if self.edit && modified { "modified".to_string() } else { format!("{}", self.size) };
+        };
         let state = match media.status() {
             crate::srp::Status::Sending => "sending...",
             crate::srp::Status::Failed(_) => "failed",
@@ -317,7 +385,7 @@ impl Viewer {
     /// on the last, the file between. Returns where the cursor goes.
     pub fn paint(&mut self, grid: &mut Grid) -> Option<(u16, u16)> {
         grid.fill_with(0, 0, grid.cols, grid.rows, FG(), BG());
-        let keys = crate::settings::bool("Viewer.ShowKeyBar") && crate::settings::bool("Screen.KeyBar");
+        let keys = crate::settings::bool(if self.edit { "Editor.ShowKeyBar" } else { "Viewer.ShowKeyBar" }) && crate::settings::bool("Screen.KeyBar");
         let (top, bottom) = (1, u16::from(keys));
         if grid.rows < top + bottom + 1 {
             return None;
@@ -325,7 +393,8 @@ impl Viewer {
         let height = grid.rows - top - bottom;
         let cols = grid.cols as usize;
         // the status bar
-        let note = self.top_note();
+        let modified = self.modified();
+        let note = self.top_note(modified);
         let name: String = self.name.chars().take(cols.saturating_sub(note.chars().count() + 2)).collect();
         grid.fill_with(0, 0, grid.cols, 1, BAR_FG(), BAR_BG());
         grid.put(0, 0, &name, BAR_FG(), BAR_BG());
@@ -347,6 +416,14 @@ impl Viewer {
             let mut labels = [""; 12];
             labels[2] = crate::help::msg("Quit", "Выход");
             labels[9] = crate::help::msg("Quit", "Выход");
+            if self.edit {
+                // F3 is the viewer's; F6 goes to it from the editor
+                labels[1] = crate::help::msg("Save", "Сохран");
+                labels[2] = "";
+                labels[5] = crate::help::msg("View", "Просм");
+            } else if self.editor.is_some() {
+                labels[5] = crate::help::msg("Edit", "Редакт");
+            }
             labels[11] = crate::help::msg("Screen", "Экраны");
             crate::panels::paint_labels(grid, &labels);
         }
@@ -451,6 +528,59 @@ mod tests {
         let path = temp_file("b.bin", b"MZ\x90\x00\x03\x00\x00\x00");
         let error = Viewer::open(&path).err().expect("an error");
         assert!(error.to_string().contains("binary"), "{error}");
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn f4_edits_f2_saves_and_esc_asks_about_changes() {
+        let path = temp_file("e.txt", b"hello
+");
+        let mut viewer = Viewer::open_edit(&path).unwrap();
+        let mut grid = Grid::new(100, 10);
+        viewer.paint(&mut grid);
+        assert!(matches!(viewer.key(key(KeyCode::Esc)), Outcome::Closed), "nothing changed: no question");
+        drop(viewer);
+        let mut viewer = Viewer::open_edit(&path).unwrap();
+        viewer.paint(&mut grid);
+        viewer.key(key(KeyCode::Char('X')));
+        viewer.tick();
+        viewer.paint(&mut grid);
+        let screen = rows(&mut grid);
+        assert!(screen[1].starts_with("Xhello"), "{screen:#?}");
+        assert!(screen[0].trim_end().ends_with("modified"), "{:?}", screen[0]);
+        assert!(screen[9].contains("2Save") && screen[9].contains("6View"), "{:?}", screen[9]);
+        // Esc with changes asks; F2 writes the file and then Esc closes
+        assert!(matches!(viewer.key(key(KeyCode::Esc)), Outcome::AskSave));
+        viewer.key(key(KeyCode::F(2)));
+        viewer.tick();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "Xhello
+");
+        assert!(matches!(viewer.key(key(KeyCode::Esc)), Outcome::Closed));
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn shift_f10_saves_and_quits_and_f6_goes_between_viewer_and_editor() {
+        let path = temp_file("s.txt", b"abc
+");
+        let mut viewer = Viewer::open_edit(&path).unwrap();
+        viewer.paint(&mut Grid::new(80, 10));
+        viewer.key(key(KeyCode::Char('Z')));
+        viewer.tick();
+        let shift_f10 = KeyEvent::new(KeyCode::F(10), KeyModifiers::SHIFT);
+        assert!(matches!(viewer.key(shift_f10), Outcome::Closed));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "Zabc
+");
+        // F3 viewer: F6 makes it an editor, F6 again a viewer
+        let mut viewer = Viewer::open(&path).unwrap();
+        viewer.paint(&mut Grid::new(80, 10));
+        viewer.key(key(KeyCode::Char('Q')));
+        assert!(!viewer.modified(), "read-only");
+        viewer.key(key(KeyCode::F(6)));
+        viewer.key(key(KeyCode::Char('Q')));
+        assert!(viewer.modified(), "now an editor");
+        viewer.key(key(KeyCode::F(6)));
+        assert!(!viewer.edit);
         std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
     }
 }

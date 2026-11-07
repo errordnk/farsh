@@ -183,6 +183,29 @@ pub fn viewer_options() -> EmbedOptions {
     viewer_options_in("Panel.Text", "Viewer.Text.Selected")
 }
 
+/// An editable session for F4: Far's editor has no line numbers, no
+/// current-line band and no wrapping by default; the animations stay (the
+/// cursor's trail), unlike in the viewers.
+fn editor_config(config: &mut fresh::config::Config) {
+    config.editor.line_numbers = false;
+    config.editor.line_wrap = false;
+    config.editor.show_vertical_scrollbar = false;
+    config.editor.highlight_current_line = false;
+    // Editor settings: Tab size
+    config.editor.tab_size = crate::settings::int("Editor.TabSize").clamp(1, 512) as usize;
+}
+
+/// A session for editing a file, in the colors Options > Colors gives the editor.
+pub fn editor_options() -> EmbedOptions {
+    EmbedOptions {
+        read_only: false,
+        configure: Some(editor_config),
+        theme_json: Some(theme_json("Editor.Text", "Editor.Text.Selected")),
+        dirs: dirs(),
+        ..EmbedOptions::default()
+    }
+}
+
 /// The same, in the colors named `text` and `selected` (Options > Colors).
 pub fn viewer_options_in(text: &str, selected: &str) -> EmbedOptions {
     EmbedOptions {

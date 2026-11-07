@@ -24,6 +24,8 @@ use crate::palette;
 /// What an accepted dialog asks for.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Action {
+    /// Esc or F10 in the editor with unsaved changes: Save, Do not save, Cancel.
+    EditorClose,
     Copy(Vec<PathBuf>),
     Move(Vec<PathBuf>),
     MkDir,

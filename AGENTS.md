@@ -52,7 +52,12 @@ over the shell screen.
   vmenu.cpp, diskmenu.cpp). Known, deliberate differences: "quit farsh?",
   menu items farsh does not do are grey, Copy's "Use filter" stays disabled,
   Make folder offers no link types, Change drive has no plugin rows.
-- F4 runs the editor in the shell as a typed command (`src/editor.rs`). When
+- F4 is the internal editor: fresh over the whole screen (`Viewer::open_edit`,
+  `fresh_view::editor_options`), Far's status bar on top, the key bar below
+  (F2 save, F6 viewer, F10/Esc quit and ask about changes, Shift+F10 save and
+  quit). F3's viewer is the same screen read-only; F6 switches. The paragraph
+  below is the EXTERNAL editor (`Editor.UseExternalEditor`, Alt+F4): it runs
+  in the shell as a typed command (`src/editor.rs`). When
   the shell shows its next prompt (`Shell::prompts`, counted from the OSC 7
   hook) the panels come back, re-read, with the cursor on the edited file,
   as in Far. A shell without the hook (cmd) gives no signal: Ctrl+O there.

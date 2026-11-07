@@ -626,11 +626,18 @@ impl App {
             },
             // F12 in a viewer: the screens list (Far's manager key)
             Overlay::Viewer(viewer) if key.code == KeyCode::F(12) && key.modifiers.is_empty() => self.screens_from_viewer(viewer),
-            Overlay::Viewer(mut viewer) => {
-                if matches!(viewer.key(key), viewer::Outcome::Open) {
-                    self.overlay = Overlay::Viewer(viewer);
+            Overlay::Viewer(mut viewer) => match viewer.key(key) {
+                viewer::Outcome::Open => self.overlay = Overlay::Viewer(viewer),
+                viewer::Outcome::Closed => {}
+                // the editor asks what to do with its changes; the dialog's answer comes back through `accept`
+                viewer::Outcome::AskSave => {
+                    let name = viewer.name().to_string();
+                    self.under.push(Overlay::Viewer(viewer));
+                    let lines = [msg_modified(), name];
+                    let buttons = [("Save", "save"), ("Do not save", "discard"), ("Cancel", "cancel")];
+                    self.overlay = Overlay::Dialog(Dialog::message("Editor", &lines, &buttons, true, Action::EditorClose));
                 }
-            }
+            },
             Overlay::List(list) => self.list_key(*list, key),
             Overlay::ColorPick(mut picker) => {
                 let outcome = picker.key(key);
@@ -1266,6 +1273,21 @@ impl App {
     /// A button was pressed in a dialog.
     fn accept(&mut self, action: Action, id: &str, values: &dialog::Values) {
         match action {
+            Action::EditorClose => {
+                // the editor waits under the dialog
+                let Some(Overlay::Viewer(mut viewer)) = self.under.pop() else { return };
+                match id {
+                    "save" => {
+                        viewer.save();
+                        if viewer.modified() {
+                            // not written (a save-as question, an error): stays open
+                            self.overlay = Overlay::Viewer(viewer);
+                        }
+                    }
+                    "discard" => {}
+                    _ => self.overlay = Overlay::Viewer(viewer),
+                }
+            }
             Action::Extract(setup) => {
                 let pick = setup.pick.clone();
                 let values = values.clone();
@@ -1450,9 +1472,10 @@ impl App {
     /// the default editor (`editor::editor`), run in the shell like an external one.
     fn internal_edit(&mut self, path: &Path) {
         self.views.add(&path.display().to_string(), history::Kind::Edit);
-        let line = editor::command_line(&editor::editor(), self.shell.kind(), path);
-        let name = path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
-        self.run_until_prompt(&line, name);
+        self.overlay = match Viewer::open_edit(path) {
+            Ok(viewer) => Overlay::Viewer(viewer),
+            Err(error) => Overlay::Dialog(Dialog::error(&format!("{}: {error}", path.display()))),
+        };
     }
 
     /// Runs `line` in the shell over the panels (whatever was typed gives way,
@@ -1650,6 +1673,11 @@ fn copy_label(verb: &str, sources: &[PathBuf]) -> String {
 
 /// Where a copy goes at first: the other panel's folder with a separator
 /// after it, or the file's own name when that folder is its own (copy.cpp).
+/// The editor's question about unsaved changes.
+fn msg_modified() -> String {
+    help::msg("The text has been modified", "Текст был изменён").to_string()
+}
+
 fn default_dest(sources: &[PathBuf], other: &Path) -> String {
     if let [one] = sources {
         let same = |a: &Path, b: &Path| a == b || std::fs::canonicalize(a).ok().zip(std::fs::canonicalize(b).ok()).is_some_and(|(a, b)| a == b);
