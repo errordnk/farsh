@@ -1086,6 +1086,38 @@ impl Panel {
         }
     }
 
+    /// Ctrl+Q's panel (the user's call): Brief with one column — names only, in
+    /// the panel's colors and highlighting — and nothing else: no frame, no
+    /// column titles, no status line, no totals. The view mode itself is not
+    /// changed, so leaving Ctrl+Q shows the panel as it was.
+    fn paint_compact(&mut self, grid: &mut Grid, col: u16, width: u16, height: u16, active: bool) {
+        self.area = (col, 0, width, height);
+        grid.fill(col, 0, width, height, BG());
+        if width == 0 || height == 0 {
+            return;
+        }
+        let brief = ViewMode::Brief.text();
+        self.mode_flags = (brief.flags, false, false);
+        self.list_top = 0;
+        self.height = height as usize;
+        self.stripes = 1;
+        self.stripe_cols = vec![(col, col + width)];
+        self.correct_position();
+        let w = width as usize;
+        for line in 0..self.height {
+            let pos = self.top + line;
+            let (fg, bg) = self.colors(pos, active);
+            let (text, too_long) = match self.entries.get(pos) {
+                Some(entry) => self.cell(entry, Col::Name, w, false),
+                None => (" ".repeat(w), false),
+            };
+            grid.put(col, line as u16, &text, fg, bg);
+            if too_long {
+                grid.put(col + width - 1, line as u16, "}", TEXT(), bg);
+            }
+        }
+    }
+
     fn paint_list(&self, grid: &mut Grid, cols: &[(Col, usize)], in_stripe: usize, active: bool) {
         let right = self.area.0 + self.area.2 - 1;
         for line in 0..self.height {
@@ -1280,8 +1312,9 @@ pub struct Panels {
     qview: Option<crate::qview::State>,
     /// The screen size at the last paint.
     screen: (u16, u16),
-    /// Where each key of the key bar ends (exclusive), at the last paint.
-    key_ends: Vec<u16>,
+    /// Each key of the key bar at the last paint: its first column, the column
+    /// past it, and which F-key it is.
+    key_ends: Vec<(u16, u16, u8)>,
     /// Alt and a letter opened the quick search box (Far's FastFind): what is typed in it.
     fast: Option<String>,
     /// Where the box was last drawn: its cursor.
@@ -1904,8 +1937,9 @@ impl Panels {
             }
             MouseEventKind::Down(MouseButton::Left) => {
                 if rows > 0 && row == rows - 1 && col < cols {
-                    let Some(key) = self.key_ends.iter().position(|&end| col < end) else { return Key::Taken };
-                    return self.function_key(key as u8 + 1);
+                    // a column with no key (Ctrl+Q's key bar covers only its panel) presses nothing
+                    let Some(&(_, _, key)) = self.key_ends.iter().find(|&&(start, end, _)| col >= start && col < end) else { return Key::Taken };
+                    return self.function_key(key);
                 }
                 let Some(right) = side else { return Key::Pass };
                 self.right_active = right;
@@ -2130,10 +2164,19 @@ impl Panels {
         let place = |panel: &Panel, left: bool| {
             if panel.kind == Kind::Files && panel.mode.full_screen() { (0, grid.cols) } else if left { (0, left_width) } else { (left_width, right_width) }
         };
-        let (left_at, right_at) = (place(&self.left, true), place(&self.right, false));
-        for right in [!right_active, right_active] {
-            let at = if right { right_at } else { left_at };
-            self.paint_one(grid, right, at.0, at.1, height, right == right_active);
+        if let Some(((files_x, files_width), (view_x, view_width))) = self.quick_layout(grid.cols) {
+            // Ctrl+Q's layout: the file panel one column of names in a sixth of the
+            // screen, the viewer in the rest, neither framed
+            let files_right = self.right.kind == Kind::Files;
+            let panel = if files_right { &mut self.right } else { &mut self.left };
+            panel.paint_compact(grid, files_x, files_width, height, right_active == files_right);
+            self.paint_one(grid, !files_right, view_x, view_width, height, right_active != files_right, true);
+        } else {
+            let (left_at, right_at) = (place(&self.left, true), place(&self.right, false));
+            for right in [!right_active, right_active] {
+                let at = if right { right_at } else { left_at };
+                self.paint_one(grid, right, at.0, at.1, height, right == right_active, false);
+            }
         }
 
         if menu_bar {
@@ -2172,8 +2215,27 @@ impl Panels {
         crate::settings::bool("Interface.ShowMenuBar")
     }
 
+    /// Ctrl+Q's layout (the user's call, 2026-11-07), when one panel is a quick
+    /// view and the other a file list: `((files x, width), (viewer x, width))` —
+    /// the file panel a sixth of the screen on its own side, the viewer the rest.
+    fn quick_layout(&self, screen_cols: u16) -> Option<((u16, u16), (u16, u16))> {
+        let is = |panel: &Panel, kind: Kind| panel.visible && panel.kind == kind;
+        let files_right = if is(&self.left, Kind::QuickView) && is(&self.right, Kind::Files) {
+            true
+        } else if is(&self.right, Kind::QuickView) && is(&self.left, Kind::Files) {
+            false
+        } else {
+            return None;
+        };
+        let files_width = (screen_cols / 6).clamp(10.min(screen_cols / 2), screen_cols.saturating_sub(10).max(1));
+        let view_width = screen_cols - files_width;
+        Some(if files_right { ((view_width, files_width), (0, view_width)) } else { ((0, files_width), (files_width, view_width)) })
+    }
+
     /// One panel, as what it is; a hidden one is not drawn (the shell shows there).
-    fn paint_one(&mut self, grid: &mut Grid, right: bool, x: u16, width: u16, height: u16, active: bool) {
+    /// `bare`: a quick view without its frame, title and name line (Ctrl+Q's layout).
+    #[allow(clippy::too_many_arguments)]
+    fn paint_one(&mut self, grid: &mut Grid, right: bool, x: u16, width: u16, height: u16, active: bool, bare: bool) {
         let (panel, other) = if right { (&mut self.right, &self.left) } else { (&mut self.left, &self.right) };
         if !panel.visible {
             panel.area = (0, 0, 0, 0);
@@ -2203,9 +2265,9 @@ impl Panels {
                         if self.qview.as_ref().is_none_or(|state| state.path != path) {
                             self.qview = Some(crate::qview::State::new(path));
                         }
-                        crate::qview::paint(grid, x, width, height, active, self.qview.as_mut());
+                        crate::qview::paint(grid, x, width, height, active, self.qview.as_mut(), bare);
                     }
-                    None => crate::qview::paint(grid, x, width, height, active, None),
+                    None => crate::qview::paint(grid, x, width, height, active, None, bare),
                 }
             }
         }
@@ -2245,18 +2307,22 @@ impl Panels {
     /// user's call, not Far's even row): see [`Self::key_spans`].
     fn paint_key_bar(&mut self, grid: &mut Grid) {
         let labels: Vec<&'static str> = key_bar_labels(crate::modkeys::held()).collect();
-        self.key_ends = match self.key_spans(grid.cols) {
-            Some(spans) => paint_labels_at(grid, &labels, &spans),
-            None => paint_labels(grid, &labels),
-        };
+        let keys = self.key_spans(grid.cols).unwrap_or_else(|| numbered(even_spans(0, grid.cols, (grid.cols as usize / 8).clamp(1, 12))));
+        self.key_ends = paint_keys(grid, &labels, &keys);
     }
 
-    /// Where each of the twelve keys goes: F1-F6 under the left panel, F7-F12
-    /// under the right one, each panel's six shared out over its stripes - two
-    /// under each column of Brief (three columns), three under each of Medium
-    /// (two), six under a one-stripe mode - and evenly over a panel that is not
-    /// a file list. `None` while a panel takes the whole screen (Far's even row).
-    fn key_spans(&self, screen_cols: u16) -> Option<Vec<(u16, u16)>> {
+    /// Where each key goes, as `(F-key, first column, width)`: F1-F6 under the
+    /// left panel, F7-F12 under the right one, each panel's six shared out over
+    /// its stripes - two under each column of Brief (three columns), three under
+    /// each of Medium (two), six under a one-stripe mode - and evenly over a panel
+    /// that is not a file list. In Ctrl+Q's layout only F3 and F4 (view, edit the
+    /// file under the cursor), under the narrow panel. `None` while a panel takes
+    /// the whole screen (one even row of twelve).
+    fn key_spans(&self, screen_cols: u16) -> Option<Vec<(u8, u16, u16)>> {
+        if let Some((files, _)) = self.quick_layout(screen_cols) {
+            let (x, width) = files;
+            return Some([3u8, 4].into_iter().zip(even_spans(x, width, 2)).map(|(key, (x, w))| (key, x, w)).collect());
+        }
         let full = |panel: &Panel| panel.visible && panel.kind == Kind::Files && panel.mode.full_screen();
         if full(&self.left) || full(&self.right) {
             return None;
@@ -2277,33 +2343,39 @@ impl Panels {
                 let stop = starts.get(group + 1).copied().unwrap_or(end);
                 // six keys shared out: the first groups take one more when it does not divide
                 let keys = 6 / groups + usize::from(group < 6 % groups);
-                spans.extend(even_spans(start, stop.saturating_sub(start), keys));
+                spans.extend(even_spans(start, stop.saturating_sub(start), keys).into_iter().map(|(x, w)| (0u8, x, w)));
             }
         }
-        Some(spans)
+        // the keys in order are F1..F12
+        Some(spans.into_iter().enumerate().map(|(i, (_, x, w))| (i as u8 + 1, x, w)).collect())
     }
 }
 
-/// The key bar with each key in its own span `(first column, width)`: the
-/// number, the label fitted to what is left less one space. Returns where each
-/// key ends (for the mouse).
-fn paint_labels_at(grid: &mut Grid, labels: &[&str], spans: &[(u16, u16)]) -> Vec<u16> {
+/// Spans numbered F1, F2... in order.
+fn numbered(spans: Vec<(u16, u16)>) -> Vec<(u8, u16, u16)> {
+    spans.into_iter().enumerate().map(|(i, (x, w))| (i as u8 + 1, x, w)).collect()
+}
+
+/// The key bar row: each key `(F-key, first column, width)` shows its number
+/// and its label fitted to what is left less one space; the rest of the row is
+/// the key bar's background. Returns each key's columns and number (for the mouse).
+fn paint_keys(grid: &mut Grid, labels: &[&str], keys: &[(u8, u16, u16)]) -> Vec<(u16, u16, u8)> {
     let y = grid.rows - 1;
     use crate::colors::{bg, fg};
     let (number, text, gap) = ((fg("Keybar.Num"), bg("Keybar.Num")), (fg("Keybar.Text"), bg("Keybar.Text")), (fg("Keybar.Background"), bg("Keybar.Background")));
-    grid.put(0, y, &" ".repeat(grid.cols as usize), text.0, text.1);
+    grid.put(0, y, &" ".repeat(grid.cols as usize), gap.0, gap.1);
     let mut ends = Vec::new();
-    for (i, &(x, width)) in spans.iter().enumerate().take(12) {
-        let digits = (i + 1).to_string();
+    for &(key, x, width) in keys {
+        let digits = key.to_string();
         let width = width as usize;
         grid.put(x, y, &digits.chars().take(width).collect::<String>(), number.0, number.1);
         let label_width = width.saturating_sub(digits.len() + 1);
-        let label: String = labels.get(i).copied().unwrap_or("").chars().take(label_width).collect();
+        let label: String = labels.get(usize::from(key).saturating_sub(1)).copied().unwrap_or("").chars().take(label_width).collect();
         grid.put(x + digits.len().min(width) as u16, y, &format!("{label:<label_width$}"), text.0, text.1);
         if width > digits.len() {
             grid.put(x + width as u16 - 1, y, " ", gap.0, gap.1);
         }
-        ends.push(x + width as u16);
+        ends.push((x, x + width as u16, key));
     }
     ends
 }
@@ -2314,8 +2386,8 @@ fn paint_labels_at(grid: &mut Grid, labels: &[&str], spans: &[(u16, u16)]) -> Ve
 /// keys rather than all to the last (Far's (ScrX-1)/12 left F12 up to twice
 /// as long as the others). Returns where each key shown ends (for the mouse).
 pub fn paint_labels(grid: &mut Grid, labels: &[&str]) -> Vec<u16> {
-    let spans = even_spans(0, grid.cols, (grid.cols as usize / 8).clamp(1, 12));
-    paint_labels_at(grid, labels, &spans)
+    let keys = numbered(even_spans(0, grid.cols, (grid.cols as usize / 8).clamp(1, 12)));
+    paint_keys(grid, labels, &keys).into_iter().map(|(_, end, _)| end).collect()
 }
 
 /// `count` spans `(first column, width)` over `width` columns from `x`, as
@@ -2633,7 +2705,7 @@ mod tests {
         panels.mouse(click(MouseEventKind::ScrollDown, 50, 5), false);
         assert_eq!(panels.active_ref().cursor, 4);
         // F5 sits where the key bar put it (under the left panel's second column)
-        let f5 = panels.key_spans(80).unwrap()[4].0;
+        let f5 = panels.key_spans(80).unwrap()[4].1;
         assert_eq!(
             panels.mouse(click(left, f5 + 1, 23), false),
             Key::Ask(Request::Copy(vec![dir.join("apple.txt")], dir.clone()))
@@ -2708,7 +2780,7 @@ mod tests {
         panels.paint(&mut grid, &[], 0);
         let spans = panels.key_spans(100).expect("no full-screen panel");
         assert_eq!(spans.len(), 12);
-        let starts: Vec<u16> = spans.iter().map(|s| s.0).collect();
+        let starts: Vec<u16> = spans.iter().map(|s| s.1).collect();
         // F1 at the left edge, F4 at the left panel's second column, F7 at the right panel
         assert_eq!(starts[0], 0);
         assert_eq!(starts[3], panels.left.stripe_cols[1].0);
@@ -2717,7 +2789,7 @@ mod tests {
         assert_eq!(starts[8], panels.right.stripe_cols[1].0);
         assert_eq!(starts[10], panels.right.stripe_cols[2].0);
         // the key bar row shows the numbers where the spans start
-        for (i, &(x, _)) in spans.iter().enumerate() {
+        for (i, &(_, x, _)) in spans.iter().enumerate() {
             let digit = (i + 1).to_string();
             assert_eq!(grid.cell_mut(x, 23).unwrap().text, digit[..1], "F{} at {x}", i + 1);
         }
@@ -2912,14 +2984,77 @@ mod tests {
         }
         assert_eq!(panels.left.current().unwrap().name, "apple.txt");
         let rows = painted(&mut panels);
-        assert!(rows[0].contains(" Quick view "));
-        assert!(rows.iter().any(|r| r.contains("apple.txt")));
+        // Ctrl+Q's layout: no frame, no title (the next test has the details)
+        assert!(!rows[0].contains(" Quick view ") && !rows[0].starts_with('\u{2554}'), "{:?}", rows[0]);
+        // Brief aligns the extensions: "apple" and "txt" apart
+        assert!(rows.iter().any(|r| r.starts_with("apple") && r.contains("txt")), "{rows:#?}");
         // again: a file panel
         panels.key(ctrl('q'), true);
         assert_eq!(panels.right.kind, Kind::Files);
         // Ctrl+T does nothing: Far's tree is off by default
         panels.key(ctrl('t'), true);
         assert_eq!(panels.right.kind, Kind::Files);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn ctrl_q_is_a_one_column_panel_in_a_sixth_and_the_viewer_in_the_rest_without_frames() {
+        let dir = scratch("ctrlq");
+        std::fs::write(dir.join("text.txt"), "hello from the quick view\n").unwrap();
+        let mut panels = Panels::new(dir.clone());
+        let ctrl = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL);
+        let before = panels.view_modes();
+        let framed = painted(&mut panels);
+        assert!(framed[0].starts_with('\u{2554}'));
+        panels.key(ctrl('q'), true);
+        // the cursor to text.txt: "..", Alpha, beta, apple.txt, text.txt
+        while panels.left.current().is_some_and(|e| e.name != "text.txt") {
+            panels.key(key(KeyCode::Down), true);
+        }
+        let mut grid = Grid::new(120, 25);
+        panels.paint(&mut grid, &[], 0);
+        let rows: Vec<String> = (0..25).map(|row| grid.row(row).iter().map(|cell| cell.text.clone()).collect()).collect();
+        // the file panel: a sixth of the screen, one column of names, no frame
+        assert_eq!(panels.left.area, (0, 0, 20, panels.left.area.3));
+        assert_eq!(panels.left.stripes, 1);
+        assert!(!rows.iter().any(|r| r.contains('\u{2554}') || r.contains('\u{2551}') || r.contains('\u{2550}')), "no frames: {rows:#?}");
+        assert!(rows[0].starts_with(".."), "names from the top row: {:?}", rows[0]);
+        // the viewer: the other five sixths, the file's text from its top-left corner
+        assert_eq!(panels.right.area.0, 20);
+        assert_eq!(panels.right.area.2, 100);
+        assert!(rows[0][20..].starts_with("hello from the quick view"), "{:?}", rows[0]);
+        // the key bar: F3 and F4 under the narrow panel, nothing under the viewer
+        let keys = panels.key_spans(120).unwrap();
+        assert_eq!(keys.iter().map(|k| k.0).collect::<Vec<_>>(), [3, 4]);
+        assert!(keys.iter().all(|&(_, x, w)| x + w <= 20));
+        assert!(rows[24][20..].trim().is_empty(), "{:?}", rows[24]);
+        let f3_x = keys[0].1;
+        assert_eq!(panels.mouse(click(MouseEventKind::Down(MouseButton::Left), f3_x + 1, 24), false), Key::Ask(Request::View(dir.join("text.txt"))));
+        assert_eq!(panels.mouse(click(MouseEventKind::Down(MouseButton::Left), 60, 24), false), Key::Taken, "nothing under the viewer");
+        // leaving Ctrl+Q: the panels as they were (frames, titles, mode), the cursor where it went
+        panels.key(ctrl('q'), true);
+        assert_eq!(panels.view_modes(), before);
+        let after = painted(&mut panels);
+        assert!(after[0].starts_with('\u{2554}'));
+        assert_eq!(after[1], framed[1], "the column titles again");
+        assert_eq!(panels.left.current().unwrap().name, "text.txt");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_binary_file_is_told_apart_from_text() {
+        let dir = scratch("binary");
+        let file = |name: &str, bytes: &[u8]| {
+            let path = dir.join(name);
+            std::fs::write(&path, bytes).unwrap();
+            path
+        };
+        assert!(crate::qview::is_binary(&file("nul.bin", b"MZ\x90\x00\x03\x00\x00\x00")));
+        assert!(crate::qview::is_binary(&file("ctl.bin", &[1, 2, 3, 4, 5, 6, 7, 8, b'a', b'b'])));
+        assert!(!crate::qview::is_binary(&file("text.txt", "plain text\twith tabs\r\nand \x1b[1mescapes\x1b[0m\n".as_bytes())));
+        assert!(!crate::qview::is_binary(&file("utf16.txt", &[0xFF, 0xFE, b'h', 0, b'i', 0])));
+        assert!(!crate::qview::is_binary(&file("empty.txt", b"")));
+        assert!(!crate::qview::is_binary(&file("\u{43f}\u{440}\u{438}\u{432}\u{435}\u{442}.txt", "\u{43f}\u{440}\u{438}\u{432}\u{435}\u{442}".as_bytes())));
         std::fs::remove_dir_all(dir).unwrap();
     }
 

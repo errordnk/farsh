@@ -136,7 +136,17 @@ over the shell screen.
   in the background), Show long names (Ctrl+N: the 8.3 names from
   FILE_ID_BOTH_DIR_INFO), Panel On/Off (Ctrl+F1/F2, with Far's rules for
   which panel becomes active). Ctrl+L/Q turn the passive panel (the active
-  one if it is that kind already), again a file panel. No Tree panel: Far's
+  one if it is that kind already), again a file panel. While a quick view
+  stands beside a file list the layout is NOT Far's (the user's call,
+  2026-11-07; `Panels::quick_layout`): the file panel is one column of names
+  (Brief's, extensions aligned) in a sixth of the screen on its own side, with
+  no frame, titles, status line or totals (`Panel::paint_compact`; the view
+  mode is not changed, so leaving Ctrl+Q shows the panel as it was); the
+  viewer takes the other five sixths with no frame, title or name line
+  (`qview::paint_bare`); the key bar is F3 and F4 under the narrow panel
+  only. A binary file (`qview::is_binary`: a NUL or over a tenth control
+  bytes in the first 8 KiB; a UTF-16/32 BOM is text) that is not a placement
+  shows a line saying so instead of its bytes. No Tree panel: Far's
   Tree.TurnOffCompletely is on by default, its menu item is hidden and
   Ctrl+T does nothing. Known differences: the info panel has no computer
   or user description lines, no plugin (archive) section, and the folder

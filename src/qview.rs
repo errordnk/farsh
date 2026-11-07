@@ -59,6 +59,8 @@ pub struct State {
     viewer: Option<Viewer>,
     file_type: String,
     scan: Option<Arc<Mutex<DirInfo>>>,
+    /// A binary file that is not a placement: nothing is shown but a line saying so.
+    binary: bool,
 }
 
 impl State {
@@ -73,9 +75,12 @@ impl State {
             });
             info
         });
-        let viewer = if is_dir { None } else { Viewer::open_quick(&path).ok() };
+        // a placement (Som shows it) first, then a binary file (nothing to show), then text
+        let media = crate::srp::in_som() && crate::srp::kind_of(&path).is_some();
+        let binary = !is_dir && !media && is_binary(&path);
+        let viewer = if is_dir || binary { None } else { Viewer::open_quick(&path).ok() };
         let file_type = if is_dir { String::new() } else { file_type(&path) };
-        Self { path, viewer, file_type, scan }
+        Self { path, viewer, file_type, scan, binary }
     }
 
     pub fn viewer(&mut self) -> Option<&mut Viewer> {
@@ -133,8 +138,13 @@ fn percent(part: u64, total: u64) -> u64 {
     if total == 0 { 0 } else { part * 100 / total }
 }
 
-/// Draws the panel in (`left`, `width`, `height`).
-pub fn paint(grid: &mut Grid, left: u16, width: u16, height: u16, active: bool, state: Option<&mut State>) {
+/// Draws the panel in (`left`, `width`, `height`). `bare` is Ctrl+Q's layout
+/// (the user's call, 2026-11-07): no frame, no title, no name line — the
+/// viewer (or the folder's figures, or why there is nothing) to the edges.
+pub fn paint(grid: &mut Grid, left: u16, width: u16, height: u16, active: bool, state: Option<&mut State>, bare: bool) {
+    if bare {
+        return paint_bare(grid, left, width, height, state);
+    }
     if width < 6 || height < 5 {
         return;
     }
@@ -190,9 +200,75 @@ pub fn paint(grid: &mut Grid, left: u16, width: u16, height: u16, active: bool, 
             let room = right.saturating_sub(x) as usize;
             grid.put(x, y, &format!("{prefix}{value}").chars().take(room).collect::<String>(), color, BG());
         }
+    } else if state.binary {
+        let text: String = crate::lang::tr("A binary file: nothing to show").chars().take(inner).collect();
+        grid.put(left + 1, 1, &text, TEXT(), BG());
     } else if let Some(viewer) = &mut state.viewer {
         viewer.paint_area(grid, left + 1, 1, width - 2, height.saturating_sub(4));
     }
+}
+
+/// Ctrl+Q's viewer: the whole rectangle is the file's (a placement, the text),
+/// or the folder's figures from the top, or a short line for a binary file.
+fn paint_bare(grid: &mut Grid, left: u16, width: u16, height: u16, state: Option<&mut State>) {
+    grid.fill(left, 0, width, height, BG());
+    if width == 0 || height == 0 {
+        return;
+    }
+    let Some(state) = state else { return };
+    let line = |grid: &mut Grid, y: u16, text: &str, color: Color| {
+        if y < height {
+            grid.put(left, y, &text.chars().take(width as usize).collect::<String>(), color, BG());
+        }
+    };
+    if state.binary {
+        line(grid, 0, crate::lang::tr("A binary file: nothing to show"), TEXT());
+    } else if let Some(scan) = &state.scan {
+        let data = lock(scan).clone();
+        let shown = listing::truncate_path(&state.path.display().to_string(), (width as usize).saturating_sub("Folder".len() + 3));
+        line(grid, 0, &format!("Folder \"{shown}\""), TEXT());
+        let (color, prefix) = if data.done { (INFO(), "") } else { (HIGHLIGHT(), "~") };
+        let rows = [
+            ("Folders:", data.dirs.to_string()),
+            ("Files:", data.files.to_string()),
+            ("Files size:", size2str(data.size)),
+            ("Allocated size:", format!("{} ({}%)", size2str(data.allocated), percent(data.allocated, data.size))),
+            ("Cluster size:", crate::dialog::group(data.cluster)),
+            ("Files slack:", format!("{} ({}%)", size2str(data.slack), percent(data.slack, data.allocated))),
+            ("MFT overhead:", format!("{} ({}%)", size2str(data.mft), percent(data.mft, data.allocated))),
+        ];
+        let column = rows.iter().map(|(l, _)| l.len()).max().unwrap_or(0) + 1;
+        for (i, (label, value)) in rows.iter().enumerate() {
+            let y = 2 + i as u16;
+            line(grid, y, &format!("{label:<column$}"), TEXT());
+            if y < height && (column as u16) < width {
+                let room = (width as usize).saturating_sub(column);
+                grid.put(left + column as u16, y, &format!("{prefix}{value}").chars().take(room).collect::<String>(), color, BG());
+            }
+        }
+    } else if let Some(viewer) = &mut state.viewer {
+        viewer.paint_area(grid, left, 0, width, height);
+    }
+}
+
+/// Whether `path` reads as a binary file: a NUL, or more than a tenth control
+/// bytes (other than tab, line ends, form feed, escape), in its first 8 KiB.
+/// A UTF-16/32 file starts with its BOM and is text.
+pub fn is_binary(path: &Path) -> bool {
+    use std::io::Read as _;
+    let Ok(file) = std::fs::File::open(path) else { return false };
+    let mut head = Vec::with_capacity(8192);
+    if file.take(8192).read_to_end(&mut head).is_err() || head.is_empty() {
+        return false;
+    }
+    if head.starts_with(&[0xFF, 0xFE]) || head.starts_with(&[0xFE, 0xFF]) || head.starts_with(&[0, 0, 0xFE, 0xFF]) {
+        return false;
+    }
+    if head.contains(&0) {
+        return true;
+    }
+    let control = head.iter().filter(|&&b| b < 0x20 && !matches!(b, b'\t' | b'\n' | b'\r' | 0x0C | 0x1B)).count();
+    control * 10 > head.len()
 }
 
 /// The volume's cluster size, as GetDirInfo takes it.
@@ -267,7 +343,7 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
         let mut grid = Grid::new(40, 20);
-        paint(&mut grid, 0, 40, 20, false, Some(&mut state));
+        paint(&mut grid, 0, 40, 20, false, Some(&mut state), false);
         let rows: Vec<String> = (0..20).map(|row| grid.row(row).iter().map(|cell| cell.text.clone()).collect()).collect();
         assert!(rows[0].contains(" Quick view "));
         assert!(rows[2].contains("Folder \""), "{rows:#?}");
@@ -277,7 +353,7 @@ mod tests {
 
         let mut state = State::new(dir.join("a.txt"));
         let mut grid = Grid::new(40, 20);
-        paint(&mut grid, 0, 40, 20, false, Some(&mut state));
+        paint(&mut grid, 0, 40, 20, false, Some(&mut state), false);
         let rows: Vec<String> = (0..20).map(|row| grid.row(row).iter().map(|cell| cell.text.clone()).collect()).collect();
         assert!(rows[1].starts_with("\u{2551}hello quick view"), "{rows:#?}");
         assert!(rows[18].starts_with("\u{2551}a.txt"));
