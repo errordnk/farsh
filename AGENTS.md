@@ -27,9 +27,15 @@ over the shell screen.
   the key bar (its labels change while one of Shift/Ctrl/Alt is held, Far's
   MShiftF1.. sets; two or more held leave the plain labels, the user's call: `src/modkeys.rs` takes the modifier-only key events off the
   console queue before crossterm, which drops them; the terminal must send
-  them in win32-input-mode, as Windows Terminal and Som do; the layout is
-  6446's keybar.cpp: keys (ScrX-1)/12 wide, at least 8, `panels::paint_labels`,
-  shared with the help). The reference is Far 3.0.6446, the user's Far:
+  them in win32-input-mode, as Windows Terminal and Som do). The key bar's
+  layout is NOT Far's (the user's call, 2026-11-07): F1-F6 stand under the
+  left panel, F7-F12 under the right, each panel's six shared out over its
+  columns — two under each of Brief's three, three under each of Medium's two,
+  six under a one-column mode, evenly under a panel that is not a file list
+  (`Panels::key_spans`); a full-screen panel and the help keep one even row of
+  twelve (`panels::paint_labels`, at least 8 columns a key, fewer keys when
+  narrower). Widths are even everywhere, the leftover columns one each to the
+  first keys: Far's (ScrX-1)/12 left F12 up to twice as long. The reference is Far 3.0.6446, the user's Far:
   fetch its sources at the `builds/3.0.6446` tag, not master. Colors are `src/palette.rs`: Far's console attributes as
   they reach a terminal through ConPTY — the classic console table in RGB
   (blue 0,0,128...), with light gray text and a black background as the

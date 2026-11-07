@@ -2241,47 +2241,96 @@ impl Panels {
         Key::Taken
     }
 
-    /// Far's `KeyBar::DisplayObject` with the panels' labels.
+    /// The key bar with the panels' labels, under the panels' columns (the
+    /// user's call, not Far's even row): see [`Self::key_spans`].
     fn paint_key_bar(&mut self, grid: &mut Grid) {
         let labels: Vec<&'static str> = key_bar_labels(crate::modkeys::held()).collect();
-        self.key_ends = paint_labels(grid, &labels);
+        self.key_ends = match self.key_spans(grid.cols) {
+            Some(spans) => paint_labels_at(grid, &labels, &spans),
+            None => paint_labels(grid, &labels),
+        };
+    }
+
+    /// Where each of the twelve keys goes: F1-F6 under the left panel, F7-F12
+    /// under the right one, each panel's six shared out over its stripes - two
+    /// under each column of Brief (three columns), three under each of Medium
+    /// (two), six under a one-stripe mode - and evenly over a panel that is not
+    /// a file list. `None` while a panel takes the whole screen (Far's even row).
+    fn key_spans(&self, screen_cols: u16) -> Option<Vec<(u16, u16)>> {
+        let full = |panel: &Panel| panel.visible && panel.kind == Kind::Files && panel.mode.full_screen();
+        if full(&self.left) || full(&self.right) {
+            return None;
+        }
+        let left_width = screen_cols.div_ceil(2);
+        let mut spans = Vec::with_capacity(12);
+        for (panel, x, width) in [(&self.left, 0, left_width), (&self.right, left_width, screen_cols - left_width)] {
+            // where each stripe's keys start: the panel's left edge, then the first
+            // column of each further stripe
+            let mut starts = vec![x];
+            if panel.visible && panel.kind == Kind::Files && panel.area.2 == width {
+                starts.extend(panel.stripe_cols.iter().skip(1).map(|&(first, _)| first));
+            }
+            starts.truncate(6);
+            let end = x + width;
+            let groups = starts.len();
+            for (group, &start) in starts.iter().enumerate() {
+                let stop = starts.get(group + 1).copied().unwrap_or(end);
+                // six keys shared out: the first groups take one more when it does not divide
+                let keys = 6 / groups + usize::from(group < 6 % groups);
+                spans.extend(even_spans(start, stop.saturating_sub(start), keys));
+            }
+        }
+        Some(spans)
     }
 }
 
-/// Far 3.0.6446's `KeyBar::DisplayObject`: keys (ScrX-1)/12 wide (at least
-/// 8): the number, the label fitted to the width less 2, a space; a key
-/// stops the row when its label would reach the last column. Returns where
-/// each key shown ends (for the mouse).
-pub fn paint_labels(grid: &mut Grid, labels: &[&str]) -> Vec<u16> {
+/// The key bar with each key in its own span `(first column, width)`: the
+/// number, the label fitted to what is left less one space. Returns where each
+/// key ends (for the mouse).
+fn paint_labels_at(grid: &mut Grid, labels: &[&str], spans: &[(u16, u16)]) -> Vec<u16> {
     let y = grid.rows - 1;
-    let cols = grid.cols as usize;
-    let right = cols.saturating_sub(1);
-    let key_width = (cols.saturating_sub(2) / 12).max(8);
-    let label_width = key_width - 2;
     use crate::colors::{bg, fg};
     let (number, text, gap) = ((fg("Keybar.Num"), bg("Keybar.Num")), (fg("Keybar.Text"), bg("Keybar.Text")), (fg("Keybar.Background"), bg("Keybar.Background")));
-    let mut x = 0usize;
+    grid.put(0, y, &" ".repeat(grid.cols as usize), text.0, text.1);
     let mut ends = Vec::new();
-    for i in 0..12 {
-        if x + label_width >= right {
-            break;
-        }
+    for (i, &(x, width)) in spans.iter().enumerate().take(12) {
         let digits = (i + 1).to_string();
-        grid.put(x as u16, y, &digits, number.0, number.1);
-        x += digits.len();
-        let label = labels.get(i).copied().unwrap_or("");
-        grid.put(x as u16, y, &format!("{:<label_width$}", label.chars().take(label_width).collect::<String>()), text.0, text.1);
-        x += label_width;
-        if i < 11 {
-            grid.put(x as u16, y, " ", gap.0, gap.1);
-            x += 1;
+        let width = width as usize;
+        grid.put(x, y, &digits.chars().take(width).collect::<String>(), number.0, number.1);
+        let label_width = width.saturating_sub(digits.len() + 1);
+        let label: String = labels.get(i).copied().unwrap_or("").chars().take(label_width).collect();
+        grid.put(x + digits.len().min(width) as u16, y, &format!("{label:<label_width$}"), text.0, text.1);
+        if width > digits.len() {
+            grid.put(x + width as u16 - 1, y, " ", gap.0, gap.1);
         }
-        ends.push(x as u16);
-    }
-    if x < cols {
-        grid.put(x as u16, y, &" ".repeat(cols - x), text.0, text.1);
+        ends.push(x + width as u16);
     }
     ends
+}
+
+/// The key bar across the whole width (the help screen, a full-screen panel):
+/// twelve keys - fewer when the screen is narrower than 8 columns a key, as in
+/// Far - sharing the width evenly, the columns left over one each to the first
+/// keys rather than all to the last (Far's (ScrX-1)/12 left F12 up to twice
+/// as long as the others). Returns where each key shown ends (for the mouse).
+pub fn paint_labels(grid: &mut Grid, labels: &[&str]) -> Vec<u16> {
+    let spans = even_spans(0, grid.cols, (grid.cols as usize / 8).clamp(1, 12));
+    paint_labels_at(grid, labels, &spans)
+}
+
+/// `count` spans `(first column, width)` over `width` columns from `x`, as
+/// equal as columns allow: the remainder goes one column each to the first spans.
+fn even_spans(x: u16, width: u16, count: usize) -> Vec<(u16, u16)> {
+    let width = width as usize;
+    let mut at = x as usize;
+    (0..count)
+        .map(|i| {
+            let w = width / count + usize::from(i < width % count);
+            let span = (at as u16, w as u16);
+            at += w;
+            span
+        })
+        .collect()
 }
 
 /// Ctrl+Enter: put the highlighted name on the command line. Terminals send
@@ -2583,9 +2632,10 @@ mod tests {
         // the wheel moves the cursor by three
         panels.mouse(click(MouseEventKind::ScrollDown, 50, 5), false);
         assert_eq!(panels.active_ref().cursor, 4);
-        // F5 sits in the fifth cell of the key bar (8 columns each)
+        // F5 sits where the key bar put it (under the left panel's second column)
+        let f5 = panels.key_spans(80).unwrap()[4].0;
         assert_eq!(
-            panels.mouse(click(left, 8 * 4 + 2, 23), false),
+            panels.mouse(click(left, f5 + 1, 23), false),
             Key::Ask(Request::Copy(vec![dir.join("apple.txt")], dir.clone()))
         );
         // empty space and the command line are not the panels'
@@ -2627,6 +2677,50 @@ mod tests {
         assert_eq!(grid.cell_mut(0, 0).unwrap().text, "\u{2554}");
         assert_eq!(grid.cell_mut(40, 0).unwrap().text, "\u{2554}");
         assert_eq!(grid.cell_mut(0, 23).unwrap().text, "1");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn no_key_is_longer_than_another_by_more_than_a_column() {
+        // Far's (ScrX-1)/12 gave the remainder to F12, up to twice as long
+        for cols in [80u16, 100, 119, 150, 211] {
+            let spans = even_spans(0, cols, 12);
+            let widths: Vec<u16> = spans.iter().map(|s| s.1).collect();
+            assert!(widths.iter().max().unwrap() - widths.iter().min().unwrap() <= 1, "{cols}: {widths:?}");
+            assert_eq!(widths.iter().sum::<u16>(), cols, "the keys fill the row");
+            let mut grid = Grid::new(cols, 3);
+            let ends = paint_labels(&mut grid, &["Help"; 12]);
+            assert_eq!(ends.last().copied(), Some(cols), "{cols}: F12 ends at the edge, no longer than the rest");
+        }
+        // a screen too narrow for twelve keys of 8 shows fewer, as Far does
+        assert_eq!(paint_labels(&mut Grid::new(60, 3), &[]).len(), 7);
+    }
+
+    #[test]
+    fn the_key_bar_stands_under_the_panels_columns() {
+        // six keys under each panel: Medium (two columns) three under each,
+        // Brief (three columns) two under each
+        let dir = scratch("keybar");
+        let mut panels = Panels::new(dir.clone());
+        panels.set_view(false, 2); // left Medium
+        panels.set_view(true, 1); // right Brief
+        let mut grid = Grid::new(100, 24);
+        panels.paint(&mut grid, &[], 0);
+        let spans = panels.key_spans(100).expect("no full-screen panel");
+        assert_eq!(spans.len(), 12);
+        let starts: Vec<u16> = spans.iter().map(|s| s.0).collect();
+        // F1 at the left edge, F4 at the left panel's second column, F7 at the right panel
+        assert_eq!(starts[0], 0);
+        assert_eq!(starts[3], panels.left.stripe_cols[1].0);
+        assert_eq!(starts[6], 50);
+        // the right panel's Brief: F9 and F11 at its second and third columns
+        assert_eq!(starts[8], panels.right.stripe_cols[1].0);
+        assert_eq!(starts[10], panels.right.stripe_cols[2].0);
+        // the key bar row shows the numbers where the spans start
+        for (i, &(x, _)) in spans.iter().enumerate() {
+            let digit = (i + 1).to_string();
+            assert_eq!(grid.cell_mut(x, 23).unwrap().text, digit[..1], "F{} at {x}", i + 1);
+        }
         std::fs::remove_dir_all(dir).unwrap();
     }
 
