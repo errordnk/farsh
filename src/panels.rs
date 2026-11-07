@@ -2303,7 +2303,7 @@ impl Panels {
             }
             Kind::QuickView => {
                 panel.area = (x, 0, width, height);
-                self.qrect = (x + 1, 1, width.saturating_sub(2), height.saturating_sub(4));
+                self.qrect = (x + 1, 1, width.saturating_sub(2), height.saturating_sub(2));
                 // the other panel's entry under the cursor (not `..`, not inside an archive)
                 let target = (other.kind == Kind::Files && other.archive.is_none())
                     .then(|| other.current().filter(|e| !e.is_up()).map(|e| other.dir.join(&e.name)))

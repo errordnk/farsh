@@ -81,7 +81,6 @@ enum Phase {
 pub struct State {
     pub path: PathBuf,
     viewer: Option<Viewer>,
-    file_type: String,
     scan: Option<Arc<Mutex<DirInfo>>>,
     phase: Phase,
     since: std::time::Instant,
@@ -115,8 +114,7 @@ impl State {
         } else {
             Phase::Waiting
         };
-        let file_type = if is_dir { String::new() } else { file_type(&path) };
-        Self { path, viewer, file_type, scan, phase, since: std::time::Instant::now(), debounce: DEBOUNCE, opened: false, error: None }
+        Self { path, viewer, scan, phase, since: std::time::Instant::now(), debounce: DEBOUNCE, opened: false, error: None }
     }
 
     /// The placement of the file shown changed (a new track) and is not drawn yet.
@@ -213,7 +211,7 @@ fn percent(part: u64, total: u64) -> u64 {
 
 /// Draws the panel in (`left`, `width`, `height`).
 pub fn paint(grid: &mut Grid, left: u16, width: u16, height: u16, active: bool, state: Option<&mut State>, editor: &mut Option<EditorView>) {
-    if width < 6 || height < 5 {
+    if width < 6 || height < 3 {
         return;
     }
     let (right, bottom) = (left + width - 1, height - 1);
@@ -229,15 +227,9 @@ pub fn paint(grid: &mut Grid, left: u16, width: u16, height: u16, active: bool, 
     let title = " Quick view ";
     let (fg, bg) = if active { (BLACK(), SELECTED_INFO_BG()) } else { (TEXT(), BG()) };
     grid.put(left + width.saturating_sub(title.chars().count() as u16) / 2, 0, title, fg, bg);
-    // the separator above the name
-    grid.put(left, bottom - 2, &format!("\u{255F}{}\u{2562}", "\u{2500}".repeat(inner)), TEXT(), BG());
+    // no status bar under the view (the user's call, 2026-11-07: Far's name and
+    // file type line): the whole inside of the frame is the file's
     let Some(state) = state else { return };
-    let name = state.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    grid.put(left + 1, bottom - 1, &listing::left(&name, inner), TEXT(), BG());
-    if !state.file_type.is_empty() {
-        let text = listing::truncate_left(&format!(" {} ", state.file_type), inner);
-        grid.put(left + width.saturating_sub(text.chars().count() as u16) / 2, bottom - 2, &text, INFO(), SELECTED_INFO_BG());
-    }
     if let Some(scan) = &state.scan {
         let data = lock(scan).clone();
         let room = inner.saturating_sub("Folder".len() + 5);
@@ -260,7 +252,7 @@ pub fn paint(grid: &mut Grid, left: u16, width: u16, height: u16, active: bool, 
             (11, labels[6], format!("{} ({}%)", size2str(data.mft), percent(data.mft, data.allocated))),
         ];
         for (y, label, value) in rows {
-            if y >= bottom - 2 {
+            if y >= bottom {
                 break;
             }
             print(grid, y, &format!("{label:<column$}"), TEXT());
@@ -269,7 +261,7 @@ pub fn paint(grid: &mut Grid, left: u16, width: u16, height: u16, active: bool, 
             grid.put(x, y, &format!("{prefix}{value}").chars().take(room).collect::<String>(), color, BG());
         }
     } else {
-        paint_body(grid, left + 1, 1, width - 2, height.saturating_sub(4), state, editor);
+        paint_body(grid, left + 1, 1, width - 2, height.saturating_sub(2), state, editor);
     }
 }
 
@@ -348,35 +340,6 @@ fn cluster_size(path: &Path) -> u64 {
     }
 }
 
-/// The shell's name for the file's type (os::com::get_shell_filetype_description):
-/// the registry's description of its extension's class.
-fn file_type(path: &Path) -> String {
-    #[cfg(windows)]
-    {
-        use windows_sys::Win32::System::Registry::{HKEY_CLASSES_ROOT, RRF_RT_REG_SZ, RegGetValueW};
-        let read = |key: &str| -> Option<String> {
-            let key: Vec<u16> = key.encode_utf16().chain(Some(0)).collect();
-            let mut buffer = [0u16; 512];
-            let mut len = (buffer.len() * 2) as u32;
-            // SAFETY: the buffer is as long as said in bytes; no value name reads the default.
-            let status = unsafe { RegGetValueW(HKEY_CLASSES_ROOT, key.as_ptr(), std::ptr::null(), RRF_RT_REG_SZ, std::ptr::null_mut(), buffer.as_mut_ptr().cast(), &mut len) };
-            if status != 0 {
-                return None;
-            }
-            let end = buffer.iter().position(|&c| c == 0).unwrap_or(buffer.len());
-            Some(String::from_utf16_lossy(&buffer[..end])).filter(|s| !s.is_empty())
-        };
-        let Some(extension) = path.extension() else { return String::new() };
-        let class = read(&format!(".{}", extension.to_string_lossy()));
-        class.and_then(|class| read(&class)).unwrap_or_default()
-    }
-    #[cfg(unix)]
-    {
-        let _ = path;
-        String::new()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -407,8 +370,10 @@ mod tests {
         paint(&mut grid, 0, 40, 20, false, Some(&mut state), &mut None);
         let rows: Vec<String> = (0..20).map(|row| grid.row(row).iter().map(|cell| cell.text.clone()).collect()).collect();
         assert!(rows[1].starts_with("\u{2551}hello quick view"), "{rows:#?}");
-        assert!(rows[18].starts_with("\u{2551}a.txt"));
-        assert!(rows[17].starts_with("\u{255F}"));
+        // no name or type line under the view: the frame's inside is the file's to the bottom border
+        assert!(rows[18].starts_with('\u{2551}') && !rows[18].contains("a.txt"), "{:?}", rows[18]);
+        assert!(rows[17].starts_with('\u{2551}') && !rows[17].contains('\u{255F}'), "{:?}", rows[17]);
+        assert!(rows[19].starts_with('\u{255A}'), "{:?}", rows[19]);
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

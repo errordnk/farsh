@@ -133,7 +133,9 @@ over the shell screen.
   modes (Ctrl+1..9, 0: config.cpp's InitialModes, see `ViewMode`), Info
   panel (Ctrl+L, `src/infopanel.rs`: infolist.cpp's sections), Quick view
   (Ctrl+Q, `src/qview.rs`: qview.cpp, a folder counted as GetDirInfo does,
-  in the background), Show long names (Ctrl+N: the 8.3 names from
+  in the background; NOT Far's status bar under the view - its separator,
+  file type and name line - the user's call, 2026-11-07: the inside of the
+  frame is the file's to the bottom border, in either layout), Show long names (Ctrl+N: the 8.3 names from
   FILE_ID_BOTH_DIR_INFO), Panel On/Off (Ctrl+F1/F2, with Far's rules for
   which panel becomes active). Ctrl+L/Q turn the passive panel (the active
   one if it is that kind already), again a file panel. While a quick view
