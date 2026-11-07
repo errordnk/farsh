@@ -13,13 +13,28 @@ pub struct Cell {
     pub bold: bool,
     pub underline: bool,
     pub reverse: bool,
+    /// Italic, dim and crossed-out: what the embedded editor draws (the shell's cells and the panels have none).
+    pub italic: bool,
+    pub dim: bool,
+    pub strike: bool,
     /// The underline color (SGR 58), which a placement's cells carry its file id in.
     pub ul: Option<Color>,
 }
 
 impl Default for Cell {
     fn default() -> Self {
-        Self { text: " ".into(), fg: Color::Reset, bg: Color::Reset, bold: false, underline: false, reverse: false, ul: None }
+        Self {
+            text: " ".into(),
+            fg: Color::Reset,
+            bg: Color::Reset,
+            bold: false,
+            underline: false,
+            reverse: false,
+            italic: false,
+            dim: false,
+            strike: false,
+            ul: None,
+        }
     }
 }
 
@@ -119,7 +134,8 @@ impl Grid {
     /// `shown` to match.
     pub fn flush(&self, shown: &mut Grid, cursor: Option<(u16, u16)>, out: &mut impl Write) -> std::io::Result<()> {
         queue!(out, cursor::Hide)?;
-        let mut last: Option<(Color, Color, bool, bool, bool, Option<Color>)> = None;
+        #[allow(clippy::type_complexity)]
+        let mut last: Option<(Color, Color, bool, bool, bool, Option<Color>, bool, bool, bool)> = None;
         for row in 0..self.rows {
             let mut col = 0;
             while col < self.cols {
@@ -128,7 +144,7 @@ impl Grid {
                 let width = if cell.text.is_empty() { 1 } else { text_width(&cell.text) };
                 if shown.cells[index] != *cell {
                     queue!(out, cursor::MoveTo(col, row))?;
-                    let style = (cell.fg, cell.bg, cell.bold, cell.underline, cell.reverse, cell.ul);
+                    let style = (cell.fg, cell.bg, cell.bold, cell.underline, cell.reverse, cell.ul, cell.italic, cell.dim, cell.strike);
                     if last != Some(style) {
                         queue!(out, SetAttribute(Attribute::Reset), SetForegroundColor(cell.fg), SetBackgroundColor(cell.bg))?;
                         if let Some(Color::Rgb { r, g, b }) = cell.ul {
@@ -148,6 +164,15 @@ impl Grid {
                         if cell.reverse {
                             queue!(out, SetAttribute(Attribute::Reverse))?;
                         }
+                        if cell.italic {
+                            queue!(out, SetAttribute(Attribute::Italic))?;
+                        }
+                        if cell.dim {
+                            queue!(out, SetAttribute(Attribute::Dim))?;
+                        }
+                        if cell.strike {
+                            queue!(out, SetAttribute(Attribute::CrossedOut))?;
+                        }
                         last = Some(style);
                     }
                     queue!(out, Print(if cell.text.is_empty() { " " } else { &cell.text }))?;
@@ -165,7 +190,7 @@ impl Grid {
 }
 
 /// Columns a cell's text takes: 2 for the common wide (CJK, emoji) ranges.
-fn text_width(text: &str) -> u16 {
+pub(crate) fn text_width(text: &str) -> u16 {
     match text.chars().next() {
         Some(c)
             if matches!(

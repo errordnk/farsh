@@ -7,6 +7,9 @@ license = "GPL-3.0-or-later"
 [build-dependencies]
 zstd = "0.13"
 
+[dev-dependencies]
+tempfile = "3"
+
 [dependencies]
 anyhow = "1.0.104"
 chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
@@ -23,6 +26,13 @@ vt100 = "0.18.1"
 symphonia = { version = "0.5", features = ["mp3", "flac"] }
 image = { version = "0.25.1", default-features = false, features = ["png", "jpeg", "gif"] }
 zip = { version = "9.3.0", default-features = false, features = ["aes-crypto", "deflate", "deflate64", "lzma", "ppmd", "bzip2"] }
+# The internal editor and the viewer's text: fresh, our fork (GPL-3.0, as farsh
+# is), built in as a library through `fresh::embed::Session` - no plugins (farsh
+# will have its own, in Lua), no LSP, no menus. A rev of the fork, moved on
+# deliberately like srp_client's. See docs/fresh-plan.md.
+fresh-editor = { git = "https://github.com/errordnk/fresh", rev = "325961cbcc3086b3727c5184e5870813a38b21bd", default-features = false, features = ["runtime", "tree-sitter"] }
+fresh-input-parser = { git = "https://github.com/errordnk/fresh", rev = "325961cbcc3086b3727c5184e5870813a38b21bd" }
+ratatui = { version = "0.30.0", default-features = false, features = ["std", "underline-color"] }
 
 [target.'cfg(windows)'.dependencies]
 # the streams of a video (src/srp/streams.rs), as somsrp probes them

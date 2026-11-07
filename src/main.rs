@@ -13,6 +13,8 @@ mod colors;
 mod commands;
 mod cwd;
 mod dialog;
+#[allow(dead_code)]
+mod fresh_view;
 mod elevation;
 mod diz;
 mod drives;
