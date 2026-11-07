@@ -90,7 +90,7 @@ fn full_screen() -> bool {
 }
 
 /// A text in the interface language.
-fn msg(en: &'static str, ru: &'static str) -> &'static str {
+pub(crate) fn msg(en: &'static str, ru: &'static str) -> &'static str {
     if crate::lang::russian() { ru } else { en }
 }
 

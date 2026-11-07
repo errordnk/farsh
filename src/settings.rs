@@ -61,6 +61,7 @@ const DEFAULTS: &[(&str, Def)] = &[
     ("Screen.Clock", Bool(true)),
     ("Interface.Mouse", Bool(true)),
     ("Screen.KeyBar", Bool(true)),
+    ("Viewer.ShowKeyBar", Bool(true)),
     ("Interface.ShowMenuBar", Bool(false)),
     ("Screen.ScreenSaver", Bool(false)),
     ("Screen.ScreenSaverTime", Int(5)),

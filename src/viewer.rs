@@ -1,16 +1,15 @@
-//! F3: a plain text viewer over the whole screen; pictures (and what else Som
-//! plays) are shown through SRP when farsh runs in Som.
+//! F3: a viewer over the whole screen, as in Far: a status bar at the top, the
+//! key bar at the bottom. Text is fresh, read-only (`fresh_view`); pictures (and
+//! what else Som plays) are shown through SRP when farsh runs in Som; a binary
+//! file is an error, not a hex view.
 
-use std::io::Read;
 use std::path::Path;
 
-use crossterm::event::{KeyCode, KeyEvent, MouseEvent, MouseEventKind};
+use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent};
 use crossterm::style::Color;
 
+use crate::fresh_view::EditorView;
 use crate::grid::Grid;
-
-/// Bigger files are shown up to this much from the start.
-const LIMIT: u64 = 32 << 20;
 
 // Far's viewer: light cyan on blue, the title bar black on cyan
 #[allow(non_snake_case)]
@@ -30,30 +29,13 @@ fn BAR_BG() -> Color {
     crate::colors::bg("Viewer.Status")
 }
 
-/// Tabs to spaces up to the next multiple of `tab`.
-fn expand_tabs(line: &str, tab: usize) -> String {
-    let mut out = String::new();
-    let mut col = 0;
-    for c in line.chars() {
-        if c == '\t' {
-            let spaces = tab - col % tab;
-            out.push_str(&" ".repeat(spaces));
-            col += spaces;
-        } else {
-            out.push(c);
-            col += 1;
-        }
-    }
-    out
-}
-
 pub struct Viewer {
     name: String,
-    lines: Vec<String>,
-    truncated: bool,
-    top: usize,
-    left: usize,
-    /// Rows of text on the last screen painted.
+    /// The text, in fresh (read-only).
+    editor: Option<EditorView>,
+    /// The file's size, for the status bar.
+    size: u64,
+    /// Rows of the space for a document on the last screen painted (it is scrolled by rows).
     page: usize,
     /// The placement of a file Som shows (SRP), instead of text.
     media: Option<crate::srp::Media>,
@@ -90,32 +72,27 @@ impl Viewer {
     }
 
     fn open_for(path: &Path, quick: bool) -> std::io::Result<Self> {
+        let mut viewer = Self::empty(&path.display().to_string());
+        viewer.path = path.to_path_buf();
+        viewer.size = std::fs::metadata(path)?.len();
         if let Some(media) = crate::srp::Media::start(path, quick) {
-            let mut viewer = Self::from_text(&path.display().to_string(), "");
             viewer.media = Some(media);
-            viewer.path = path.to_path_buf();
             return Ok(viewer);
         }
-        let mut bytes = Vec::new();
-        let file = std::fs::File::open(path)?;
-        let size = file.metadata()?.len();
-        file.take(LIMIT).read_to_end(&mut bytes)?;
-        let mut viewer = Self::from_text(&path.display().to_string(), &String::from_utf8_lossy(&bytes));
-        viewer.truncated = size > LIMIT;
+        if crate::qview::is_binary(path) {
+            return Err(std::io::Error::other("a binary file: nothing to show"));
+        }
+        let options = crate::fresh_view::viewer_options_in("Viewer.Text", "Viewer.Text.Selected");
+        let editor = EditorView::open(path, 80, 24, options).map_err(std::io::Error::other)?;
+        viewer.editor = Some(editor);
         Ok(viewer)
     }
 
-    pub fn from_text(name: &str, text: &str) -> Self {
+    fn empty(name: &str) -> Self {
         Self {
             name: name.into(),
-            lines: {
-                // Viewer settings: Tab size (to the next tab stop)
-                let tab = crate::settings::int("Viewer.TabSize").clamp(1, 512) as usize;
-                text.lines().map(|line| expand_tabs(&line.replace('\r', ""), tab)).collect()
-            },
-            truncated: false,
-            top: 0,
-            left: 0,
+            editor: None,
+            size: 0,
             page: 20,
             media: None,
             media_top: 0,
@@ -165,28 +142,39 @@ impl Viewer {
         self.media.as_ref().is_some_and(crate::srp::Media::busy)
     }
 
+    /// The editor wants a frame without any input (a file just opened, highlighting).
+    pub fn animating(&mut self) -> bool {
+        self.editor.as_mut().is_some_and(|editor| editor.next_frame().is_some())
+    }
+
     /// The file's name, as the screens list shows it.
     pub fn name(&self) -> &str {
         &self.name
     }
 
-    fn scroll(&mut self, rows: isize) {
-        if self.shows_document() {
-            // clamped when painted, when the number of rows and the height are known
-            self.media_top = (self.media_top as isize + rows).max(0) as usize;
-            return;
-        }
-        let last = self.lines.len().saturating_sub(1) as isize;
-        self.top = (self.top as isize + rows).clamp(0, last) as usize;
+    /// Scrolls a document (Som's, drawn by its rows); text is the editor's.
+    fn scroll_document(&mut self, rows: isize) {
+        // clamped when painted, when the number of rows and the height are known
+        self.media_top = (self.media_top as isize + rows).max(0) as usize;
     }
 
-    /// The wheel scrolls three lines at a time.
+    /// The wheel scrolls three lines at a time (the editor's own step in text).
     pub fn mouse(&mut self, event: MouseEvent) {
-        match event.kind {
-            MouseEventKind::ScrollUp => self.scroll(-3),
-            MouseEventKind::ScrollDown => self.scroll(3),
-            _ => {}
+        if self.shows_document() {
+            match event.kind {
+                crossterm::event::MouseEventKind::ScrollUp => self.scroll_document(-3),
+                crossterm::event::MouseEventKind::ScrollDown => self.scroll_document(3),
+                _ => {}
+            }
+        } else if let Some(editor) = &mut self.editor {
+            let _ = editor.event(Event::Mouse(event), 0, 1);
         }
+    }
+
+    /// The editor goes about its own business (a file read, highlighting, an
+    /// animation): `true` when what it shows has changed.
+    pub fn tick(&mut self) -> bool {
+        self.editor.as_mut().is_some_and(|editor| editor.tick().unwrap_or(false))
     }
 
     /// `a` goes to the next audio stream of a video, `s` to the next subtitle
@@ -259,9 +247,9 @@ impl Viewer {
         if self.choose_stream(key.code) {
             return Outcome::Open;
         }
-        let page = self.page.max(1) as isize;
+        let plain = key.modifiers.is_empty();
         match key.code {
-            KeyCode::Esc | KeyCode::F(3) | KeyCode::F(10) | KeyCode::Char('q') => return Outcome::Closed,
+            KeyCode::Esc | KeyCode::F(3) | KeyCode::F(10) | KeyCode::Char('q') if plain => return Outcome::Closed,
             // the previous and next track of a list, as in somsrp
             KeyCode::Char('n' | 'N') if self.media.as_ref().is_some_and(crate::srp::Media::is_list) => {
                 self.media.as_ref().inspect(|media| media.step(1));
@@ -269,99 +257,100 @@ impl Viewer {
             KeyCode::Char('p' | 'P') if self.media.as_ref().is_some_and(crate::srp::Media::is_list) => {
                 self.media.as_ref().inspect(|media| media.step(-1));
             }
-            KeyCode::Up => self.scroll(-1),
-            KeyCode::Down | KeyCode::Enter => self.scroll(1),
-            KeyCode::PageUp => self.scroll(-page),
-            KeyCode::PageDown | KeyCode::Char(' ') => self.scroll(page),
-            KeyCode::Home => {
-                self.media_top = 0;
-                self.top = 0;
-                self.left = 0;
+            _ if self.shows_document() => {
+                let page = self.page.max(1) as isize;
+                match key.code {
+                    KeyCode::Up => self.scroll_document(-1),
+                    KeyCode::Down | KeyCode::Enter => self.scroll_document(1),
+                    KeyCode::PageUp => self.scroll_document(-page),
+                    KeyCode::PageDown | KeyCode::Char(' ') => self.scroll_document(page),
+                    KeyCode::Home => self.media_top = 0,
+                    KeyCode::End => self.media_end = true,
+                    _ => {}
+                }
             }
-            KeyCode::End => {
-                self.media_end = true;
-                self.top = self.lines.len().saturating_sub(self.page);
+            _ => {
+                if let Some(editor) = &mut self.editor {
+                    // Far's viewer: Enter goes a line down, Space a page
+                    let key = match key.code {
+                        KeyCode::Enter => KeyEvent::new(KeyCode::Down, key.modifiers),
+                        KeyCode::Char(' ') if plain => KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE),
+                        _ => key,
+                    };
+                    let _ = editor.event(Event::Key(key), 0, 1);
+                }
             }
-            KeyCode::Left => self.left = self.left.saturating_sub(8),
-            KeyCode::Right => self.left += 8,
-            _ => {}
         }
         Outcome::Open
     }
 
-    /// The text in a window of the screen, wrapped at its width (the quick
-    /// view's viewer: Far's ViewerIsWrap is on by default), no bars.
+    /// A window of the screen for what Som shows (the quick view's text is
+    /// fresh itself, drawn by `qview`), no bars.
     pub fn paint_area(&mut self, grid: &mut Grid, x: u16, y: u16, width: u16, height: u16, bg: Color) {
         self.page = height as usize;
-        if self.paint_media(grid, x, y, width, height, bg) {
-            return;
-        }
-        let width = width.max(1) as usize;
-        let mut row = 0u16;
-        'lines: for line in self.lines.iter().skip(self.top) {
-            let chars: Vec<char> = line.chars().collect();
-            let mut start = 0;
-            loop {
-                if row >= height {
-                    break 'lines;
-                }
-                let piece: String = chars[start..(start + width).min(chars.len())].iter().collect();
-                grid.put(x, y + row, &piece, FG(), BG());
-                row += 1;
-                start += width;
-                if start >= chars.len() {
-                    break;
-                }
-            }
-        }
+        self.paint_media(grid, x, y, width, height, bg);
     }
 
-    pub fn paint(&mut self, grid: &mut Grid) {
+    /// What the top bar says on its right: the file's size, or what Som is doing with it.
+    fn top_note(&self) -> String {
+        let Some(media) = &self.media else { return format!("{}", self.size) };
+        let state = match media.status() {
+            crate::srp::Status::Sending => "sending...",
+            crate::srp::Status::Failed(_) => "failed",
+            _ => "shown by Som",
+        };
+        let track = match media.position() {
+            Some((index, len)) => format!(", track {}/{len} (n, p)", index + 1),
+            None => String::new(),
+        };
+        let streams = match (&self.stream_list, &self.stream_note) {
+            (_, Some(note)) if media.kind == crate::srp::Kind::Video => format!(", {note} (a, s)"),
+            (Some(None), None) if media.kind == crate::srp::Kind::Video => ", a/s + digit: audio/subtitle stream".to_string(),
+            (_, None) if media.kind == crate::srp::Kind::Video => ", a: audio, s: subtitles".to_string(),
+            _ => String::new(),
+        };
+        format!("{state}{track}{streams}")
+    }
+
+    /// The whole screen as in Far: the status bar on the first row (the name,
+    /// then on the right the size or what Som does with the file), the key bar
+    /// on the last, the file between. Returns where the cursor goes.
+    pub fn paint(&mut self, grid: &mut Grid) -> Option<(u16, u16)> {
         grid.fill_with(0, 0, grid.cols, grid.rows, FG(), BG());
-        // Som paints a document over everything below its first cell, not only over the
-        // cells it has: without bars to cover the whole screen is its place (as in somsrp)
-        if self.shows_document() && matches!(self.media.as_ref().map(crate::srp::Media::status), Some(crate::srp::Status::Sent | crate::srp::Status::Sending)) {
-            self.page = grid.rows as usize;
-            self.paint_media(grid, 0, 0, grid.cols, grid.rows, BG());
-            return;
+        let keys = crate::settings::bool("Viewer.ShowKeyBar") && crate::settings::bool("Screen.KeyBar");
+        let (top, bottom) = (1, u16::from(keys));
+        if grid.rows < top + bottom + 1 {
+            return None;
         }
-        if grid.rows < 3 {
-            return;
-        }
-        self.page = grid.rows as usize - 2;
-        let title: String = self.name.chars().take(grid.cols as usize).collect();
+        let height = grid.rows - top - bottom;
+        let cols = grid.cols as usize;
+        // the status bar
+        let note = self.top_note();
+        let name: String = self.name.chars().take(cols.saturating_sub(note.chars().count() + 2)).collect();
         grid.fill_with(0, 0, grid.cols, 1, BAR_FG(), BAR_BG());
-        grid.put(0, 0, &title, BAR_FG(), BAR_BG());
-        if self.paint_media(grid, 0, 1, grid.cols, grid.rows - 2, BG()) {
-            let state = match self.media.as_ref().map(crate::srp::Media::status) {
-                Some(crate::srp::Status::Sending) => "sending...",
-                Some(crate::srp::Status::Failed(_)) => "failed",
-                _ => "shown by Som",
-            };
-            let track = match self.media.as_ref().and_then(crate::srp::Media::position) {
-                Some((index, len)) => format!(" track {}/{len} (n, p) --", index + 1),
-                None => String::new(),
-            };
-            let streams = match (self.media.as_ref(), &self.stream_list, &self.stream_note) {
-                (Some(media), _, Some(note)) if media.kind == crate::srp::Kind::Video => format!(" -- {note} (a, s)"),
-                (Some(media), Some(None), None) if media.kind == crate::srp::Kind::Video => " -- a/s + digit: audio/subtitle stream".to_string(),
-                (Some(media), _, None) if media.kind == crate::srp::Kind::Video => " -- a: audio, s: subtitles".to_string(),
-                _ => String::new(),
-            };
-            let status = format!(" {state}{track}{streams} -- Esc, F3 or F10 closes");
-            grid.fill_with(0, grid.rows - 1, grid.cols, 1, BAR_FG(), BAR_BG());
-            grid.put(0, grid.rows - 1, &status, BAR_FG(), BAR_BG());
-            return;
+        grid.put(0, 0, &name, BAR_FG(), BAR_BG());
+        let note_x = cols.saturating_sub(note.chars().count() + 1);
+        if note_x > name.chars().count() {
+            grid.put(note_x as u16, 0, &note, BAR_FG(), BAR_BG());
         }
-        for (row, line) in self.lines.iter().skip(self.top).take(self.page).enumerate() {
-            let shown: String = line.chars().skip(self.left).take(grid.cols as usize).collect();
-            grid.put(0, 1 + row as u16, &shown, FG(), BG());
+        // the file
+        self.page = height as usize;
+        let mut cursor = None;
+        if !self.paint_media(grid, 0, top, grid.cols, height, BG())
+            && let Some(editor) = &mut self.editor
+        {
+            editor.resize(grid.cols, height);
+            cursor = editor.paint(grid, 0, top).ok().flatten();
         }
-        let percent = if self.lines.len() <= self.page { 100 } else { (self.top + self.page).min(self.lines.len()) * 100 / self.lines.len() };
-        let note = if self.truncated { " (cut)" } else { "" };
-        let status = format!(" Line {}/{}  {}%{} -- Esc, F3 or F10 closes", self.top + 1, self.lines.len().max(1), percent, note);
-        grid.fill_with(0, grid.rows - 1, grid.cols, 1, BAR_FG(), BAR_BG());
-        grid.put(0, grid.rows - 1, &status, BAR_FG(), BAR_BG());
+        // the key bar: only what works here has a label
+        if keys {
+            let mut labels = [""; 12];
+            labels[2] = crate::help::msg("Quit", "Выход");
+            labels[9] = crate::help::msg("Quit", "Выход");
+            labels[11] = crate::help::msg("Screen", "Экраны");
+            crate::panels::paint_labels(grid, &labels);
+        }
+        cursor
     }
 }
 
@@ -380,7 +369,7 @@ mod tests {
             audio: vec!["rus, AC3".into(), "eng, AAC".into()],
             subtitle: vec!["rus, SUBRIP".into()],
         };
-        let mut viewer = Viewer::from_text("film.mkv", "");
+        let mut viewer = Viewer::empty("film.mkv");
         viewer.path = "film.mkv".into();
         viewer.next_stream('a', &list);
         assert_eq!(viewer.streams.audio, Some(1));
@@ -399,32 +388,69 @@ mod tests {
         assert_eq!(viewer.stream_note.as_deref(), Some("no subtitles"));
     }
 
-    #[test]
-    fn scrolling_stays_inside_the_text_and_esc_closes() {
-        let text: String = (1..=100).map(|n| format!("line {n}\n")).collect();
-        let mut viewer = Viewer::from_text("t.txt", &text);
-        let mut grid = Grid::new(40, 12);
-        viewer.paint(&mut grid);
-        assert_eq!(grid.cell_mut(0, 1).unwrap().text, "l");
-        viewer.key(key(KeyCode::PageDown));
-        viewer.paint(&mut grid);
-        assert_eq!(viewer.top, 10);
-        viewer.key(key(KeyCode::Home));
-        viewer.key(key(KeyCode::Up));
-        assert_eq!(viewer.top, 0);
-        viewer.key(key(KeyCode::End));
-        viewer.key(key(KeyCode::PageDown));
-        assert!(viewer.top < 100);
-        assert!(matches!(viewer.key(key(KeyCode::Esc)), Outcome::Closed));
+    fn temp_file(name: &str, bytes: &[u8]) -> std::path::PathBuf {
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("farsh-view-{}-{n}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(name);
+        std::fs::write(&path, bytes).unwrap();
+        path
+    }
+
+    fn rows(grid: &mut Grid) -> Vec<String> {
+        (0..grid.rows).map(|y| (0..grid.cols).map(|x| grid.cell_mut(x, y).unwrap().text.clone()).collect()).collect()
     }
 
     #[test]
-    fn a_file_is_shown_with_tabs_expanded_and_bad_utf8_replaced() {
-        let path = std::env::temp_dir().join(format!("farsh-view-{}.txt", std::process::id()));
-        std::fs::write(&path, b"a\tb\r\nbad \xff byte\n").unwrap();
-        let viewer = Viewer::open(&path).unwrap();
-        assert_eq!(viewer.lines[0], "a       b", "Far's default tab size is 8");
-        assert!(viewer.lines[1].contains('\u{fffd}'));
-        std::fs::remove_file(path).unwrap();
+    fn the_screen_is_a_status_bar_the_file_and_the_key_bar() {
+        let text: String = (1..=100).map(|n| format!("line {n}\n")).collect();
+        let path = temp_file("t.txt", text.as_bytes());
+        let mut viewer = Viewer::open(&path).unwrap();
+        let mut grid = Grid::new(100, 12);
+        viewer.tick();
+        viewer.paint(&mut grid);
+        let screen = rows(&mut grid);
+        assert!(screen[0].contains("t.txt"), "the name on the status bar: {:?}", screen[0]);
+        assert!(screen[0].trim_end().ends_with("792"), "the size on its right: {:?}", screen[0]);
+        assert!(screen[1].starts_with("line 1 "), "{screen:#?}");
+        assert!(screen[10].starts_with("line 10"), "the file down to the row above the key bar: {screen:#?}");
+        assert!(screen[11].contains("3Quit") && screen[11].contains("10Quit") && screen[11].contains("12Scree"), "{:?}", screen[11]);
+        // the bars are in Far's colors, the text in the viewer's
+        assert_eq!(grid.cell_mut(0, 0).unwrap().bg, BAR_BG());
+        assert_eq!(grid.cell_mut(30, 5).unwrap().bg, BG());
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn keys_scroll_the_text_enter_and_space_as_in_far_and_esc_closes() {
+        let text: String = (1..=100).map(|n| format!("line {n}\n")).collect();
+        let path = temp_file("t.txt", text.as_bytes());
+        let mut viewer = Viewer::open(&path).unwrap();
+        let mut grid = Grid::new(40, 12);
+        viewer.paint(&mut grid);
+        viewer.key(key(KeyCode::Enter));
+        viewer.tick();
+        viewer.paint(&mut grid);
+        assert!(rows(&mut grid)[1].starts_with("line 1"), "the cursor moved, the view did not yet");
+        viewer.key(key(KeyCode::Char(' ')));
+        viewer.key(key(KeyCode::Char(' ')));
+        viewer.tick();
+        viewer.paint(&mut grid);
+        assert!(!rows(&mut grid)[1].starts_with("line 1 "), "a page down scrolls: {:?}", rows(&mut grid)[1]);
+        // read-only: typing changes nothing
+        viewer.key(key(KeyCode::Char('x')));
+        assert!(!viewer.editor.as_mut().unwrap().session().modified());
+        assert!(matches!(viewer.key(key(KeyCode::Esc)), Outcome::Closed));
+        assert!(matches!(viewer.key(key(KeyCode::F(3))), Outcome::Closed));
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn a_binary_file_is_an_error_not_a_hex_view() {
+        let path = temp_file("b.bin", b"MZ\x90\x00\x03\x00\x00\x00");
+        let error = Viewer::open(&path).err().expect("an error");
+        assert!(error.to_string().contains("binary"), "{error}");
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
     }
 }

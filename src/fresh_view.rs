@@ -174,6 +174,8 @@ fn viewer_config(config: &mut fresh::config::Config) {
     config.editor.line_wrap = true;
     config.editor.show_vertical_scrollbar = false;
     config.editor.highlight_current_line = false;
+    // Viewer settings: Tab size
+    config.editor.tab_size = crate::settings::int("Viewer.TabSize").clamp(1, 512) as usize;
 }
 
 /// A read-only session for looking at a file.

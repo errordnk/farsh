@@ -412,6 +412,11 @@ impl App {
             if self.panels_visible && self.panels.tick() {
                 dirty = true;
             }
+            if let Overlay::Viewer(viewer) = &mut self.overlay
+                && viewer.tick()
+            {
+                dirty = true;
+            }
             if let Overlay::Find(results) = &mut self.overlay
                 && results.poll()
             {
@@ -440,7 +445,10 @@ impl App {
             }
             // A copy in progress, or a folder the quick view is counting, redraws as it goes.
             let busy = matches!(self.overlay, Overlay::Job(..))
-                || matches!(&self.overlay, Overlay::Viewer(viewer) if viewer.busy())
+                || match &mut self.overlay {
+                    Overlay::Viewer(viewer) => viewer.busy() || viewer.animating(),
+                    _ => false,
+                }
                 || matches!(&self.overlay, Overlay::Find(results) if results.busy())
                 || (self.panels_visible && self.panels.busy());
             let wait = if busy { 50 } else { 10 };
@@ -522,10 +530,7 @@ impl App {
         match &mut self.overlay {
             Overlay::None => {}
             Overlay::Dialog(dialog) => cursor = dialog.paint(frame),
-            Overlay::Viewer(viewer) => {
-                viewer.paint(frame);
-                cursor = None;
-            }
+            Overlay::Viewer(viewer) => cursor = viewer.paint(frame),
             Overlay::Menu(menu) => {
                 menu.paint(frame);
                 cursor = None;
