@@ -162,6 +162,40 @@ impl Backend for GridBackend {
     }
 }
 
+/// How the viewer's text looks (the quick view's, and F3's): Far's viewer has
+/// no line numbers, no current-line band and no scroll bar by default (its
+/// `Viewer.ShowScrollbar`), and wraps lines in the quick view. No animations: a
+/// viewer that follows the cursor of a panel would slide and trail on every file
+/// (the editor, F4, keeps them).
+fn viewer_config(config: &mut fresh::config::Config) {
+    config.editor.animations = false;
+    config.editor.line_numbers = false;
+    config.editor.line_wrap = true;
+    config.editor.show_vertical_scrollbar = false;
+    config.editor.highlight_current_line = false;
+}
+
+/// A read-only session for looking at a file.
+pub fn viewer_options() -> EmbedOptions {
+    EmbedOptions { read_only: true, configure: Some(viewer_config), dirs: dirs(), ..EmbedOptions::default() }
+}
+
+/// Where the embedded editor keeps its config and data: the user's fresh
+/// folders (`~/.config/fresh`, ...), and in tests a temporary tree of the
+/// thread's own, so a test never reads or writes the user's.
+#[cfg(not(test))]
+fn dirs() -> Option<fresh::config_io::DirectoryContext> {
+    None
+}
+
+#[cfg(test)]
+fn dirs() -> Option<fresh::config_io::DirectoryContext> {
+    thread_local! {
+        static TREE: tempfile::TempDir = tempfile::tempdir().unwrap();
+    }
+    TREE.with(|tree| Some(fresh::config_io::DirectoryContext::for_testing(tree.path())))
+}
+
 /// One fresh session in a rectangle of the screen.
 pub struct EditorView {
     session: Session,
@@ -221,6 +255,9 @@ impl EditorView {
     /// Draws the session into `grid` from (`x`, `y`), clipped to the screen;
     /// returns the cursor's place on the screen, if the editor shows one.
     pub fn paint(&mut self, grid: &mut Grid, x: u16, y: u16) -> io::Result<Option<(u16, u16)>> {
+        // what the editor has to settle first (a file just opened) is settled
+        // before the frame, so that the frame is the file's, not the one before
+        let _ = self.session.tick();
         self.terminal.draw(|frame| self.session.render(frame))?;
         let backend = self.terminal.backend();
         for row in 0..backend.rows {

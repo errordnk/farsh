@@ -154,11 +154,6 @@ impl Viewer {
         true
     }
 
-    /// Whether Som shows the file (a placement), not this viewer's text.
-    pub fn shows_media(&self) -> bool {
-        self.media.is_some()
-    }
-
     fn shows_document(&self) -> bool {
         self.media.as_ref().is_some_and(|media| media.kind == crate::srp::Kind::Markdown)
     }

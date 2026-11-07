@@ -409,6 +409,9 @@ impl App {
             if self.poll_job() {
                 dirty = true;
             }
+            if self.panels_visible && self.panels.tick() {
+                dirty = true;
+            }
             if let Overlay::Find(results) = &mut self.overlay
                 && results.poll()
             {

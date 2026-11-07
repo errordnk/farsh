@@ -146,7 +146,22 @@ over the shell screen.
   (`qview::paint_bare`); the key bar is F3 and F4 under the narrow panel
   only. A binary file (`qview::is_binary`: a NUL or over a tenth control
   bytes in the first 8 KiB; a UTF-16/32 BOM is text) that is not a placement
-  shows a line saying so instead of its bytes. No Tree panel: Far's
+  shows a line saying so instead of its bytes. The text of any other file in
+  the quick view (framed or not) is fresh, our fork of the editor (GPL-3.0, as
+  farsh is), built in as a library: read-only, highlighted, no line numbers,
+  wrapped, no animations (`fresh_view::viewer_options`; docs/fresh-plan.md).
+  ONE `fresh::embed::Session` lives as long as a quick view is shown
+  (`Panels::qeditor`) and is moved from file to file with `open_other` (which
+  closes the file before it: a session is one file) after the cursor has stayed
+  150 ms on a file (`qview::State::load`; a file not yet read keeps showing the
+  one before). `Panels::tick` runs its housekeeping in the main loop, `busy`
+  keeps the screen redrawing only while it asks for frames (`next_frame`); the
+  wheel over the quick view and the scroll keys of an active one go to it
+  (`EditorView::event`, mouse positions taken from the rectangle's origin).
+  `fresh_view::GridBackend` is a ratatui backend that keeps fresh's frame as
+  farsh `Cell`s (which gained italic, dim and crossed-out). The embedded
+  editor uses the user's own fresh folders (`~/.config/fresh`...); tests use a
+  temporary tree per thread. No Tree panel: Far's
   Tree.TurnOffCompletely is on by default, its menu item is hidden and
   Ctrl+T does nothing. Known differences: the info panel has no computer
   or user description lines, no plugin (archive) section, and the folder

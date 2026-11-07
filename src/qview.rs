@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex};
 
 use crossterm::style::Color;
 
+use crate::fresh_view::EditorView;
 use crate::grid::Grid;
 use crate::listing;
 use crate::viewer::Viewer;
@@ -53,14 +54,42 @@ pub struct DirInfo {
     pub done: bool,
 }
 
+/// How long the cursor stays on a file before the quick view reads it, so that
+/// running it over many files does not open each (a placement waits the same
+/// time in `srp`).
+#[cfg(not(test))]
+const DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(150);
+#[cfg(test)]
+const DEBOUNCE: std::time::Duration = std::time::Duration::ZERO;
+
+/// What the quick view shows for its path.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Phase {
+    /// A folder: what GetDirInfo counts.
+    Dir,
+    /// A file Som shows (a placement), in a [`Viewer`].
+    Media,
+    /// A file not looked at yet (the cursor has just come to it).
+    Waiting,
+    /// A binary file that is not a placement: a line saying so.
+    Binary,
+    /// Text: fresh, read-only, with highlighting.
+    Text,
+}
+
 /// The quick view of one path.
 pub struct State {
     pub path: PathBuf,
     viewer: Option<Viewer>,
     file_type: String,
     scan: Option<Arc<Mutex<DirInfo>>>,
-    /// A binary file that is not a placement: nothing is shown but a line saying so.
-    binary: bool,
+    phase: Phase,
+    since: std::time::Instant,
+    debounce: std::time::Duration,
+    /// The editor session was asked to open this file (once, whatever came of it).
+    opened: bool,
+    /// Why fresh could not open the file (unreadable, a bad encoding...).
+    error: Option<String>,
 }
 
 impl State {
@@ -75,16 +104,19 @@ impl State {
             });
             info
         });
-        // a placement (Som shows it) first, then a binary file (nothing to show), then text
-        let media = crate::srp::in_som() && crate::srp::kind_of(&path).is_some();
-        let binary = !is_dir && !media && is_binary(&path);
-        let viewer = if is_dir || binary { None } else { Viewer::open_quick(&path).ok() };
+        // a placement (Som shows it) first; a binary file or text is told apart
+        // once the cursor has stayed (`resolve`)
+        let media = !is_dir && crate::srp::in_som() && crate::srp::kind_of(&path).is_some();
+        let viewer = if media { Viewer::open_quick(&path).ok() } else { None };
+        let phase = if is_dir {
+            Phase::Dir
+        } else if media {
+            Phase::Media
+        } else {
+            Phase::Waiting
+        };
         let file_type = if is_dir { String::new() } else { file_type(&path) };
-        Self { path, viewer, file_type, scan, binary }
-    }
-
-    pub fn viewer(&mut self) -> Option<&mut Viewer> {
-        self.viewer.as_mut()
+        Self { path, viewer, file_type, scan, phase, since: std::time::Instant::now(), debounce: DEBOUNCE, opened: false, error: None }
     }
 
     /// The placement of the file shown changed (a new track) and is not drawn yet.
@@ -94,6 +126,47 @@ impl State {
 
     pub fn scanning(&self) -> bool {
         self.scan.as_ref().is_some_and(|s| !lock(s).done)
+    }
+
+    /// The file is not read yet: the cursor has not stayed, or the editor has
+    /// not been given it. The panels redraw until it is.
+    pub fn pending(&self) -> bool {
+        matches!(self.phase, Phase::Waiting) || (self.phase == Phase::Text && !self.opened)
+    }
+
+    /// A test waits less than the real 150 ms (or more, to see it wait).
+    #[cfg(test)]
+    pub fn set_debounce(&mut self, debounce: std::time::Duration) {
+        self.debounce = debounce;
+    }
+
+    /// The file is shown as text (in the editor).
+    pub fn text(&self) -> bool {
+        self.phase == Phase::Text
+    }
+
+    /// After the cursor stayed: binary or text.
+    fn resolve(&mut self) {
+        if self.phase == Phase::Waiting && self.since.elapsed() >= self.debounce {
+            self.phase = if is_binary(&self.path) { Phase::Binary } else { Phase::Text };
+        }
+    }
+
+    /// Gives the editor this state's file (once it is text and has waited).
+    fn load(&mut self, editor: &mut Option<EditorView>, width: u16, height: u16) {
+        self.resolve();
+        if self.phase != Phase::Text || self.opened {
+            return;
+        }
+        self.opened = true;
+        let result = match editor {
+            Some(view) => {
+                view.resize(width, height);
+                view.session().open_other(&self.path)
+            }
+            None => EditorView::open(&self.path, width, height, crate::fresh_view::viewer_options()).map(|view| *editor = Some(view)),
+        };
+        self.error = result.err().map(|error| error.to_string());
     }
 }
 
@@ -141,9 +214,9 @@ fn percent(part: u64, total: u64) -> u64 {
 /// Draws the panel in (`left`, `width`, `height`). `bare` is Ctrl+Q's layout
 /// (the user's call, 2026-11-07): no frame, no title, no name line — the
 /// viewer (or the folder's figures, or why there is nothing) to the edges.
-pub fn paint(grid: &mut Grid, left: u16, width: u16, height: u16, active: bool, state: Option<&mut State>, bare: bool) {
+pub fn paint(grid: &mut Grid, left: u16, width: u16, height: u16, active: bool, state: Option<&mut State>, bare: bool, editor: &mut Option<EditorView>) {
     if bare {
-        return paint_bare(grid, left, width, height, state);
+        return paint_bare(grid, left, width, height, state, editor);
     }
     if width < 6 || height < 5 {
         return;
@@ -200,17 +273,43 @@ pub fn paint(grid: &mut Grid, left: u16, width: u16, height: u16, active: bool, 
             let room = right.saturating_sub(x) as usize;
             grid.put(x, y, &format!("{prefix}{value}").chars().take(room).collect::<String>(), color, BG());
         }
-    } else if state.binary {
-        let text: String = crate::lang::tr("A binary file: nothing to show").chars().take(inner).collect();
-        grid.put(left + 1, 1, &text, TEXT(), BG());
-    } else if let Some(viewer) = &mut state.viewer {
-        viewer.paint_area(grid, left + 1, 1, width - 2, height.saturating_sub(4));
+    } else {
+        paint_body(grid, left + 1, 1, width - 2, height.saturating_sub(4), state, editor);
+    }
+}
+
+/// What a file shows in the rectangle (`x`, `y`, `w`, `h`): a placement in
+/// Som, a line for a binary file or for why the editor could not open it, or the
+/// text in fresh. While the cursor has not stayed on the file yet the editor
+/// goes on showing the one before (less flicker than a blank).
+fn paint_body(grid: &mut Grid, x: u16, y: u16, w: u16, h: u16, state: &mut State, editor: &mut Option<EditorView>) {
+    if w == 0 || h == 0 {
+        return;
+    }
+    state.load(editor, w, h);
+    let mut message = |text: &str| grid.put(x, y, &text.chars().take(usize::from(w)).collect::<String>(), TEXT(), BG());
+    match state.phase {
+        Phase::Dir => {}
+        Phase::Binary => message(crate::lang::tr("A binary file: nothing to show")),
+        Phase::Media => {
+            if let Some(viewer) = &mut state.viewer {
+                viewer.paint_area(grid, x, y, w, h);
+            }
+        }
+        Phase::Waiting | Phase::Text => {
+            if let Some(error) = &state.error {
+                message(error);
+            } else if let Some(view) = editor {
+                view.resize(w, h);
+                let _ = view.paint(grid, x, y);
+            }
+        }
     }
 }
 
 /// Ctrl+Q's viewer: the whole rectangle is the file's (a placement, the text),
 /// or the folder's figures from the top, or a short line for a binary file.
-fn paint_bare(grid: &mut Grid, left: u16, width: u16, height: u16, state: Option<&mut State>) {
+fn paint_bare(grid: &mut Grid, left: u16, width: u16, height: u16, state: Option<&mut State>, editor: &mut Option<EditorView>) {
     grid.fill(left, 0, width, height, BG());
     if width == 0 || height == 0 {
         return;
@@ -221,9 +320,7 @@ fn paint_bare(grid: &mut Grid, left: u16, width: u16, height: u16, state: Option
             grid.put(left, y, &text.chars().take(width as usize).collect::<String>(), color, BG());
         }
     };
-    if state.binary {
-        line(grid, 0, crate::lang::tr("A binary file: nothing to show"), TEXT());
-    } else if let Some(scan) = &state.scan {
+    if let Some(scan) = &state.scan {
         let data = lock(scan).clone();
         let shown = listing::truncate_path(&state.path.display().to_string(), (width as usize).saturating_sub("Folder".len() + 3));
         line(grid, 0, &format!("Folder \"{shown}\""), TEXT());
@@ -246,8 +343,8 @@ fn paint_bare(grid: &mut Grid, left: u16, width: u16, height: u16, state: Option
                 grid.put(left + column as u16, y, &format!("{prefix}{value}").chars().take(room).collect::<String>(), color, BG());
             }
         }
-    } else if let Some(viewer) = &mut state.viewer {
-        viewer.paint_area(grid, left, 0, width, height);
+    } else {
+        paint_body(grid, left, 0, width, height, state, editor);
     }
 }
 
@@ -343,7 +440,7 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
         let mut grid = Grid::new(40, 20);
-        paint(&mut grid, 0, 40, 20, false, Some(&mut state), false);
+        paint(&mut grid, 0, 40, 20, false, Some(&mut state), false, &mut None);
         let rows: Vec<String> = (0..20).map(|row| grid.row(row).iter().map(|cell| cell.text.clone()).collect()).collect();
         assert!(rows[0].contains(" Quick view "));
         assert!(rows[2].contains("Folder \""), "{rows:#?}");
@@ -353,7 +450,7 @@ mod tests {
 
         let mut state = State::new(dir.join("a.txt"));
         let mut grid = Grid::new(40, 20);
-        paint(&mut grid, 0, 40, 20, false, Some(&mut state), false);
+        paint(&mut grid, 0, 40, 20, false, Some(&mut state), false, &mut None);
         let rows: Vec<String> = (0..20).map(|row| grid.row(row).iter().map(|cell| cell.text.clone()).collect()).collect();
         assert!(rows[1].starts_with("\u{2551}hello quick view"), "{rows:#?}");
         assert!(rows[18].starts_with("\u{2551}a.txt"));

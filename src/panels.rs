@@ -1310,6 +1310,11 @@ pub struct Panels {
     info: Option<(PathBuf, crate::infopanel::Info)>,
     /// What the quick view panel shows.
     qview: Option<crate::qview::State>,
+    /// The quick view's text: one fresh session for as long as a quick view is
+    /// shown, moved from file to file (opening an editor per cursor step would be
+    /// slow), and where it was last drawn (to take the wheel and the keys).
+    qeditor: Option<crate::fresh_view::EditorView>,
+    qrect: (u16, u16, u16, u16),
     /// The screen size at the last paint.
     screen: (u16, u16),
     /// Each key of the key bar at the last paint: its first column, the column
@@ -1326,7 +1331,7 @@ impl Panels {
         let mut right = Panel::new(dir.clone());
         right.filter_area = 1;
         right.reload(None);
-        Self { left: Panel::new(dir), right, right_active: false, info: None, qview: None, screen: (0, 0), key_ends: Vec::new(), fast: None, fast_cursor: None }
+        Self { left: Panel::new(dir), right, right_active: false, info: None, qview: None, qeditor: None, qrect: (0, 0, 0, 0), screen: (0, 0), key_ends: Vec::new(), fast: None, fast_cursor: None }
     }
 
     /// Save setup: each panel's folder, view and sort (Far's Panel.Left / Panel.Right).
@@ -1552,10 +1557,21 @@ impl Panels {
     }
 
     /// Whether something is still being counted for the quick view.
-    pub fn busy(&self) -> bool {
+    pub fn busy(&mut self) -> bool {
         let shown = |panel: &Panel| panel.visible && panel.kind == Kind::QuickView;
         (shown(&self.left) || shown(&self.right))
-            && self.qview.as_ref().is_some_and(|state| state.scanning() || state.viewer_busy())
+            && (self.qview.as_ref().is_some_and(|state| state.scanning() || state.viewer_busy() || state.pending())
+                || self.qeditor.as_mut().is_some_and(|view| view.next_frame().is_some()))
+    }
+
+    /// The quick view's editor goes about its own business (a file read, the
+    /// highlighting, an animation): `true` when what it shows has changed.
+    pub fn tick(&mut self) -> bool {
+        let shown = |panel: &Panel| panel.visible && panel.kind == Kind::QuickView;
+        if !(shown(&self.left) || shown(&self.right)) {
+            return false;
+        }
+        self.qeditor.as_mut().is_some_and(|view| view.tick().unwrap_or(false))
     }
 
     /// The panels' kinds, visibility and long names, for the menu.
@@ -1931,6 +1947,16 @@ impl Panels {
         match event.kind {
             MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
                 let Some(right) = side else { return Key::Pass };
+                // over the quick view the wheel scrolls its text
+                if (if right { &self.right } else { &self.left }).kind == Kind::QuickView {
+                    if self.qview.as_ref().is_some_and(|state| state.text())
+                        && let Some(view) = &mut self.qeditor
+                    {
+                        let wheel = crossterm::event::Event::Mouse(MouseEvent { kind: event.kind, column: col, row, modifiers: event.modifiers });
+                        let _ = view.event(wheel, self.qrect.0, self.qrect.1);
+                    }
+                    return Key::Taken;
+                }
                 self.right_active = right;
                 let step = if event.kind == MouseEventKind::ScrollUp { -3 } else { 3 };
                 self.active().move_cursor(step);
@@ -2179,6 +2205,11 @@ impl Panels {
             }
         }
 
+        // no quick view shown: its editor session goes
+        let quick = |panel: &Panel| panel.visible && panel.kind == Kind::QuickView;
+        if !(quick(&self.left) || quick(&self.right)) {
+            self.qeditor = None;
+        }
         if menu_bar {
             for row in (0..height).rev() {
                 let cells = grid.row(row);
@@ -2256,6 +2287,7 @@ impl Panels {
             }
             Kind::QuickView => {
                 panel.area = (x, 0, width, height);
+                self.qrect = if bare { (x, 0, width, height) } else { (x + 1, 1, width.saturating_sub(2), height.saturating_sub(4)) };
                 // the other panel's entry under the cursor (not `..`, not inside an archive)
                 let target = (other.kind == Kind::Files && other.archive.is_none())
                     .then(|| other.current().filter(|e| !e.is_up()).map(|e| other.dir.join(&e.name)))
@@ -2265,9 +2297,9 @@ impl Panels {
                         if self.qview.as_ref().is_none_or(|state| state.path != path) {
                             self.qview = Some(crate::qview::State::new(path));
                         }
-                        crate::qview::paint(grid, x, width, height, active, self.qview.as_mut(), bare);
+                        crate::qview::paint(grid, x, width, height, active, self.qview.as_mut(), bare, &mut self.qeditor);
                     }
-                    None => crate::qview::paint(grid, x, width, height, active, None, bare),
+                    None => crate::qview::paint(grid, x, width, height, active, None, bare, &mut self.qeditor),
                 }
             }
         }
@@ -2294,8 +2326,10 @@ impl Panels {
             KeyCode::Up | KeyCode::Down | KeyCode::PageUp | KeyCode::PageDown | KeyCode::Home | KeyCode::End | KeyCode::Left | KeyCode::Right => {
                 // a placement in the quick view takes no keys: Som's player there is used with
                 // the mouse (the user's call), and Som leaves the keys of a preview to farsh
-                if let Some(viewer) = self.qview.as_mut().and_then(|state| state.viewer()).filter(|viewer| !viewer.shows_media()) {
-                    viewer.key(key);
+                if self.qview.as_ref().is_some_and(|state| state.text())
+                    && let Some(view) = &mut self.qeditor
+                {
+                    let _ = view.event(crossterm::event::Event::Key(key), 0, 0);
                 }
             }
             _ => return Key::Pass,
@@ -3038,6 +3072,127 @@ mod tests {
         assert!(after[0].starts_with('\u{2554}'));
         assert_eq!(after[1], framed[1], "the column titles again");
         assert_eq!(panels.left.current().unwrap().name, "text.txt");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A quick view (Ctrl+Q's layout) of `files`, the cursor on `name`.
+    fn quick_view_of(files: &[(&str, &str)], name: &str) -> (Panels, PathBuf) {
+        let dir = scratch(&format!("qtext-{name}"));
+        for (file, text) in files {
+            std::fs::write(dir.join(file), text).unwrap();
+        }
+        let mut panels = Panels::new(dir.clone());
+        panels.key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::CONTROL), true);
+        while panels.left.current().is_some_and(|e| e.name != name) {
+            panels.key(key(KeyCode::Down), true);
+        }
+        (panels, dir)
+    }
+
+    fn quick_rows(panels: &mut Panels) -> Vec<String> {
+        let mut grid = Grid::new(120, 25);
+        panels.paint(&mut grid, &[], 0);
+        (0..25).map(|row| grid.row(row).iter().map(|cell| cell.text.clone()).collect()).collect()
+    }
+
+    #[test]
+    fn the_quick_view_shows_text_in_fresh_highlighted_and_follows_the_cursor_in_one_session() {
+        let (mut panels, dir) = quick_view_of(
+            &[("main.rs", "fn main() {\n    let answer = \"forty-two\"; // a comment\n}\n"), ("note.txt", "just a note\n")],
+            "main.rs",
+        );
+        let mut grid = Grid::new(120, 25);
+        // the highlighting arrives with the editor's own ticks
+        let mut colors = std::collections::HashSet::new();
+        for _ in 0..200 {
+            panels.paint(&mut grid, &[], 0);
+            panels.tick();
+            let (x0, y0, w, h) = panels.qrect;
+            colors = (y0..y0 + h)
+                .flat_map(|y| (x0..x0 + w).map(move |x| (x, y)))
+                .filter_map(|(x, y)| grid.cell_mut(x, y).cloned())
+                .filter(|cell| cell.text.trim() != "")
+                .map(|cell| format!("{:?}", cell.fg))
+                .collect();
+            if colors.len() > 2 {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(colors.len() > 2, "keywords, strings and comments differ in color: {colors:?}");
+        let rows = quick_rows(&mut panels);
+        assert!(rows[0][20..].starts_with("fn main()"), "{:?}", rows[0]);
+        // the cursor moves to the next file: the same session shows it
+        let session = panels.qeditor.as_ref().map(|view| view as *const _ as usize);
+        panels.key(key(KeyCode::Down), true);
+        while panels.left.current().is_some_and(|e| e.name != "note.txt") {
+            panels.key(key(KeyCode::Down), true);
+        }
+        let rows = quick_rows(&mut panels);
+        assert!(rows[0][20..].starts_with("just a note"), "{rows:#?}");
+        assert_eq!(panels.qeditor.as_ref().map(|view| view as *const _ as usize), session, "one session, not one per file");
+        // it settles (fresh's own short timers run out) and then asks for nothing:
+        // the panels do not redraw forever
+        let started = std::time::Instant::now();
+        while panels.busy() && started.elapsed() < std::time::Duration::from_secs(3) {
+            panels.tick();
+            quick_rows(&mut panels);
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(!panels.busy(), "an idle quick view must not keep the screen redrawing");
+        // no quick view shown: the session is gone
+        panels.key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::CONTROL), true);
+        quick_rows(&mut panels);
+        assert!(panels.qeditor.is_none());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn the_wheel_scrolls_the_quick_views_text_and_the_view_is_read_only() {
+        let text: String = (1..=100).map(|n| format!("line {n}\n")).collect();
+        let (mut panels, dir) = quick_view_of(&[("long.txt", &text)], "long.txt");
+        let rows = quick_rows(&mut panels);
+        assert!(rows[0][20..].starts_with("line 1"), "{:?}", rows[0]);
+        let wheel = |kind, column| MouseEvent { kind, column, row: 5, modifiers: KeyModifiers::NONE };
+        // over the viewer (to the right of the narrow panel)
+        for _ in 0..3 {
+            assert_eq!(panels.mouse(wheel(MouseEventKind::ScrollDown, 60), false), Key::Taken);
+            panels.tick();
+        }
+        let rows = quick_rows(&mut panels);
+        let first: usize = rows[0][20..].trim_start_matches("line ").trim().split_whitespace().next().unwrap().parse().unwrap();
+        assert!(first > 1, "scrolled: {:?}", rows[0]);
+        // the wheel did not move the file panel's cursor
+        assert_eq!(panels.left.current().unwrap().name, "long.txt");
+        // typing is refused: the text of the file is not changed by keys sent to a quick view
+        panels.right_active = true;
+        panels.key(key(KeyCode::Char('Z')), true);
+        assert!(panels.qeditor.as_mut().is_some_and(|view| !view.session().modified()));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_file_waits_for_the_cursor_to_stay_before_it_is_read() {
+        let dir = scratch("debounce");
+        std::fs::write(dir.join("a.txt"), "alpha\n").unwrap();
+        let mut state = crate::qview::State::new(dir.join("a.txt"));
+        state.set_debounce(std::time::Duration::from_millis(60));
+        let mut editor = None;
+        let mut grid = Grid::new(40, 10);
+        crate::qview::paint(&mut grid, 0, 40, 10, false, Some(&mut state), true, &mut editor);
+        assert!(state.pending() && editor.is_none(), "the cursor has just come: nothing is opened");
+        std::thread::sleep(std::time::Duration::from_millis(80));
+        crate::qview::paint(&mut grid, 0, 40, 10, false, Some(&mut state), true, &mut editor);
+        assert!(!state.pending() && editor.is_some());
+        assert!(grid.row(0).iter().map(|c| c.text.as_str()).collect::<String>().starts_with("alpha"));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_binary_file_and_an_unreadable_one_say_so() {
+        let (mut panels, dir) = quick_view_of(&[("data.bin", "MZ\u{0}\u{0}\u{3}\u{0}")], "data.bin");
+        let rows = quick_rows(&mut panels);
+        assert!(rows[0][20..].starts_with("A binary file"), "{:?}", rows[0]);
         std::fs::remove_dir_all(dir).unwrap();
     }
 
