@@ -139,12 +139,15 @@ over the shell screen.
   one if it is that kind already), again a file panel. While a quick view
   stands beside a file list the layout is NOT Far's (the user's call,
   2026-11-07; `Panels::quick_layout`): the file panel is one column of names
-  (Brief's, extensions aligned) in a sixth of the screen on its own side, with
-  no frame, titles, status line or totals (`Panel::paint_compact`; the view
-  mode is not changed, so leaving Ctrl+Q shows the panel as it was); the
-  viewer takes the other five sixths with no frame, title or name line
-  (`qview::paint_bare`); the key bar is F3 and F4 under the narrow panel
-  only. A binary file (`qview::is_binary`: a NUL or over a tenth control
+  (Brief's, extensions aligned) in a sixth of the screen on its own side, the
+  viewer takes the other five sixths; both keep their frames and the folder
+  or "Quick view" title in the border (`Panel::paint_compact`: no column
+  titles, status line or totals; the view mode is not changed, so leaving
+  Ctrl+Q shows the panel as it was). The command line is there and the key bar
+  is all twelve keys in one even row across the screen (the narrow panel has
+  no room for six of its own). (A first version without frames and with only
+  F3/F4 was tried and taken back the same day.) A binary file
+  (`qview::is_binary`: a NUL or over a tenth control
   bytes in the first 8 KiB; a UTF-16/32 BOM is text) that is not a placement
   shows a line saying so instead of its bytes. The text of any other file in
   the quick view (framed or not) is fresh, our fork of the editor (GPL-3.0, as

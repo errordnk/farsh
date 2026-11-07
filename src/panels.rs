@@ -1086,38 +1086,56 @@ impl Panel {
         }
     }
 
-    /// Ctrl+Q's panel (the user's call): Brief with one column — names only, in
-    /// the panel's colors and highlighting — and nothing else: no frame, no
-    /// column titles, no status line, no totals. The view mode itself is not
+    /// Ctrl+Q's file panel (the user's call): a framed panel of one column of
+    /// names, Brief's (extensions aligned), the folder in the top border - no
+    /// column titles, status line or totals. The view mode itself is not
     /// changed, so leaving Ctrl+Q shows the panel as it was.
     fn paint_compact(&mut self, grid: &mut Grid, col: u16, width: u16, height: u16, active: bool) {
         self.area = (col, 0, width, height);
         grid.fill(col, 0, width, height, BG());
-        if width == 0 || height == 0 {
+        if width < 4 || height < 3 {
             return;
         }
+        let (right, bottom) = (col + width - 1, height - 1);
+        let inner = (width - 2) as usize;
+        let horizontal = "\u{2550}".repeat(inner);
+        grid.put(col, 0, &format!("\u{2554}{horizontal}\u{2557}"), TEXT(), BG());
+        grid.put(col, bottom, &format!("\u{255A}{horizontal}\u{255D}"), TEXT(), BG());
+        for row in 1..bottom {
+            grid.put(col, row, "\u{2551}", TEXT(), BG());
+            grid.put(right, row, "\u{2551}", TEXT(), BG());
+        }
+        // the folder in the top border, as in a panel
+        let folder = match &self.archive {
+            Some(view) => view.title(),
+            None => self.dir.display().to_string(),
+        };
+        let folder = format!(" {} ", if inner >= 2 { listing::truncate_path(&folder, inner - 2) } else { folder });
+        let folder: String = folder.chars().take(inner).collect();
+        let folder_x = col + 1 + (width - 1).saturating_sub(listing::chars(&folder) as u16) / 2;
+        let (title_fg, title_bg) = if active { (BLACK(), CURSOR_BG()) } else { (TEXT(), BG()) };
+        grid.put(folder_x, 0, &folder, title_fg, title_bg);
+
         let brief = ViewMode::Brief.text();
         self.mode_flags = (brief.flags, false, false);
-        self.list_top = 0;
-        self.height = height as usize;
+        self.list_top = 1;
+        self.height = usize::from(height - 2);
         self.stripes = 1;
-        self.stripe_cols = vec![(col, col + width)];
+        self.stripe_cols = vec![(col + 1, right)];
         self.correct_position();
-        let w = width as usize;
         for line in 0..self.height {
             let pos = self.top + line;
             let (fg, bg) = self.colors(pos, active);
             let (text, too_long) = match self.entries.get(pos) {
-                Some(entry) => self.cell(entry, Col::Name, w, false),
-                None => (" ".repeat(w), false),
+                Some(entry) => self.cell(entry, Col::Name, inner, false),
+                None => (" ".repeat(inner), false),
             };
-            grid.put(col, line as u16, &text, fg, bg);
+            grid.put(col + 1, 1 + line as u16, &text, fg, bg);
             if too_long {
-                grid.put(col + width - 1, line as u16, "}", TEXT(), bg);
+                grid.put(right - 1, 1 + line as u16, "}", TEXT(), bg);
             }
         }
     }
-
     fn paint_list(&self, grid: &mut Grid, cols: &[(Col, usize)], in_stripe: usize, active: bool) {
         let right = self.area.0 + self.area.2 - 1;
         for line in 0..self.height {
@@ -2192,16 +2210,16 @@ impl Panels {
         };
         if let Some(((files_x, files_width), (view_x, view_width))) = self.quick_layout(grid.cols) {
             // Ctrl+Q's layout: the file panel one column of names in a sixth of the
-            // screen, the viewer in the rest, neither framed
+            // screen, the viewer in the rest, both framed
             let files_right = self.right.kind == Kind::Files;
             let panel = if files_right { &mut self.right } else { &mut self.left };
             panel.paint_compact(grid, files_x, files_width, height, right_active == files_right);
-            self.paint_one(grid, !files_right, view_x, view_width, height, right_active != files_right, true);
+            self.paint_one(grid, !files_right, view_x, view_width, height, right_active != files_right);
         } else {
             let (left_at, right_at) = (place(&self.left, true), place(&self.right, false));
             for right in [!right_active, right_active] {
                 let at = if right { right_at } else { left_at };
-                self.paint_one(grid, right, at.0, at.1, height, right == right_active, false);
+                self.paint_one(grid, right, at.0, at.1, height, right == right_active);
             }
         }
 
@@ -2264,9 +2282,7 @@ impl Panels {
     }
 
     /// One panel, as what it is; a hidden one is not drawn (the shell shows there).
-    /// `bare`: a quick view without its frame, title and name line (Ctrl+Q's layout).
-    #[allow(clippy::too_many_arguments)]
-    fn paint_one(&mut self, grid: &mut Grid, right: bool, x: u16, width: u16, height: u16, active: bool, bare: bool) {
+    fn paint_one(&mut self, grid: &mut Grid, right: bool, x: u16, width: u16, height: u16, active: bool) {
         let (panel, other) = if right { (&mut self.right, &self.left) } else { (&mut self.left, &self.right) };
         if !panel.visible {
             panel.area = (0, 0, 0, 0);
@@ -2287,7 +2303,7 @@ impl Panels {
             }
             Kind::QuickView => {
                 panel.area = (x, 0, width, height);
-                self.qrect = if bare { (x, 0, width, height) } else { (x + 1, 1, width.saturating_sub(2), height.saturating_sub(4)) };
+                self.qrect = (x + 1, 1, width.saturating_sub(2), height.saturating_sub(4));
                 // the other panel's entry under the cursor (not `..`, not inside an archive)
                 let target = (other.kind == Kind::Files && other.archive.is_none())
                     .then(|| other.current().filter(|e| !e.is_up()).map(|e| other.dir.join(&e.name)))
@@ -2297,9 +2313,9 @@ impl Panels {
                         if self.qview.as_ref().is_none_or(|state| state.path != path) {
                             self.qview = Some(crate::qview::State::new(path));
                         }
-                        crate::qview::paint(grid, x, width, height, active, self.qview.as_mut(), bare, &mut self.qeditor);
+                        crate::qview::paint(grid, x, width, height, active, self.qview.as_mut(), &mut self.qeditor);
                     }
-                    None => crate::qview::paint(grid, x, width, height, active, None, bare, &mut self.qeditor),
+                    None => crate::qview::paint(grid, x, width, height, active, None, &mut self.qeditor),
                 }
             }
         }
@@ -2349,13 +2365,12 @@ impl Panels {
     /// left panel, F7-F12 under the right one, each panel's six shared out over
     /// its stripes - two under each column of Brief (three columns), three under
     /// each of Medium (two), six under a one-stripe mode - and evenly over a panel
-    /// that is not a file list. In Ctrl+Q's layout only F3 and F4 (view, edit the
-    /// file under the cursor), under the narrow panel. `None` while a panel takes
-    /// the whole screen (one even row of twelve).
+    /// that is not a file list. `None` (one even row of twelve across the screen)
+    /// while a panel takes the whole screen, and in Ctrl+Q's layout: its narrow
+    /// panel has no room for six keys of its own.
     fn key_spans(&self, screen_cols: u16) -> Option<Vec<(u8, u16, u16)>> {
-        if let Some((files, _)) = self.quick_layout(screen_cols) {
-            let (x, width) = files;
-            return Some([3u8, 4].into_iter().zip(even_spans(x, width, 2)).map(|(key, (x, w))| (key, x, w)).collect());
+        if self.quick_layout(screen_cols).is_some() {
+            return None;
         }
         let full = |panel: &Panel| panel.visible && panel.kind == Kind::Files && panel.mode.full_screen();
         if full(&self.left) || full(&self.right) {
@@ -3018,10 +3033,10 @@ mod tests {
         }
         assert_eq!(panels.left.current().unwrap().name, "apple.txt");
         let rows = painted(&mut panels);
-        // Ctrl+Q's layout: no frame, no title (the next test has the details)
-        assert!(!rows[0].contains(" Quick view ") && !rows[0].starts_with('\u{2554}'), "{:?}", rows[0]);
+        // Ctrl+Q's layout: two framed panels, the viewer's titled (the next test has the details)
+        assert!(rows[0].starts_with('\u{2554}') && rows[0].contains(" Quick view "), "{:?}", rows[0]);
         // Brief aligns the extensions: "apple" and "txt" apart
-        assert!(rows.iter().any(|r| r.starts_with("apple") && r.contains("txt")), "{rows:#?}");
+        assert!(rows.iter().any(|r| r.starts_with("\u{2551}apple") && r.contains("txt")), "{rows:#?}");
         // again: a file panel
         panels.key(ctrl('q'), true);
         assert_eq!(panels.right.kind, Kind::Files);
@@ -3032,7 +3047,7 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_q_is_a_one_column_panel_in_a_sixth_and_the_viewer_in_the_rest_without_frames() {
+    fn ctrl_q_is_a_framed_one_column_panel_in_a_sixth_and_a_framed_viewer_in_the_rest() {
         let dir = scratch("ctrlq");
         std::fs::write(dir.join("text.txt"), "hello from the quick view\n").unwrap();
         let mut panels = Panels::new(dir.clone());
@@ -3048,23 +3063,26 @@ mod tests {
         let mut grid = Grid::new(120, 25);
         panels.paint(&mut grid, &[], 0);
         let rows: Vec<String> = (0..25).map(|row| grid.row(row).iter().map(|cell| cell.text.clone()).collect()).collect();
-        // the file panel: a sixth of the screen, one column of names, no frame
+        // the file panel: a sixth of the screen, one column of names, framed, the folder in its border
         assert_eq!(panels.left.area, (0, 0, 20, panels.left.area.3));
         assert_eq!(panels.left.stripes, 1);
-        assert!(!rows.iter().any(|r| r.contains('\u{2554}') || r.contains('\u{2551}') || r.contains('\u{2550}')), "no frames: {rows:#?}");
-        assert!(rows[0].starts_with(".."), "names from the top row: {:?}", rows[0]);
-        // the viewer: the other five sixths, the file's text from its top-left corner
+        assert!(rows[0].starts_with('\u{2554}') && rows[0].contains('\u{2557}'), "{:?}", rows[0]);
+        assert!(rows[1].starts_with("\u{2551}..") && rows[1].chars().nth(19) == Some('\u{2551}'), "names from the first row inside the frame: {:?}", rows[1]);
+        // the viewer: the other five sixths, framed and titled, the file's text inside the frame
         assert_eq!(panels.right.area.0, 20);
         assert_eq!(panels.right.area.2, 100);
-        assert!(rows[0][20..].starts_with("hello from the quick view"), "{:?}", rows[0]);
-        // the key bar: F3 and F4 under the narrow panel, nothing under the viewer
-        let keys = panels.key_spans(120).unwrap();
-        assert_eq!(keys.iter().map(|k| k.0).collect::<Vec<_>>(), [3, 4]);
-        assert!(keys.iter().all(|&(_, x, w)| x + w <= 20));
-        assert!(rows[24][20..].trim().is_empty(), "{:?}", rows[24]);
-        let f3_x = keys[0].1;
+        assert!(from_col(&rows[0], 20).starts_with('\u{2554}') && rows[0].contains(" Quick view "), "{:?}", rows[0]);
+        assert!(from_col(&rows[1], 21).starts_with("hello from the quick view"), "{:?}", rows[1]);
+        // the command line is the row above the key bar, and the key bar is all twelve keys
+        // in one even row (the narrow panel has no room for six of its own)
+        assert!(panels.key_spans(120).is_none());
+        for label in ["1Help", "3View", "4Edit", "5Copy", "10Quit", "12Screen"] {
+            assert!(rows[24].contains(label), "{label}: {:?}", rows[24]);
+        }
+        assert_eq!(panels.key_ends.len(), 12);
+        // F3 is the key at column 20: a click there views the file
+        let f3_x = panels.key_ends[2].0;
         assert_eq!(panels.mouse(click(MouseEventKind::Down(MouseButton::Left), f3_x + 1, 24), false), Key::Ask(Request::View(dir.join("text.txt"))));
-        assert_eq!(panels.mouse(click(MouseEventKind::Down(MouseButton::Left), 60, 24), false), Key::Taken, "nothing under the viewer");
         // leaving Ctrl+Q: the panels as they were (frames, titles, mode), the cursor where it went
         panels.key(ctrl('q'), true);
         assert_eq!(panels.view_modes(), before);
@@ -3074,7 +3092,6 @@ mod tests {
         assert_eq!(panels.left.current().unwrap().name, "text.txt");
         std::fs::remove_dir_all(dir).unwrap();
     }
-
     /// A quick view (Ctrl+Q's layout) of `files`, the cursor on `name`.
     fn quick_view_of(files: &[(&str, &str)], name: &str) -> (Panels, PathBuf) {
         let dir = scratch(&format!("qtext-{name}"));
@@ -3087,6 +3104,12 @@ mod tests {
             panels.key(key(KeyCode::Down), true);
         }
         (panels, dir)
+    }
+
+    /// What a screen row shows from column `col` on (rows hold frame characters
+    /// of several bytes, so a byte slice is not a column).
+    fn from_col(row: &str, col: usize) -> String {
+        row.chars().skip(col).collect()
     }
 
     fn quick_rows(panels: &mut Panels) -> Vec<String> {
@@ -3121,7 +3144,7 @@ mod tests {
         }
         assert!(colors.len() > 2, "keywords, strings and comments differ in color: {colors:?}");
         let rows = quick_rows(&mut panels);
-        assert!(rows[0][20..].starts_with("fn main()"), "{:?}", rows[0]);
+        assert!(from_col(&rows[1], 21).starts_with("fn main()"), "{:?}", rows[0]);
         // the cursor moves to the next file: the same session shows it
         let session = panels.qeditor.as_ref().map(|view| view as *const _ as usize);
         panels.key(key(KeyCode::Down), true);
@@ -3129,7 +3152,7 @@ mod tests {
             panels.key(key(KeyCode::Down), true);
         }
         let rows = quick_rows(&mut panels);
-        assert!(rows[0][20..].starts_with("just a note"), "{rows:#?}");
+        assert!(from_col(&rows[1], 21).starts_with("just a note"), "{rows:#?}");
         assert_eq!(panels.qeditor.as_ref().map(|view| view as *const _ as usize), session, "one session, not one per file");
         // it settles (fresh's own short timers run out) and then asks for nothing:
         // the panels do not redraw forever
@@ -3152,7 +3175,7 @@ mod tests {
         let text: String = (1..=100).map(|n| format!("line {n}\n")).collect();
         let (mut panels, dir) = quick_view_of(&[("long.txt", &text)], "long.txt");
         let rows = quick_rows(&mut panels);
-        assert!(rows[0][20..].starts_with("line 1"), "{:?}", rows[0]);
+        assert!(from_col(&rows[1], 21).starts_with("line 1"), "{:?}", rows[0]);
         let wheel = |kind, column| MouseEvent { kind, column, row: 5, modifiers: KeyModifiers::NONE };
         // over the viewer (to the right of the narrow panel)
         for _ in 0..3 {
@@ -3160,7 +3183,7 @@ mod tests {
             panels.tick();
         }
         let rows = quick_rows(&mut panels);
-        let first: usize = rows[0][20..].trim_start_matches("line ").trim().split_whitespace().next().unwrap().parse().unwrap();
+        let first: usize = from_col(&rows[1], 21).trim_start_matches("line ").trim().split_whitespace().next().unwrap().parse().unwrap();
         assert!(first > 1, "scrolled: {:?}", rows[0]);
         // the wheel did not move the file panel's cursor
         assert_eq!(panels.left.current().unwrap().name, "long.txt");
@@ -3179,12 +3202,12 @@ mod tests {
         state.set_debounce(std::time::Duration::from_millis(60));
         let mut editor = None;
         let mut grid = Grid::new(40, 10);
-        crate::qview::paint(&mut grid, 0, 40, 10, false, Some(&mut state), true, &mut editor);
+        crate::qview::paint(&mut grid, 0, 40, 10, false, Some(&mut state), &mut editor);
         assert!(state.pending() && editor.is_none(), "the cursor has just come: nothing is opened");
         std::thread::sleep(std::time::Duration::from_millis(80));
-        crate::qview::paint(&mut grid, 0, 40, 10, false, Some(&mut state), true, &mut editor);
+        crate::qview::paint(&mut grid, 0, 40, 10, false, Some(&mut state), &mut editor);
         assert!(!state.pending() && editor.is_some());
-        assert!(grid.row(0).iter().map(|c| c.text.as_str()).collect::<String>().starts_with("alpha"));
+        assert!(grid.row(1).iter().skip(1).map(|c| c.text.as_str()).collect::<String>().starts_with("alpha"), "inside the frame");
         std::fs::remove_dir_all(dir).unwrap();
     }
 
@@ -3192,7 +3215,7 @@ mod tests {
     fn a_binary_file_and_an_unreadable_one_say_so() {
         let (mut panels, dir) = quick_view_of(&[("data.bin", "MZ\u{0}\u{0}\u{3}\u{0}")], "data.bin");
         let rows = quick_rows(&mut panels);
-        assert!(rows[0][20..].starts_with("A binary file"), "{:?}", rows[0]);
+        assert!(from_col(&rows[1], 21).starts_with("A binary file"), "{:?}", rows[0]);
         std::fs::remove_dir_all(dir).unwrap();
     }
 

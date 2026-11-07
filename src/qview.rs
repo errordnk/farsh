@@ -211,13 +211,8 @@ fn percent(part: u64, total: u64) -> u64 {
     if total == 0 { 0 } else { part * 100 / total }
 }
 
-/// Draws the panel in (`left`, `width`, `height`). `bare` is Ctrl+Q's layout
-/// (the user's call, 2026-11-07): no frame, no title, no name line — the
-/// viewer (or the folder's figures, or why there is nothing) to the edges.
-pub fn paint(grid: &mut Grid, left: u16, width: u16, height: u16, active: bool, state: Option<&mut State>, bare: bool, editor: &mut Option<EditorView>) {
-    if bare {
-        return paint_bare(grid, left, width, height, state, editor);
-    }
+/// Draws the panel in (`left`, `width`, `height`).
+pub fn paint(grid: &mut Grid, left: u16, width: u16, height: u16, active: bool, state: Option<&mut State>, editor: &mut Option<EditorView>) {
     if width < 6 || height < 5 {
         return;
     }
@@ -304,47 +299,6 @@ fn paint_body(grid: &mut Grid, x: u16, y: u16, w: u16, h: u16, state: &mut State
                 let _ = view.paint(grid, x, y);
             }
         }
-    }
-}
-
-/// Ctrl+Q's viewer: the whole rectangle is the file's (a placement, the text),
-/// or the folder's figures from the top, or a short line for a binary file.
-fn paint_bare(grid: &mut Grid, left: u16, width: u16, height: u16, state: Option<&mut State>, editor: &mut Option<EditorView>) {
-    grid.fill(left, 0, width, height, BG());
-    if width == 0 || height == 0 {
-        return;
-    }
-    let Some(state) = state else { return };
-    let line = |grid: &mut Grid, y: u16, text: &str, color: Color| {
-        if y < height {
-            grid.put(left, y, &text.chars().take(width as usize).collect::<String>(), color, BG());
-        }
-    };
-    if let Some(scan) = &state.scan {
-        let data = lock(scan).clone();
-        let shown = listing::truncate_path(&state.path.display().to_string(), (width as usize).saturating_sub("Folder".len() + 3));
-        line(grid, 0, &format!("Folder \"{shown}\""), TEXT());
-        let (color, prefix) = if data.done { (INFO(), "") } else { (HIGHLIGHT(), "~") };
-        let rows = [
-            ("Folders:", data.dirs.to_string()),
-            ("Files:", data.files.to_string()),
-            ("Files size:", size2str(data.size)),
-            ("Allocated size:", format!("{} ({}%)", size2str(data.allocated), percent(data.allocated, data.size))),
-            ("Cluster size:", crate::dialog::group(data.cluster)),
-            ("Files slack:", format!("{} ({}%)", size2str(data.slack), percent(data.slack, data.allocated))),
-            ("MFT overhead:", format!("{} ({}%)", size2str(data.mft), percent(data.mft, data.allocated))),
-        ];
-        let column = rows.iter().map(|(l, _)| l.len()).max().unwrap_or(0) + 1;
-        for (i, (label, value)) in rows.iter().enumerate() {
-            let y = 2 + i as u16;
-            line(grid, y, &format!("{label:<column$}"), TEXT());
-            if y < height && (column as u16) < width {
-                let room = (width as usize).saturating_sub(column);
-                grid.put(left + column as u16, y, &format!("{prefix}{value}").chars().take(room).collect::<String>(), color, BG());
-            }
-        }
-    } else {
-        paint_body(grid, left, 0, width, height, state, editor);
     }
 }
 
@@ -440,7 +394,7 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
         let mut grid = Grid::new(40, 20);
-        paint(&mut grid, 0, 40, 20, false, Some(&mut state), false, &mut None);
+        paint(&mut grid, 0, 40, 20, false, Some(&mut state), &mut None);
         let rows: Vec<String> = (0..20).map(|row| grid.row(row).iter().map(|cell| cell.text.clone()).collect()).collect();
         assert!(rows[0].contains(" Quick view "));
         assert!(rows[2].contains("Folder \""), "{rows:#?}");
@@ -450,7 +404,7 @@ mod tests {
 
         let mut state = State::new(dir.join("a.txt"));
         let mut grid = Grid::new(40, 20);
-        paint(&mut grid, 0, 40, 20, false, Some(&mut state), false, &mut None);
+        paint(&mut grid, 0, 40, 20, false, Some(&mut state), &mut None);
         let rows: Vec<String> = (0..20).map(|row| grid.row(row).iter().map(|cell| cell.text.clone()).collect()).collect();
         assert!(rows[1].starts_with("\u{2551}hello quick view"), "{rows:#?}");
         assert!(rows[18].starts_with("\u{2551}a.txt"));
