@@ -280,7 +280,7 @@ fn paint_body(grid: &mut Grid, x: u16, y: u16, w: u16, h: u16, state: &mut State
         Phase::Binary => message(crate::lang::tr("A binary file: nothing to show")),
         Phase::Media => {
             if let Some(viewer) = &mut state.viewer {
-                viewer.paint_area(grid, x, y, w, h);
+                viewer.paint_area(grid, x, y, w, h, BG());
             }
         }
         Phase::Waiting | Phase::Text => {

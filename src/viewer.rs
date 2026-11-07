@@ -130,7 +130,9 @@ impl Viewer {
 
     /// Paints a placement (or why there is none) into a rectangle; false if
     /// this viewer shows text.
-    fn paint_media(&mut self, grid: &mut Grid, x: u16, y: u16, width: u16, height: u16) -> bool {
+    /// `bg` is the background of the placement's cells: what Som shows around a
+    /// picture, and what it fills a widget with when it takes it from the cells.
+    fn paint_media(&mut self, grid: &mut Grid, x: u16, y: u16, width: u16, height: u16, bg: Color) -> bool {
         let Some(media) = &self.media else { return false };
         match media.status() {
             crate::srp::Status::Failed(message) => {
@@ -147,9 +149,9 @@ impl Viewer {
                 // up to the top, so that the end of the text can be seen
                 self.media_top = self.media_top.min(total.saturating_sub(1));
                 let shown = total.saturating_sub(self.media_top).min(height as usize) as u16;
-                grid.place_from(x, y, width, shown, self.media_top as u16, media.ids());
+                grid.place_from(x, y, width, shown, self.media_top as u16, media.ids(), bg);
             }
-            _ => grid.place(x, y, width, height, media.ids()),
+            _ => grid.place(x, y, width, height, media.ids(), bg),
         }
         true
     }
@@ -289,9 +291,9 @@ impl Viewer {
 
     /// The text in a window of the screen, wrapped at its width (the quick
     /// view's viewer: Far's ViewerIsWrap is on by default), no bars.
-    pub fn paint_area(&mut self, grid: &mut Grid, x: u16, y: u16, width: u16, height: u16) {
+    pub fn paint_area(&mut self, grid: &mut Grid, x: u16, y: u16, width: u16, height: u16, bg: Color) {
         self.page = height as usize;
-        if self.paint_media(grid, x, y, width, height) {
+        if self.paint_media(grid, x, y, width, height, bg) {
             return;
         }
         let width = width.max(1) as usize;
@@ -320,7 +322,7 @@ impl Viewer {
         // cells it has: without bars to cover the whole screen is its place (as in somsrp)
         if self.shows_document() && matches!(self.media.as_ref().map(crate::srp::Media::status), Some(crate::srp::Status::Sent | crate::srp::Status::Sending)) {
             self.page = grid.rows as usize;
-            self.paint_media(grid, 0, 0, grid.cols, grid.rows);
+            self.paint_media(grid, 0, 0, grid.cols, grid.rows, BG());
             return;
         }
         if grid.rows < 3 {
@@ -330,7 +332,7 @@ impl Viewer {
         let title: String = self.name.chars().take(grid.cols as usize).collect();
         grid.fill_with(0, 0, grid.cols, 1, BAR_FG(), BAR_BG());
         grid.put(0, 0, &title, BAR_FG(), BAR_BG());
-        if self.paint_media(grid, 0, 1, grid.cols, grid.rows - 2) {
+        if self.paint_media(grid, 0, 1, grid.cols, grid.rows - 2, BG()) {
             let state = match self.media.as_ref().map(crate::srp::Media::status) {
                 Some(crate::srp::Status::Sending) => "sending...",
                 Some(crate::srp::Status::Failed(_)) => "failed",

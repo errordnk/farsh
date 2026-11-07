@@ -93,13 +93,13 @@ impl Grid {
     /// A placement of Som's rich-content protocol over a rectangle: placeholder
     /// cells whose foreground color is the session id and whose underline color
     /// is the file id (at most 297 by 297 cells; the rest stays as it was).
-    pub fn place(&mut self, col: u16, row: u16, width: u16, height: u16, ids: (u32, u32)) {
-        self.place_from(col, row, width, height, 0, ids);
+    pub fn place(&mut self, col: u16, row: u16, width: u16, height: u16, ids: (u32, u32), bg: Color) {
+        self.place_from(col, row, width, height, 0, ids, bg);
     }
 
     /// The same, showing the placement from its row `first_row` on (a document
     /// taller than the screen is scrolled by drawing a window of its rows).
-    pub fn place_from(&mut self, col: u16, row: u16, width: u16, height: u16, first_row: u16, ids: (u32, u32)) {
+    pub fn place_from(&mut self, col: u16, row: u16, width: u16, height: u16, first_row: u16, ids: (u32, u32), bg: Color) {
         let color = |id| {
             let (r, g, b) = srp_client::placeholder::id_to_rgb(id);
             Color::Rgb { r, g, b }
@@ -109,7 +109,7 @@ impl Grid {
             for c in 0..width {
                 let Some(text) = srp_client::placeholder::cell_text(u32::from(first_row.saturating_add(r)), u32::from(c)) else { continue };
                 if let Some(cell) = self.cell_mut(col + c, row + r) {
-                    *cell = Cell { text, fg, ul: Some(ul), ..Cell::default() };
+                    *cell = Cell { text, fg, bg, ul: Some(ul), ..Cell::default() };
                 }
             }
         }
@@ -219,11 +219,13 @@ mod tests {
     #[test]
     fn a_placement_is_placeholder_cells_with_the_ids_in_their_colors() {
         let mut grid = Grid::new(6, 4);
-        grid.place(1, 1, 3, 2, (0x01_02_03, 0x0A_0B_0C));
+        grid.place(1, 1, 3, 2, (0x01_02_03, 0x0A_0B_0C), Color::Rgb { r: 0, g: 0, b: 128 });
         let cell = grid.cell_mut(1, 1).unwrap().clone();
         assert_eq!(cell.text, "\u{10EEEE}\u{0305}\u{0305}");
         assert_eq!(cell.fg, Color::Rgb { r: 1, g: 2, b: 3 });
         assert_eq!(cell.ul, Some(Color::Rgb { r: 10, g: 11, b: 12 }));
+        // the cells carry the panel's background: Som shows it around a picture (and under a widget)
+        assert_eq!(cell.bg, Color::Rgb { r: 0, g: 0, b: 128 });
         assert_eq!(grid.cell_mut(3, 2).unwrap().text, "\u{10EEEE}\u{030D}\u{030E}");
         // outside the rectangle nothing changed
         assert_eq!(grid.cell_mut(0, 0).unwrap().text, " ");
@@ -233,7 +235,7 @@ mod tests {
     #[test]
     fn a_window_of_a_placement_starts_at_its_row() {
         let mut grid = Grid::new(4, 3);
-        grid.place_from(0, 0, 2, 2, 5, (1, 2));
+        grid.place_from(0, 0, 2, 2, 5, (1, 2), Color::Reset);
         // the first drawn row is the placement's row 5, the next its row 6
         assert_eq!(grid.cell_mut(0, 0).unwrap().text, srp_client::placeholder::cell_text(5, 0).unwrap());
         assert_eq!(grid.cell_mut(1, 1).unwrap().text, srp_client::placeholder::cell_text(6, 1).unwrap());
@@ -243,7 +245,7 @@ mod tests {
     #[test]
     fn the_underline_color_reaches_the_terminal_as_sgr_58() {
         let mut grid = Grid::new(3, 1);
-        grid.place(0, 0, 2, 1, (1, 0x0A_0B_0C));
+        grid.place(0, 0, 2, 1, (1, 0x0A_0B_0C), Color::Reset);
         let mut shown = Grid::unknown(3, 1);
         let mut out = Vec::new();
         grid.flush(&mut shown, None, &mut out).unwrap();
