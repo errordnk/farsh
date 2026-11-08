@@ -1254,6 +1254,8 @@ pub enum Request {
     Help,
     View(PathBuf),
     Edit(PathBuf),
+    /// Shift+F4: asks for the name of a file (new or not) to edit in this folder.
+    EditNew(PathBuf),
     /// Sources and the other panel's folder (the default destination).
     Copy(Vec<PathBuf>, PathBuf),
     Move(Vec<PathBuf>, PathBuf),
@@ -1871,6 +1873,7 @@ impl Panels {
             KeyCode::Char('z') if ctrl_only => return self.describe_request(),
             KeyCode::F(6) if key.modifiers == KeyModifiers::ALT => return self.link_request(),
             KeyCode::F(3) if key.modifiers == KeyModifiers::SHIFT => return self.archive_commands_request(),
+            KeyCode::F(4) if key.modifiers == KeyModifiers::SHIFT && !self.in_archive() => return Key::Ask(Request::EditNew(self.active_dir().to_path_buf())),
             KeyCode::F(n) if ctrl_only && SortMode::by_key(n).is_some() => {
                 self.active().set_sort(SortMode::by_key(n).unwrap_or(SortMode::Name));
             }
@@ -2727,6 +2730,7 @@ mod tests {
         panels.key(key(KeyCode::Down), true); // apple.txt
         assert_eq!(panels.key(key(KeyCode::F(3)), true), Key::Ask(Request::View(dir.join("apple.txt"))));
         assert_eq!(panels.key(key(KeyCode::F(4)), true), Key::Ask(Request::Edit(dir.join("apple.txt"))));
+        assert_eq!(panels.key(KeyEvent::new(KeyCode::F(4), KeyModifiers::SHIFT), true), Key::Ask(Request::EditNew(dir.clone())));
         std::fs::remove_dir_all(dir).unwrap();
     }
 

@@ -48,6 +48,8 @@ pub enum Action {
     Link(Vec<PathBuf>),
     /// Ctrl+G: the command for each of these names (in the active folder).
     ApplyCommand(Vec<String>),
+    /// Shift+F4: the name typed is a file of this folder to edit.
+    EditNew(PathBuf),
     /// Ctrl+Z: the description of `names[0]`, then the rest in turn.
     Describe(PathBuf, Vec<String>),
     /// Folder shortcuts, F4: the title and path of shortcut N.

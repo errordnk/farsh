@@ -603,4 +603,24 @@ mod tests {
         assert!(!viewer.edit);
         std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
     }
+
+    #[test]
+    fn a_file_that_is_not_there_yet_opens_in_the_editor_and_is_written_by_f2() {
+        let dir = std::env::temp_dir().join(format!("farsh-new-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("fresh.txt");
+        let mut viewer = Viewer::open_edit(&path).unwrap();
+        let mut grid = Grid::new(60, 12);
+        viewer.tick();
+        viewer.paint(&mut grid);
+        for c in "new".chars() {
+            viewer.key(key(KeyCode::Char(c)));
+        }
+        viewer.key(key(KeyCode::F(2)));
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        viewer.tick();
+        assert_eq!(std::fs::read_to_string(&path).unwrap().trim(), "new");
+        drop(viewer);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }

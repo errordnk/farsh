@@ -1171,6 +1171,9 @@ impl App {
                 let dialog = Dialog::get_string("Apply command", "Enter command to process selected files", &self.last_command, Action::ApplyCommand(names));
                 self.overlay = Overlay::Dialog(dialog);
             }
+            Request::EditNew(dir) => {
+                self.overlay = Overlay::Dialog(Dialog::get_string("Edit file", "Enter file name to edit", "", Action::EditNew(dir)));
+            }
             Request::Describe(dir, names) => self.describe_next(dir, names),
             Request::ArchiveCommands(picks) => {
                 self.overlay = Overlay::ArcMenu(vmenu::VMenu::new("ArcLite", vec!["Test archive files".into()]), picks);
@@ -1410,6 +1413,13 @@ impl App {
                     }
                 }
                 self.panels.refresh(None);
+            }
+            Action::EditNew(dir) => {
+                let typed = values.text("text");
+                let name = typed.trim().trim_matches('"');
+                if !name.is_empty() {
+                    self.request(Request::Edit(dir.join(name)));
+                }
             }
             Action::ApplyCommand(names) => {
                 let typed = values.text("text");
