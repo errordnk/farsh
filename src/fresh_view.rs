@@ -243,6 +243,8 @@ fn json_color(color: Color) -> serde_json::Value {
 /// panel next to it, and syntax categories take the table above.
 pub fn theme_json(text: &str, selected: &str) -> String {
     let (fg, bg) = (json_color(colors::fg(text)), json_color(colors::bg(text)));
+    // muted, as in fresh itself: Far's dark gray (the same as comments) on the text background
+    let line_numbers = json_color(palette::fg(palette::DARK_GRAY));
     let (sel_fg, sel_bg) = (json_color(colors::fg(selected)), json_color(colors::bg(selected)));
     let syntax: serde_json::Map<String, serde_json::Value> =
         SYNTAX.iter().map(|(name, index)| ((*name).to_string(), json_color(palette::fg(*index)))).collect();
@@ -252,7 +254,7 @@ pub fn theme_json(text: &str, selected: &str) -> String {
         "editor": {
             "bg": bg, "after_eof_bg": bg, "fg": fg, "current_line_bg": bg,
             "selection_bg": sel_bg, "selection_fg": sel_fg,
-            "line_number_bg": bg, "line_number_fg": fg,
+            "line_number_bg": bg, "line_number_fg": line_numbers,
         },
         "syntax": syntax,
     })
