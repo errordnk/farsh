@@ -40,6 +40,8 @@ pub struct Shell {
     /// The shell shows a prompt and no command runs: set by the prompt's
     /// report, cleared by Enter.
     idle: bool,
+    /// The folder of the files the shell is started with.
+    scratch: PathBuf,
 }
 
 /// Where the terminal's cursor was when farsh started, 0-based (column, row).
@@ -118,6 +120,7 @@ impl Shell {
             out: Vec::new(),
             hooked: hooked_ok,
             idle: false,
+            scratch,
         })
     }
 
@@ -250,6 +253,14 @@ impl Shell {
 
     /// Makes the shell go to `dir`, as if `cd` were typed at an empty prompt.
     pub fn cd(&mut self, dir: &Path) {
+        // PowerShell on Windows is told by a key it binds, which leaves no command in its screen
+        if self.kind == Kind::PowerShell
+            && cfg!(windows)
+            && std::fs::write(cwd::cd_file(&self.scratch), dir.display().to_string()).is_ok()
+        {
+            self.write(cwd::POWERSHELL_CD_KEY, true);
+            return;
+        }
         self.run(&cwd::cd_command(self.kind, dir));
     }
 
@@ -429,6 +440,8 @@ mod tests {
         }
         let reported = shell.take_cwd().expect("the prompt after cd reports the new directory");
         assert_eq!(reported.to_string_lossy().to_lowercase(), target.to_string_lossy().to_lowercase());
+        // the shell was told by a key: no command was typed into its screen
+        assert!(!shell.parser.screen().contents().contains("Set-Location"), "{}", shell.parser.screen().contents());
         shell.write(b"exit\r", true);
     }
 

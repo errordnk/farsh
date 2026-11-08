@@ -49,8 +49,13 @@ pub fn integration(kind: Kind, dir: &Path, login: bool) -> std::io::Result<Integ
     Ok(match kind {
         Kind::PowerShell => Integration {
             // Runs after the profile, so the prompt it wraps is the user's own.
+            env: if cfg!(windows) {
+                std::fs::create_dir_all(dir)?;
+                vec![("FARSH_CDFILE".to_string(), cd_file(dir).display().to_string())]
+            } else {
+                vec![]
+            },
             args: [if login { vec!["-Login".to_string()] } else { vec![] }, vec!["-NoExit".into(), "-Command".into(), POWERSHELL_HOOK.into()]].concat(),
-            env: vec![],
         },
         Kind::Bash => {
             std::fs::create_dir_all(dir)?;
@@ -84,7 +89,17 @@ const POWERSHELL_HOOK: &str = "$global:__farsh_prompt = $function:prompt; \
 function global:prompt { \
 $p = (Get-Location).ProviderPath -replace '\\\\', '/'; \
 [Console]::Out.Write(\"$([char]27)]7;file:///$p$([char]7)\"); \
-& $global:__farsh_prompt }";
+& $global:__farsh_prompt }; try { Set-PSReadLineKeyHandler -Chord 'Ctrl+Alt+F12' -ScriptBlock { Set-Location -LiteralPath ([IO.File]::ReadAllText($env:FARSH_CDFILE)); [Microsoft.PowerShell.PSConsoleReadLine]::InvokePrompt() } } catch {}";
+
+/// What farsh sends to a PowerShell on Windows to make it read the folder in the
+/// `FARSH_CDFILE` file and go there: the key the hook above binds. The shell
+/// redraws its prompt in place, so nothing is typed into its screen.
+pub const POWERSHELL_CD_KEY: &[u8] = b"[24;7~";
+
+/// Where the folder for [`POWERSHELL_CD_KEY`] is put.
+pub fn cd_file(dir: &Path) -> PathBuf {
+    dir.join("cd")
+}
 
 /// The directory for OSC 7. On Windows (Git Bash, MSYS2, Cygwin) `$PWD` is a
 /// path of their own (`/c/Users/x`, `/tmp`): `cygpath -m` gives the Windows
