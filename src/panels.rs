@@ -1986,6 +1986,10 @@ impl Panels {
                     return self.function_key(key);
                 }
                 let Some(right) = side else { return Key::Pass };
+                // a click in the quick view leaves the focus where it is
+                if (if right { &self.right } else { &self.left }).kind == Kind::QuickView {
+                    return Key::Taken;
+                }
                 self.right_active = right;
                 if let Some(index) = self.active().entry_at(col, row) {
                     self.active().cursor = index;
@@ -1999,6 +2003,9 @@ impl Panels {
             }
             MouseEventKind::Down(MouseButton::Right) => {
                 let Some(right) = side else { return Key::Pass };
+                if (if right { &self.right } else { &self.left }).kind == Kind::QuickView {
+                    return Key::Taken;
+                }
                 self.right_active = right;
                 if let Some(index) = self.active().entry_at(col, row) {
                     self.active().cursor = index;
@@ -3191,6 +3198,12 @@ mod tests {
         assert!(first > 1, "scrolled: {:?}", rows[0]);
         // the wheel did not move the file panel's cursor
         assert_eq!(panels.left.current().unwrap().name, "long.txt");
+        // a click in the quick view leaves the focus on the file panel
+        let was = panels.right_active;
+        for button in [MouseButton::Left, MouseButton::Right] {
+            panels.mouse(wheel(MouseEventKind::Down(button), 60), false);
+            assert_eq!(panels.right_active, was);
+        }
         // typing is refused: the text of the file is not changed by keys sent to a quick view
         panels.right_active = true;
         panels.key(key(KeyCode::Char('Z')), true);
