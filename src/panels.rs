@@ -1332,6 +1332,8 @@ pub struct Panels {
     /// shown, moved from file to file (opening an editor per cursor step would be
     /// slow), and where it was last drawn (to take the wheel and the keys).
     qeditor: Option<crate::fresh_view::EditorView>,
+    /// The mouse is selecting text in the quick view.
+    qdrag: bool,
     qrect: (u16, u16, u16, u16),
     /// The screen size at the last paint.
     screen: (u16, u16),
@@ -1349,7 +1351,7 @@ impl Panels {
         let mut right = Panel::new(dir.clone());
         right.filter_area = 1;
         right.reload(None);
-        Self { left: Panel::new(dir), right, right_active: false, info: None, qview: None, qeditor: None, qrect: (0, 0, 0, 0), screen: (0, 0), key_ends: Vec::new(), fast: None, fast_cursor: None }
+        Self { left: Panel::new(dir), right, right_active: false, info: None, qview: None, qeditor: None, qdrag: false, qrect: (0, 0, 0, 0), screen: (0, 0), key_ends: Vec::new(), fast: None, fast_cursor: None }
     }
 
     /// Save setup: each panel's folder, view and sort (Far's Panel.Left / Panel.Right).
@@ -1950,6 +1952,20 @@ impl Panels {
         if self.fast.is_some() && matches!(event.kind, MouseEventKind::Down(_)) {
             self.fast = None;
             return Key::Taken;
+        }
+        // text of the quick view is selected with the mouse and copied when it is let go
+        if matches!(event.kind, MouseEventKind::Down(MouseButton::Left) | MouseEventKind::Drag(MouseButton::Left) | MouseEventKind::Up(MouseButton::Left))
+            && self.qview.as_ref().is_some_and(|state| state.text())
+            && let Some(view) = &mut self.qeditor
+        {
+            let (qx, qy, qw, qh) = self.qrect;
+            let inside = event.column >= qx && event.column < qx + qw && event.row >= qy && event.row < qy + qh;
+            if inside || self.qdrag {
+                let at = MouseEvent { column: event.column, row: event.row, ..event };
+                let _ = view.event(crossterm::event::Event::Mouse(at), qx, qy);
+                self.qdrag = crate::viewer::copy_on_select(view, at, self.qdrag, qx, qy);
+                return Key::Taken;
+            }
         }
         let (cols, rows) = self.screen;
         let col = event.column;

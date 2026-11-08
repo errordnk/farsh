@@ -34,6 +34,8 @@ pub struct Viewer {
     name: String,
     /// The text, in fresh (read-only, or editable: `edit`).
     editor: Option<EditorView>,
+    /// The mouse selected text (a drag): letting go of the button copies it.
+    dragged: bool,
     /// F4: the text can be changed (F2 saves).
     edit: bool,
     /// The file's size, for the status bar.
@@ -120,6 +122,7 @@ impl Viewer {
         Self {
             name: name.into(),
             editor: None,
+            dragged: false,
             edit: false,
             size: 0,
             page: 20,
@@ -197,6 +200,7 @@ impl Viewer {
             }
         } else if let Some(editor) = &mut self.editor {
             let _ = editor.event(Event::Mouse(event), 0, 1);
+            self.dragged = copy_on_select(editor, event, self.dragged, 0, 1);
         }
     }
 
@@ -428,6 +432,22 @@ impl Viewer {
             crate::panels::paint_labels(grid, &labels);
         }
         cursor
+    }
+}
+
+/// A text selected with the mouse goes to the clipboard when the button is let
+/// go, as in a terminal: a drag is followed by the editor's own copy (Ctrl+C).
+/// Returns whether a drag is going on.
+pub fn copy_on_select(editor: &mut EditorView, event: MouseEvent, dragging: bool, x: u16, y: u16) -> bool {
+    use crossterm::event::{MouseButton, MouseEventKind};
+    match event.kind {
+        MouseEventKind::Drag(MouseButton::Left) => true,
+        MouseEventKind::Up(MouseButton::Left) if dragging => {
+            let _ = editor.event(Event::Key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)), x, y);
+            false
+        }
+        MouseEventKind::Down(_) | MouseEventKind::Up(_) => false,
+        _ => dragging,
     }
 }
 
