@@ -282,6 +282,9 @@ struct App {
     /// What a dialog or viewer on top was opened over (a list, Find's
     /// results): it comes back when that closes.
     under: Vec<Overlay>,
+    /// Ctrl+O over a viewer, an editor, a list...: they wait here (with what they were
+    /// opened over) while the shell's screen is shown, and come back with Ctrl+O.
+    stashed: Option<(Overlay, Vec<Overlay>)>,
     /// Far's command, view/edit and folder histories.
     commands: history::History,
     views: history::History,
@@ -349,6 +352,7 @@ impl App {
             last_mask: "*.*".into(),
             last_command: String::new(),
             under: Vec::new(),
+            stashed: None,
             commands: history::History::load(history::Which::Commands),
             views: history::History::load(history::Which::Views),
             folders: history::History::load(history::Which::Folders),
@@ -404,6 +408,14 @@ impl App {
             {
                 self.panels_visible = true;
                 self.panels.refresh(editing.name.as_deref());
+                dirty = true;
+            }
+            // Ctrl+O again (the panels are asked for): the window that waited comes back instead
+            if self.panels_visible
+                && let Some((overlay, under)) = self.stashed.take()
+            {
+                self.overlay = overlay;
+                self.under = under;
                 dirty = true;
             }
             if self.poll_job() {
@@ -628,6 +640,18 @@ impl App {
                 return;
             }
         };
+        // Ctrl+O over a window shows the shell's screen, as over the panels; it brings the window back
+        if key.code == KeyCode::Char('o')
+            && key.modifiers == KeyModifiers::CONTROL
+            && !matches!(self.overlay, Overlay::None | Overlay::Dialog(_) | Overlay::Job(..))
+            && self.stashed.is_none()
+            && self.shell.ctrl_o_is_ours()
+        {
+            let overlay = std::mem::replace(&mut self.overlay, Overlay::None);
+            self.stashed = Some((overlay, std::mem::take(&mut self.under)));
+            self.panels_visible = false;
+            return;
+        }
         match std::mem::replace(&mut self.overlay, Overlay::None) {
             Overlay::Dialog(mut dialog) => match dialog.key(key) {
                 dialog::Outcome::Open => self.overlay = Overlay::Dialog(dialog),
