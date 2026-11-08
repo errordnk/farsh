@@ -173,7 +173,7 @@ fn viewer_config(config: &mut fresh::config::Config) {
     config.editor.line_numbers = crate::settings::bool("Viewer.ShowLineNumbers");
     config.editor.line_wrap = true;
     config.editor.show_vertical_scrollbar = false;
-    config.editor.highlight_current_line = false;
+    config.editor.highlight_current_line = crate::settings::bool("Viewer.HighlightCurrentLine");
     // Viewer settings: Tab size
     config.editor.tab_size = crate::settings::int("Viewer.TabSize").clamp(1, 512) as usize;
 }
@@ -190,7 +190,7 @@ fn editor_config(config: &mut fresh::config::Config) {
     config.editor.line_numbers = crate::settings::bool("Editor.ShowLineNumbers");
     config.editor.line_wrap = false;
     config.editor.show_vertical_scrollbar = false;
-    config.editor.highlight_current_line = false;
+    config.editor.highlight_current_line = crate::settings::bool("Editor.HighlightCurrentLine");
     // Editor settings: Tab size
     config.editor.tab_size = crate::settings::int("Editor.TabSize").clamp(1, 512) as usize;
 }
@@ -244,6 +244,14 @@ fn json_color(color: Color) -> serde_json::Value {
 pub fn theme_json(text: &str, selected: &str) -> String {
     let (fg, bg) = (json_color(colors::fg(text)), json_color(colors::bg(text)));
     // muted, as in fresh itself: Far's dark gray (the same as comments) on the text background
+    // the current line: the background a fifth of the way to the text
+    let current_line = match (colors::bg(text), colors::fg(text)) {
+        (Color::Rgb { r, g, b }, Color::Rgb { r: fr, g: fg_, b: fb }) => {
+            let mix = |a: u8, z: u8| (u16::from(a) * 4 / 5 + u16::from(z) / 5) as u8;
+            serde_json::json!([mix(r, fr), mix(g, fg_), mix(b, fb)])
+        }
+        _ => bg.clone(),
+    };
     let line_numbers = json_color(palette::fg(palette::DARK_GRAY));
     let (sel_fg, sel_bg) = (json_color(colors::fg(selected)), json_color(colors::bg(selected)));
     let syntax: serde_json::Map<String, serde_json::Value> =
@@ -252,7 +260,7 @@ pub fn theme_json(text: &str, selected: &str) -> String {
         "name": "farsh",
         "extends": "builtin://dark",
         "editor": {
-            "bg": bg, "after_eof_bg": bg, "fg": fg, "current_line_bg": bg,
+            "bg": bg, "after_eof_bg": bg, "fg": fg, "current_line_bg": current_line,
             "selection_bg": sel_bg, "selection_fg": sel_fg,
             "line_number_bg": bg, "line_number_fg": line_numbers,
         },

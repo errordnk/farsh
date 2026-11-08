@@ -137,6 +137,8 @@ const DEFAULTS: &[(&str, Def)] = &[
     ("Editor.TabSize", Int(8)),
     ("Editor.ShowKeyBar", Bool(true)),
     ("Editor.ShowLineNumbers", Bool(true)),
+    ("Editor.HighlightCurrentLine", Bool(true)),
+    ("Viewer.HighlightCurrentLine", Bool(true)),
     ("Viewer.ShowLineNumbers", Bool(true)),
     ("Viewer.ShowArrows", Bool(true)),
     ("Viewer.Visible0x00", Bool(false)),
@@ -166,7 +168,7 @@ fn read_file() -> Map<String, Value> {
     // (without the line numbers column, which the layout tests do not expect: the default
     // is checked against DEFAULTS in `line_numbers_are_on_by_default`)
     if cfg!(test) {
-        let off = |key: &str| (key.to_string(), serde_json::json!({ "ShowLineNumbers": false }));
+        let off = |key: &str| (key.to_string(), serde_json::json!({ "ShowLineNumbers": false, "HighlightCurrentLine": false }));
         return [off("Viewer"), off("Editor")].into_iter().collect();
     }
     std::fs::read_to_string(path()).ok().and_then(|text| serde_json::from_str::<Value>(&text).ok()).and_then(|v| v.as_object().cloned()).unwrap_or_default()
@@ -361,7 +363,7 @@ mod tests {
 
     #[test]
     fn line_numbers_are_on_by_default_in_the_viewer_and_the_editor() {
-        for key in ["Viewer.ShowLineNumbers", "Editor.ShowLineNumbers"] {
+        for key in ["Viewer.ShowLineNumbers", "Editor.ShowLineNumbers", "Viewer.HighlightCurrentLine", "Editor.HighlightCurrentLine"] {
             assert!(matches!(default(key), Some(Bool(true))), "{key}");
         }
     }
