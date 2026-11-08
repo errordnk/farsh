@@ -151,9 +151,9 @@ impl Viewer {
                 if std::mem::take(&mut self.media_end) {
                     self.media_top = total.saturating_sub(height as usize);
                 }
-                // Som paints a little more than the rows it asked for: the last of them may be scrolled
-                // up to the top, so that the end of the text can be seen
-                self.media_top = self.media_top.min(total.saturating_sub(1));
+                // Som grows the rows to the real height of the text: the last row of it stops at the
+                // bottom of the window, and scrolling back starts at once (nothing is "scrolled past")
+                self.media_top = self.media_top.min(total.saturating_sub(height as usize));
                 let shown = total.saturating_sub(self.media_top).min(height as usize) as u16;
                 grid.place_from(x, y, width, shown, self.media_top as u16, media.ids(), bg);
             }

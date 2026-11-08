@@ -2315,7 +2315,11 @@ impl Panels {
                         }
                         crate::qview::paint(grid, x, width, height, active, self.qview.as_mut(), &mut self.qeditor);
                     }
-                    None => crate::qview::paint(grid, x, width, height, active, None, &mut self.qeditor),
+                    None => {
+                        // nothing under the cursor (`..`, an archive): what played before stops
+                        self.qview = None;
+                        crate::qview::paint(grid, x, width, height, active, None, &mut self.qeditor)
+                    }
                 }
             }
         }
