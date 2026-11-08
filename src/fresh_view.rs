@@ -164,13 +164,13 @@ impl Backend for GridBackend {
 }
 
 /// How the viewer's text looks (the quick view's, and F3's): Far's viewer has
-/// no line numbers, no current-line band and no scroll bar by default (its
+/// line numbers only as a setting (on here), no current-line band and no scroll bar by default (its
 /// `Viewer.ShowScrollbar`), and wraps lines in the quick view. No animations: a
 /// viewer that follows the cursor of a panel would slide and trail on every file
 /// (the editor, F4, keeps them).
 fn viewer_config(config: &mut fresh::config::Config) {
     config.editor.animations = false;
-    config.editor.line_numbers = false;
+    config.editor.line_numbers = crate::settings::bool("Viewer.ShowLineNumbers");
     config.editor.line_wrap = true;
     config.editor.show_vertical_scrollbar = false;
     config.editor.highlight_current_line = false;
@@ -187,7 +187,7 @@ pub fn viewer_options() -> EmbedOptions {
 /// current-line band and no wrapping by default; the animations stay (the
 /// cursor's trail), unlike in the viewers.
 fn editor_config(config: &mut fresh::config::Config) {
-    config.editor.line_numbers = false;
+    config.editor.line_numbers = crate::settings::bool("Editor.ShowLineNumbers");
     config.editor.line_wrap = false;
     config.editor.show_vertical_scrollbar = false;
     config.editor.highlight_current_line = false;

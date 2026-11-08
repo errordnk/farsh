@@ -255,6 +255,7 @@ pub fn viewer() -> Dialog {
     b.check("Viewer.ShowArrows", "Show scrolling arro&ws");
     b.check("Viewer.Visible0x00", "Visible '\\&0'");
     b.check("Viewer.ShowScrollbar", "Show scro&llbar");
+    b.check("Viewer.ShowLineNumbers", "Show line &numbers");
     b.end_columns();
     b.separator(None);
     b.start_columns();
@@ -284,6 +285,8 @@ pub fn editor() -> Dialog {
     b.check("Editor.UseExternalEditor", "Use external editor for &F4 instead of Alt+F4");
     b.text("Editor &command:");
     b.edit("Editor.ExternalEditorName", 64);
+    b.separator(Some("Internal editor"));
+    b.check("Editor.ShowLineNumbers", "Show line &numbers");
     b.ok_cancel();
     b.build(Settings::Editor)
 }

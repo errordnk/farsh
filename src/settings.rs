@@ -136,6 +136,8 @@ const DEFAULTS: &[(&str, Def)] = &[
     ("Viewer.TabSize", Int(8)),
     ("Editor.TabSize", Int(8)),
     ("Editor.ShowKeyBar", Bool(true)),
+    ("Editor.ShowLineNumbers", Bool(true)),
+    ("Viewer.ShowLineNumbers", Bool(true)),
     ("Viewer.ShowArrows", Bool(true)),
     ("Viewer.Visible0x00", Bool(false)),
     ("Viewer.ShowScrollbar", Bool(false)),
@@ -161,8 +163,11 @@ static SETTINGS: RwLock<Option<Map<String, Value>>> = RwLock::new(None);
 
 fn read_file() -> Map<String, Value> {
     // the tests see Far's defaults, not the user's file
+    // (without the line numbers column, which the layout tests do not expect: the default
+    // is checked against DEFAULTS in `line_numbers_are_on_by_default`)
     if cfg!(test) {
-        return Map::new();
+        let off = |key: &str| (key.to_string(), serde_json::json!({ "ShowLineNumbers": false }));
+        return [off("Viewer"), off("Editor")].into_iter().collect();
     }
     std::fs::read_to_string(path()).ok().and_then(|text| serde_json::from_str::<Value>(&text).ok()).and_then(|v| v.as_object().cloned()).unwrap_or_default()
 }
@@ -347,5 +352,17 @@ pub fn set_int(key: &str, n: i64) {
 pub fn set_string(key: &str, text: &str) {
     if string(key) != text || stored(key).is_some() {
         set(key, Value::from(text));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn line_numbers_are_on_by_default_in_the_viewer_and_the_editor() {
+        for key in ["Viewer.ShowLineNumbers", "Editor.ShowLineNumbers"] {
+            assert!(matches!(default(key), Some(Bool(true))), "{key}");
+        }
     }
 }
