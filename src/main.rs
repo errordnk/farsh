@@ -417,6 +417,16 @@ impl App {
             {
                 dirty = true;
             }
+            // what Som could not show is an error as in Far: a dialog (a viewer that cannot show its file is closed)
+            let failure = match &mut self.overlay {
+                Overlay::Viewer(viewer) => viewer.take_failure(),
+                Overlay::None if self.panels_visible => self.panels.take_failure(),
+                _ => None,
+            };
+            if let Some(message) = failure {
+                self.overlay = Overlay::Dialog(Dialog::error(&dialog::wrap_message(&message, 64)));
+                dirty = true;
+            }
             if let Overlay::Find(results) = &mut self.overlay
                 && results.poll()
             {

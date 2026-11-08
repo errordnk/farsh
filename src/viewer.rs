@@ -36,6 +36,8 @@ pub struct Viewer {
     editor: Option<EditorView>,
     /// The mouse selected text (a drag): letting go of the button copies it.
     dragged: bool,
+    /// The failure of the transfer to Som was shown in a dialog.
+    reported: bool,
     /// F4: the text can be changed (F2 saves).
     edit: bool,
     /// The file's size, for the status bar.
@@ -123,6 +125,7 @@ impl Viewer {
             name: name.into(),
             editor: None,
             dragged: false,
+            reported: false,
             edit: false,
             size: 0,
             page: 20,
@@ -202,6 +205,18 @@ impl Viewer {
             let _ = editor.event(Event::Mouse(event), 0, 1);
             self.dragged = copy_on_select(editor, event, self.dragged, 0, 1);
         }
+    }
+
+    /// What went wrong with the placement, once: the screen answers it with
+    /// Far's error dialog (the viewer also says "failed" in its bar).
+    pub fn take_failure(&mut self) -> Option<String> {
+        if self.reported {
+            return None;
+        }
+        let crate::srp::Status::Failed(message) = self.media.as_ref()?.status() else { return None };
+        self.reported = true;
+        Some(format!("{}
+{message}", self.name))
     }
 
     /// The editor goes about its own business (a file read, highlighting, an

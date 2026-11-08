@@ -117,6 +117,11 @@ impl State {
         Self { path, viewer, scan, phase, since: std::time::Instant::now(), debounce: DEBOUNCE, opened: false, error: None }
     }
 
+    /// A failure of the file's placement, once (see `Viewer::take_failure`).
+    pub fn take_failure(&mut self) -> Option<String> {
+        self.viewer.as_mut().and_then(Viewer::take_failure)
+    }
+
     /// The placement of the file shown changed (a new track) and is not drawn yet.
     pub fn viewer_busy(&self) -> bool {
         self.viewer.as_ref().is_some_and(Viewer::busy)

@@ -1586,6 +1586,15 @@ impl Panels {
                 || self.qeditor.as_mut().is_some_and(|view| view.next_frame().is_some()))
     }
 
+    /// A failure of what the quick view shows (a file Som could not play), once.
+    pub fn take_failure(&mut self) -> Option<String> {
+        let shown = |panel: &Panel| panel.visible && panel.kind == Kind::QuickView;
+        if !(shown(&self.left) || shown(&self.right)) {
+            return None;
+        }
+        self.qview.as_mut().and_then(crate::qview::State::take_failure)
+    }
+
     /// The quick view's editor goes about its own business (a file read, the
     /// highlighting, an animation): `true` when what it shows has changed.
     pub fn tick(&mut self) -> bool {

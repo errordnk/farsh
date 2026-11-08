@@ -1163,6 +1163,27 @@ fn buttons_len(buttons: &[Button]) -> u16 {
 }
 
 /// The parts of an item along its row.
+/// `text` with each line broken at spaces to at most `width` characters, as an
+/// error dialog wants it.
+pub fn wrap_message(text: &str, width: usize) -> String {
+    let mut out = Vec::new();
+    for line in text.lines() {
+        let mut current = String::new();
+        for word in line.split(' ') {
+            if !current.is_empty() && current.chars().count() + 1 + word.chars().count() > width {
+                out.push(std::mem::take(&mut current));
+            }
+            if !current.is_empty() {
+                current.push(' ');
+            }
+            current.push_str(word);
+        }
+        out.push(current);
+    }
+    out.join("
+")
+}
+
 #[cfg(test)]
 fn spans(item: &Item, frame: &Frame) -> Vec<Span> {
     spans_at(item, frame, None)
@@ -2644,5 +2665,16 @@ mod tests {
         assert_eq!(at_col(&rows[10], 31, 9), "hard link");
         assert_eq!(at_col(&rows[12], 7, 33), "[ ] Process multiple destinations");
         assert!(rows[16].contains("{ Create link }") && rows[16].contains("[ Filter ]") && rows[16].contains("[ Cancel ]"), "{}", rows[16]);
+    }
+
+    #[test]
+    fn a_long_error_is_broken_into_lines_that_fit_the_dialog() {
+        let wrapped = wrap_message("name.m3u
+user:onyourwave: Yandex Music radio request failed: timeout: connect", 30);
+        assert_eq!(wrapped, "name.m3u
+user:onyourwave: Yandex Music
+radio request failed: timeout:
+connect");
+        assert!(wrapped.lines().all(|line| line.chars().count() <= 30));
     }
 }
