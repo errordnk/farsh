@@ -446,6 +446,24 @@ mod tests {
     }
 
     #[test]
+    fn a_prompt_redrawn_after_a_cd_keeps_its_glyphs() {
+        let Some(program) = windows_powershell_or_skip() else { return };
+        let mut shell = Shell::spawn_program(&program, 100, 30).unwrap();
+        settle(&mut shell);
+        // a prompt of the kind the user has: a glyph outside the console's code page
+        shell.run("$global:__p = $function:prompt; function global:prompt { \"$([char]0xF17A)$([char]0xBB) \" + (& $global:__p) }");
+        settle(&mut shell);
+        let target = std::env::temp_dir().canonicalize().unwrap();
+        let target = PathBuf::from(target.display().to_string().trim_start_matches(r"\\?\"));
+        shell.cd(&target);
+        settle(&mut shell);
+        let screen = shell.parser.screen().contents();
+        assert!(screen.contains('\u{F17A}') && !screen.lines().any(|l| l.contains('?')), "{screen}");
+        assert!(shell.command_line_is_empty(), "{:?}", shell.cursor_line());
+        shell.write(b"exit\r", true);
+    }
+
+    #[test]
     fn a_hooked_shell_counts_a_prompt_only_when_the_command_ends() {
         let Some(program) = windows_powershell_or_skip() else { return };
         let mut shell = Shell::spawn_program(&program, 100, 30).unwrap();

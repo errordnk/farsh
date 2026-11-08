@@ -89,7 +89,7 @@ const POWERSHELL_HOOK: &str = "$global:__farsh_prompt = $function:prompt; \
 function global:prompt { \
 $p = (Get-Location).ProviderPath -replace '\\\\', '/'; \
 [Console]::Out.Write(\"$([char]27)]7;file:///$p$([char]7)\"); \
-& $global:__farsh_prompt }; try { Set-PSReadLineKeyHandler -Chord 'Ctrl+Alt+F12' -ScriptBlock { Set-Location -LiteralPath ([IO.File]::ReadAllText($env:FARSH_CDFILE)); [Microsoft.PowerShell.PSConsoleReadLine]::InvokePrompt() } } catch {}";
+& $global:__farsh_prompt }; try { Set-PSReadLineKeyHandler -Chord 'Ctrl+Alt+F12' -ScriptBlock { Set-Location -LiteralPath ([IO.File]::ReadAllText($env:FARSH_CDFILE)); $e = [Console]::OutputEncoding; [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false); \n[Microsoft.PowerShell.PSConsoleReadLine]::InvokePrompt(); [Console]::OutputEncoding = $e } } catch {}";
 
 /// What farsh sends to a PowerShell on Windows to make it read the folder in the
 /// `FARSH_CDFILE` file and go there: the key the hook above binds. The shell
