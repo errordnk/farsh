@@ -106,7 +106,7 @@ const KEY_BARS: [KeyBarLabels; 4] = {
 
 /// The key bar's labels for the modifiers held: one modifier changes them,
 /// two or more leave the plain ones (farsh has no keys with two modifiers).
-fn key_bar_labels(held: u8) -> impl Iterator<Item = &'static str> {
+pub(crate) fn key_bar_labels(held: u8) -> impl Iterator<Item = &'static str> {
     use crate::modkeys::{ALT, CTRL, SHIFT};
     let russian = crate::lang::russian();
     let set = match held & (SHIFT | CTRL | ALT) {
@@ -2405,7 +2405,9 @@ impl Panels {
     /// The key bar with the panels' labels, under the panels' columns (the
     /// user's call, not Far's even row): see [`Self::key_spans`].
     fn paint_key_bar(&mut self, grid: &mut Grid) {
-        let labels: Vec<&'static str> = key_bar_labels(crate::modkeys::held()).collect();
+        // Ctrl+Q has a set of its own
+        let set = if self.quick_layout(grid.cols).is_some() { crate::keybar::Set::QuickView } else { crate::keybar::Set::Main };
+        let labels: Vec<&'static str> = crate::keybar::labels(set, crate::modkeys::held(), self.qview.as_ref().is_some_and(|state| state.text())).to_vec();
         let keys = self.key_spans(grid.cols).unwrap_or_else(|| numbered(even_spans(0, grid.cols, (grid.cols as usize / 8).clamp(1, 12))));
         self.key_ends = paint_keys(grid, &labels, &keys);
     }
@@ -3147,7 +3149,7 @@ mod tests {
         // the command line is the row above the key bar, and the key bar is all twelve keys
         // in one even row (the narrow panel has no room for six of its own)
         assert!(panels.key_spans(120).is_none());
-        for label in ["1Help", "3View", "4Edit", "5Copy", "10Quit", "12Screen"] {
+        for label in ["1Help", "3View", "4Edit", "9ConfMn", "10Quit", "12Screen"] {
             assert!(rows[24].contains(label), "{label}: {:?}", rows[24]);
         }
         assert_eq!(panels.key_ends.len(), 12);

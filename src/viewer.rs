@@ -432,18 +432,8 @@ impl Viewer {
         }
         // the key bar: only what works here has a label
         if keys {
-            let mut labels = [""; 12];
-            labels[2] = crate::help::msg("Quit", "Выход");
-            labels[9] = crate::help::msg("Quit", "Выход");
-            if self.edit {
-                // F3 is the viewer's; F6 goes to it from the editor
-                labels[1] = crate::help::msg("Save", "Сохран");
-                labels[2] = "";
-                labels[5] = crate::help::msg("View", "Просм");
-            } else if self.editor.is_some() {
-                labels[5] = crate::help::msg("Edit", "Редакт");
-            }
-            labels[11] = crate::help::msg("Screen", "Экраны");
+            let set = if self.edit { crate::keybar::Set::Editor } else { crate::keybar::Set::Viewer };
+            let labels = crate::keybar::labels(set, crate::modkeys::held(), self.editor.is_some());
             crate::panels::paint_labels(grid, &labels);
         }
         cursor

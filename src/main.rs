@@ -28,6 +28,7 @@ mod highlight;
 mod history;
 mod hotplug;
 mod infopanel;
+mod keybar;
 mod keys;
 mod lang;
 mod links;
