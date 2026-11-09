@@ -1774,7 +1774,17 @@ impl Panels {
         let right_active = self.right_active;
         for (is_right, panel) in [(false, &mut self.left), (true, &mut self.right)] {
             let wanted = if is_right == right_active { select.map(String::from).or(keep.clone()) } else { other_keep.clone() };
+            let (was_at, was_top) = (panel.cursor, panel.top);
             panel.reload(wanted.as_deref());
+            // the file the cursor was on is gone (deleted, moved): the cursor stays where it was,
+            // now on what followed it, not thrown to the top of the folder
+            if let Some(name) = &wanted
+                && panel.current().is_some_and(|entry| &entry.name != name)
+                && !panel.entries.iter().any(|entry| &entry.name == name)
+            {
+                panel.cursor = was_at.min(panel.entries.len().saturating_sub(1));
+                panel.top = was_top;
+            }
         }
     }
 
@@ -2740,6 +2750,27 @@ mod tests {
         assert_eq!(panels.key(key(KeyCode::F(3)), true), Key::Ask(Request::View(dir.join("apple.txt"))));
         assert_eq!(panels.key(key(KeyCode::F(4)), true), Key::Ask(Request::Edit(dir.join("apple.txt"))));
         assert_eq!(panels.key(KeyEvent::new(KeyCode::F(4), KeyModifiers::SHIFT), true), Key::Ask(Request::EditNew(dir.clone())));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn after_a_delete_the_cursor_stays_where_the_file_was() {
+        let dir = scratch("delete-cursor");
+        for name in ["a.txt", "b.txt", "c.txt", "d.txt"] {
+            std::fs::write(dir.join(name), name).unwrap();
+        }
+        let mut panels = Panels::new(dir.clone());
+        let at = panels.active().entries.iter().position(|e| e.name == "c.txt").unwrap();
+        panels.active().cursor = at;
+        assert_eq!(panels.active().current().unwrap().name, "c.txt");
+        std::fs::remove_file(dir.join("c.txt")).unwrap();
+        panels.refresh(None);
+        assert_eq!(panels.active().cursor, at, "the cursor did not move");
+        assert_eq!(panels.active().current().unwrap().name, "d.txt", "on what followed the deleted file");
+        // the last one deleted: the cursor goes to the new last one, not to the top
+        std::fs::remove_file(dir.join("d.txt")).unwrap();
+        panels.refresh(None);
+        assert_eq!(panels.active().current().unwrap().name, "zeta.txt", "the last one now");
         std::fs::remove_dir_all(dir).unwrap();
     }
 
