@@ -239,13 +239,27 @@ pub fn run(service: &'static str, station: &str, shared: &std::sync::Arc<Shared>
     let mut cursor = 0usize;
     let mut failures_in_a_row = 0usize;
     let mut first = true;
+    // The next track made ready while this one plays (its id, and the fetch the daemon has begun),
+    // and the next batch being asked for in the meantime (the id it follows).
+    let mut prefetched: Option<(String, super::play::Fetch)> = None;
+    let mut pending: Option<(String, std::thread::JoinHandle<Result<Vec<RadioEntry>, String>>)> = None;
     loop {
         if shared.cancelled() {
+            if let Some((_, fetch)) = prefetched.take() {
+                fetch.abandon();
+            }
             return Ok(());
         }
         shared.step.store(0, Ordering::Release);
-        // The track after this one is wanted before this one starts: its tags and cover are
-        // fetched while this one plays. At the end of the batch the next batch is asked for now.
+        // the batch asked for ahead is here by now (a track lasts minutes); one that no longer
+        // follows what is queued (a branch changed the queue) is dropped
+        if let Some((after, handle)) = pending.take()
+            && let Ok(Ok(more)) = handle.join()
+            && played.last().is_some_and(|last| last.track.id == after)
+        {
+            played.extend(more);
+        }
+        // Without the lookahead below (the first batch is a single track, a branch...) the next batch is asked for now.
         if cursor + 1 >= played.len() {
             let (station, last) = (played[cursor].station.clone(), played[cursor].track.id.clone());
             if let Ok(more) = fetch_entries(service, &station, Some(&last)) {
@@ -256,19 +270,36 @@ pub fn run(service: &'static str, station: &str, shared: &std::sync::Arc<Shared>
         let entry = &played[cursor];
         *lock(&radio.current) =
             Some(Current { id: entry.track.id.clone(), liked: radio.effective_like(&entry.track.id, entry.track.liked) });
-        let ids = if first {
-            shared.ids()
-        } else {
-            let ids = new_ids();
-            shared.set_ids(ids);
-            ids
+        // the placement made ready ahead is this track's (the queue did not change meanwhile), else it is given up
+        let mut prepared = None;
+        let ids = match prefetched.take() {
+            Some((id, fetch)) if id == entry.track.id => {
+                let ids = fetch.ids;
+                shared.set_ids(ids);
+                prepared = Some(fetch);
+                ids
+            }
+            other => {
+                if let Some((_, stale)) = other {
+                    stale.abandon();
+                }
+                if first {
+                    shared.ids()
+                } else {
+                    let ids = new_ids();
+                    shared.set_ids(ids);
+                    ids
+                }
+            }
         };
         first = false;
         // one more than what is known, so the next button never goes away
         shared.set_position(Some((cursor, played.len() + 1)));
+        // The next button of the widget is not active until the next track is ready to play: this one
+        // is announced as the last (`len`), and again when the next one is ready (below).
         let position = super::play::Position {
             index: cursor,
-            len: played.len() + 1,
+            len: cursor + 1,
             title: Some(entry.track.title.clone()),
             cue: None,
             looping: false,
@@ -277,8 +308,50 @@ pub fn run(service: &'static str, station: &str, shared: &std::sync::Arc<Shared>
             next: played.get(cursor + 1).map(|following| announced_track(&following.track)),
         };
         feedback(service, Some(entry), &entry.station, &entry.batch_id, RadioEvent::TrackStarted, 0.0);
+        // told again what is known now (the track after this one may be known since it was made ready)
+        if prepared.is_some() {
+            super::play::announce(ids, None, &entry.track.target, &position);
+        }
+        // The track after this one is made ready now, while this one plays: the daemon fetches its
+        // bytes and knows its tags and cover, so that its start is not waited for.
+        if let Some(next) = played.get(cursor + 1) {
+            let next_position = super::play::Position {
+                index: cursor + 1,
+                len: played.len() + 1,
+                title: Some(next.track.title.clone()),
+                cue: None,
+                looping: false,
+                radio: true,
+                current: Some(announced_track(&next.track)),
+                next: played.get(cursor + 2).map(|following| announced_track(&following.track)),
+            };
+            if let Ok(fetch) = super::play::begin_fetch(&next.track.target, &next_position, new_ids()) {
+                prefetched = Some((next.track.id.clone(), fetch));
+            }
+        }
+        // the batch after the next one is asked for ahead, so that no track ever starts with the end of the queue
+        if cursor + 2 >= played.len() && pending.is_none() {
+            let (station, last) = (played[played.len() - 1].station.clone(), played[played.len() - 1].track.id.clone());
+            let after = last.clone();
+            pending = Some((after, std::thread::spawn(move || fetch_entries(service, &station, Some(&last)))));
+        }
+        // the next one ready: the widget's next button comes alive
+        if let Some((_, fetch)) = &prefetched {
+            let (flag, shared, target) = (fetch.ready_flag(), shared.clone(), entry.track.target.clone());
+            let mut with_next = position.clone();
+            with_next.len = played.len() + 1;
+            std::thread::spawn(move || {
+                while !shared.cancelled() && shared.ids() == ids {
+                    if flag.load(Ordering::Acquire) {
+                        super::play::announce(ids, None, &target, &with_next);
+                        return;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+            });
+        }
         let started = std::time::Instant::now();
-        let result = super::play::play_url(&entry.track.target, &position, ids, shared);
+        let result = super::play::play_url(&entry.track.target, &position, ids, shared, prepared);
         let step = shared.step.swap(0, Ordering::AcqRel);
         let heard = started.elapsed().as_secs_f32();
         match result {

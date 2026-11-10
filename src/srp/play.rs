@@ -246,7 +246,7 @@ fn run_list(entries: &[Entry], looping: bool, shared: &Arc<Shared>) -> Result<()
 
 fn play_target(entry: &Entry, position: &Position, ids: (u32, u32), shared: &Arc<Shared>) -> Result<(), String> {
     if is_url(&entry.target) {
-        return play_url(&entry.target, position, ids, shared);
+        return play_url(&entry.target, position, ids, shared, None);
     }
     let path = PathBuf::from(&entry.target);
     match kind_of(&path) {
@@ -256,7 +256,7 @@ fn play_target(entry: &Entry, position: &Position, ids: (u32, u32), shared: &Arc
 }
 
 /// Tells Som which track the placement is, and its CUE track list.
-fn announce(ids: (u32, u32), path: Option<&Path>, target: &str, position: &Position) {
+pub(super) fn announce(ids: (u32, u32), path: Option<&Path>, target: &str, position: &Position) {
     let tags = match (&position.cue, path) {
         // the tags of a CUE sheet's file describe the whole disc, not a track: the sheet is announced instead
         (Some(sheet), _) if sheet.cover.is_none() => Some(TrackTags {
@@ -371,46 +371,108 @@ fn play_file(path: &Path, kind: Kind, position: Option<&Position>, ids: (u32, u3
     Ok(())
 }
 
-/// A URL: the daemon fetches it into its cache itself, so farsh only asks, and
-/// listens for the end of the playback and for a failure of the fetch.
-pub(super) fn play_url(url: &str, position: &Position, ids: (u32, u32), shared: &Arc<Shared>) -> Result<(), String> {
-    let fetch = Arc::new(Channel::connect()?);
-    announce(ids, None, url, position);
+/// A URL placement being made ready: the daemon is told what it is (`AnnounceTrack`) and asked for
+/// its bytes (`FetchResource`), and the fetch is watched for its failure. A radio makes the next
+/// track ready while this one plays, so that when this one ends the next one is in the daemon's cache
+/// with its tags and cover known, and nothing is waited for.
+pub(super) struct Fetch {
+    pub(super) ids: (u32, u32),
+    channel: Arc<Channel>,
+    /// Set when the fetch failed, and later by the end of the playback.
+    ended: Arc<AtomicBool>,
+    /// Set when the daemon has the whole of it: it can be played at once.
+    ready: Arc<AtomicBool>,
+    failure: Arc<Mutex<Option<String>>>,
+    reader: Option<std::thread::JoinHandle<()>>,
+}
 
-    // registered only to hear the end of the playback: the daemon never forwards ranges for a fetched key
-    let responder = Arc::new(Channel::connect()?);
-    responder.send(&SrvRequest::RegisterRangeResponder { session_id: ids.0, file_id: ids.1 })?;
-    let ended = Arc::new(AtomicBool::new(false));
-    if position.radio {
-        super::radio::announce_state(shared, ids);
+impl Drop for Fetch {
+    fn drop(&mut self) {
+        self.close();
     }
-    let thread = watch_responder(responder.clone(), ids, shared.clone(), ended.clone(), |_, _, _| {});
+}
 
+impl Fetch {
+    /// Gives it up unplayed (the radio went another way): the placement is stopped, nothing is left in the daemon.
+    pub(super) fn abandon(mut self) {
+        self.close();
+        if let Ok(channel) = Channel::connect() {
+            let _ = channel.send(&SrvRequest::StopPlayback { session_id: self.ids.0, file_id: self.ids.1 });
+        }
+    }
+
+    /// Whether the daemon has the bytes of this one (its start waits for nothing).
+    pub(super) fn ready_flag(&self) -> Arc<AtomicBool> {
+        self.ready.clone()
+    }
+
+    fn close(&mut self) {
+        self.channel.shutdown();
+        if let Some(reader) = self.reader.take() {
+            let _ = reader.join();
+        }
+    }
+}
+
+/// Announces `ids` and starts the daemon's fetch of `url`.
+pub(super) fn begin_fetch(url: &str, position: &Position, ids: (u32, u32)) -> Result<Fetch, String> {
+    let channel = Arc::new(Channel::connect()?);
+    announce(ids, None, url, position);
+    let ended = Arc::new(AtomicBool::new(false));
+    let ready = Arc::new(AtomicBool::new(false));
     let failure: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
-    fetch.send(&SrvRequest::FetchResource { session_id: ids.0, file_id: ids.1, target: url.to_string(), base_dir: None })?;
+    channel.send(&SrvRequest::FetchResource { session_id: ids.0, file_id: ids.1, target: url.to_string(), base_dir: None })?;
+    // The daemon takes the requests of a connection one after another, and `FetchResource` is not
+    // answered when it succeeds: a request that has an answer, sent after it, is answered once the
+    // fetch is done. That answer says the bytes are all there.
+    channel.send(&SrvRequest::ListSessions { client_id: Some("farsh-fetch-done".to_string()) })?;
     let reader = {
-        let (fetch, ended, failure) = (fetch.clone(), ended.clone(), failure.clone());
+        let (channel, ended, failure, ready) = (channel.clone(), ended.clone(), failure.clone(), ready.clone());
         std::thread::spawn(move || {
-            while let Ok(message) = fetch.read_raw() {
-                if let Ok(SrvResponse::FetchFailed { reason, .. }) = serde_json::from_slice::<SrvResponse>(&message) {
-                    *failure.lock().unwrap_or_else(|e| e.into_inner()) = Some(reason);
-                    ended.store(true, Ordering::Release);
-                    return;
+            while let Ok(message) = channel.read_raw() {
+                match serde_json::from_slice::<SrvResponse>(&message) {
+                    Ok(SrvResponse::FetchFailed { reason, .. }) => {
+                        *failure.lock().unwrap_or_else(|e| e.into_inner()) = Some(reason);
+                        ended.store(true, Ordering::Release);
+                        return;
+                    }
+                    Ok(SrvResponse::Sessions(_)) => ready.store(true, Ordering::Release),
+                    _ => {}
                 }
             }
         })
     };
+    Ok(Fetch { ids, channel, ended, ready, failure, reader: Some(reader) })
+}
+
+/// A URL: the daemon fetches it into its cache itself, so farsh only asks, and
+/// listens for the end of the playback and for a failure of the fetch. `prepared` is the
+/// fetch begun ahead for these `ids`.
+pub(super) fn play_url(url: &str, position: &Position, ids: (u32, u32), shared: &Arc<Shared>, prepared: Option<Fetch>) -> Result<(), String> {
+    let mut fetch = match prepared {
+        Some(fetch) => fetch,
+        None => begin_fetch(url, position, ids)?,
+    };
+
+    // registered only to hear the end of the playback: the daemon never forwards ranges for a fetched key
+    let responder = Arc::new(Channel::connect()?);
+    responder.send(&SrvRequest::RegisterRangeResponder { session_id: ids.0, file_id: ids.1 })?;
+    if position.radio {
+        super::radio::announce_state(shared, ids);
+    }
+    let ended = fetch.ended.clone();
+    let thread = watch_responder(responder.clone(), ids, shared.clone(), ended.clone(), |_, _, _| {});
     shared.set_status(super::Status::Sent);
 
     wait_for_end(shared, &ended);
     responder.shutdown();
-    fetch.shutdown();
+    fetch.close();
     let _ = thread.join();
-    let _ = reader.join();
     if let Ok(channel) = Channel::connect() {
         let _ = channel.send(&SrvRequest::StopPlayback { session_id: ids.0, file_id: ids.1 });
     }
-    match failure.lock().unwrap_or_else(|e| e.into_inner()).take() {
+    let failure = fetch.failure.lock().unwrap_or_else(|e| e.into_inner()).take();
+    match failure {
         Some(reason) => Err(format!("fetching: {reason}")),
         None => Ok(()),
     }
