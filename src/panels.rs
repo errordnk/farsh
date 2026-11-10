@@ -1233,7 +1233,7 @@ impl Panel {
         if !self.marked.is_empty() && status {
             let marked = self.entries.iter().filter(|e| self.marked.contains(&e.name));
             let (files, dirs, bytes) = marked.fold((0, 0, 0), |(f, d, sum), e| {
-                if e.is_dir { (f, d + 1, sum) } else { (f + 1, d, sum + e.size) }
+                if e.is_dir { (f, d + 1, sum + e.tree_size.unwrap_or(0)) } else { (f + 1, d, sum + e.size) }
             });
             let line = |size: String| format!("Bytes: {size}, files: {files}, folders: {dirs}");
             let mut text = line(listing::group_digits(bytes));
@@ -1244,6 +1244,65 @@ impl Panel {
             }
             grid.put(centered(&text), bottom - 2, &format!(" {text} "), TITLE(), CURSOR_BG());
         }
+    }
+}
+
+/// One folder being counted by F3: a thread adds up the sizes of the files in it
+/// (links are not followed) and stops when this is dropped.
+struct Scan {
+    right: bool,
+    path: PathBuf,
+    name: String,
+    total: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    done: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl Scan {
+    fn start(right: bool, path: PathBuf, name: String) -> Self {
+        use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+        use std::sync::Arc;
+        let total = Arc::new(AtomicU64::new(0));
+        let done = Arc::new(AtomicBool::new(false));
+        let cancel = Arc::new(AtomicBool::new(false));
+        let (worker_total, worker_done, worker_cancel) = (total.clone(), done.clone(), cancel.clone());
+        let root = path.clone();
+        std::thread::spawn(move || {
+            let mut stack = vec![root];
+            while let Some(dir) = stack.pop() {
+                let Ok(read) = std::fs::read_dir(&dir) else { continue };
+                for item in read.flatten() {
+                    if worker_cancel.load(Ordering::Relaxed) {
+                        return;
+                    }
+                    let Ok(meta) = item.metadata() else { continue };
+                    let kind = meta.file_type();
+                    if kind.is_symlink() {
+                        continue;
+                    }
+                    if kind.is_dir() {
+                        #[cfg(windows)]
+                        {
+                            use std::os::windows::fs::MetadataExt;
+                            if meta.file_attributes() & 0x400 != 0 {
+                                continue;
+                            }
+                        }
+                        stack.push(item.path());
+                    } else {
+                        worker_total.fetch_add(meta.len(), Ordering::Relaxed);
+                    }
+                }
+            }
+            worker_done.store(true, Ordering::Relaxed);
+        });
+        Self { right, path, name, total, done, cancel }
+    }
+}
+
+impl Drop for Scan {
+    fn drop(&mut self) {
+        self.cancel.store(true, std::sync::atomic::Ordering::Relaxed);
     }
 }
 
@@ -1323,6 +1382,8 @@ pub enum Key {
 }
 
 pub struct Panels {
+    /// Folders F3 is counting.
+    scans: Vec<Scan>,
     left: Panel,
     right: Panel,
     right_active: bool,
@@ -1353,7 +1414,7 @@ impl Panels {
         let mut right = Panel::new(dir.clone());
         right.filter_area = 1;
         right.reload(None);
-        Self { left: Panel::new(dir), right, right_active: false, info: None, qview: None, qeditor: None, qdrag: false, qrect: (0, 0, 0, 0), screen: (0, 0), key_ends: Vec::new(), fast: None, fast_cursor: None }
+        Self { scans: Vec::new(), left: Panel::new(dir), right, right_active: false, info: None, qview: None, qeditor: None, qdrag: false, qrect: (0, 0, 0, 0), screen: (0, 0), key_ends: Vec::new(), fast: None, fast_cursor: None }
     }
 
     /// Save setup: each panel's folder, view and sort (Far's Panel.Left / Panel.Right).
@@ -1598,11 +1659,44 @@ impl Panels {
     /// The quick view's editor goes about its own business (a file read, the
     /// highlighting, an animation): `true` when what it shows has changed.
     pub fn tick(&mut self) -> bool {
+        let counted = self.poll_scans();
         let shown = |panel: &Panel| panel.visible && panel.kind == Kind::QuickView;
         if !(shown(&self.left) || shown(&self.right)) {
-            return false;
+            return counted;
         }
-        self.qeditor.as_mut().is_some_and(|view| view.tick().unwrap_or(false))
+        self.qeditor.as_mut().is_some_and(|view| view.tick().unwrap_or(false)) || counted
+    }
+
+    /// F3 on folders (Far's "view" of a folder): each is counted in a thread of
+    /// its own and its size appears in the panel as it grows.
+    fn count_folders(&mut self, sources: &[PathBuf]) {
+        let right = self.right_active;
+        for path in sources.iter().filter(|path| path.is_dir()) {
+            let Some(name) = path.file_name().map(|n| n.to_string_lossy().into_owned()) else { continue };
+            self.scans.retain(|scan| !(scan.right == right && scan.name == name));
+            self.scans.push(Scan::start(right, path.clone(), name));
+        }
+    }
+
+    /// Brings the counted sizes into the panels; `true` when something moved.
+    fn poll_scans(&mut self) -> bool {
+        let mut changed = false;
+        let (left, right) = (&mut self.left, &mut self.right);
+        self.scans.retain(|scan| {
+            let panel = if scan.right { &mut *right } else { &mut *left };
+            let parent = scan.path.parent().map(Path::to_path_buf);
+            let Some(entry) = panel.entries.iter_mut().find(|e| e.is_dir && e.name == scan.name) else { return false };
+            if panel.archive.is_some() || parent.as_deref() != Some(panel.dir.as_path()) {
+                return false;
+            }
+            let size = scan.total.load(std::sync::atomic::Ordering::Relaxed);
+            if entry.tree_size != Some(size) {
+                entry.tree_size = Some(size);
+                changed = true;
+            }
+            !scan.done.load(std::sync::atomic::Ordering::Relaxed)
+        });
+        changed
     }
 
     /// The panels' kinds, visibility and long names, for the menu.
@@ -2214,6 +2308,9 @@ impl Panels {
         if matches!(n, 5 | 6) && !sources.is_empty() {
             self.active().save_selection();
         }
+        if n == 3 && file.is_none() {
+            self.count_folders(&sources);
+        }
         let request = match n {
             3 => file.map(Request::View),
             4 => file.map(Request::Edit),
@@ -2643,6 +2740,29 @@ mod tests {
         assert_eq!(panels.key(key(KeyCode::Enter), false), Key::Pass);
         assert_eq!(panels.key(key(KeyCode::Home), false), Key::Pass);
         assert_eq!(panels.key(key(KeyCode::Enter), true), Key::Taken);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn f3_on_a_folder_counts_its_size_and_shows_it() {
+        let dir = scratch("foldersize");
+        std::fs::create_dir_all(dir.join("Alpha/deep")).unwrap();
+        std::fs::write(dir.join("Alpha/one.bin"), vec![0u8; 1000]).unwrap();
+        std::fs::write(dir.join("Alpha/deep/two.bin"), vec![0u8; 234]).unwrap();
+        let mut panels = Panels::new(dir.clone());
+        panels.key(key(KeyCode::Down), true); // Alpha
+        assert_eq!(panels.key(key(KeyCode::F(3)), true), Key::Taken);
+        for _ in 0..200 {
+            panels.tick();
+            if panels.scans.is_empty() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let entry = panels.active_ref().current().unwrap().clone();
+        assert_eq!(entry.name, "Alpha");
+        assert_eq!(entry.tree_size, Some(1234));
+        assert_eq!(listing::size_column(&entry, 8).trim(), "1234");
         std::fs::remove_dir_all(dir).unwrap();
     }
 

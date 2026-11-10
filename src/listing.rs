@@ -23,6 +23,8 @@ pub struct Entry {
     pub changed: Option<SystemTime>,
     /// Space taken on the disk.
     pub allocated: u64,
+    /// A folder's whole size, once F3 has counted it (still growing while it counts).
+    pub tree_size: Option<u64>,
     /// Hidden or system (dimmed, as Far's first highlighting groups do).
     pub hidden: bool,
     /// The 8.3 name, where the volume keeps one (Ctrl+N shows it).
@@ -344,6 +346,9 @@ pub fn status_name(name: &str, width: usize) -> String {
 
 /// Far's Size column for a folder or a reparse point, else the size itself.
 pub fn size_column(entry: &Entry, width: usize) -> String {
+    if let (true, Some(size)) = (entry.is_dir, entry.tree_size) {
+        return file_size(size, width);
+    }
     let have_size = !entry.is_dir && (entry.reparse.is_none() || entry.size > 0);
     if have_size {
         return file_size(entry.size, width);
