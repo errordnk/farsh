@@ -422,10 +422,6 @@ pub(super) fn begin_fetch(url: &str, position: &Position, ids: (u32, u32)) -> Re
     let ready = Arc::new(AtomicBool::new(false));
     let failure: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
     channel.send(&SrvRequest::FetchResource { session_id: ids.0, file_id: ids.1, target: url.to_string(), base_dir: None })?;
-    // The daemon takes the requests of a connection one after another, and `FetchResource` is not
-    // answered when it succeeds: a request that has an answer, sent after it, is answered once the
-    // fetch is done. That answer says the bytes are all there.
-    channel.send(&SrvRequest::ListSessions { client_id: Some("farsh-fetch-done".to_string()) })?;
     let reader = {
         let (channel, ended, failure, ready) = (channel.clone(), ended.clone(), failure.clone(), ready.clone());
         std::thread::spawn(move || {
@@ -436,7 +432,8 @@ pub(super) fn begin_fetch(url: &str, position: &Position, ids: (u32, u32)) -> Re
                         ended.store(true, Ordering::Release);
                         return;
                     }
-                    Ok(SrvResponse::Sessions(_)) => ready.store(true, Ordering::Release),
+                    // the whole of it is in the daemon's cache
+                    Ok(SrvResponse::FetchDone { .. }) => ready.store(true, Ordering::Release),
                     _ => {}
                 }
             }
