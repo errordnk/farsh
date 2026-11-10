@@ -3009,7 +3009,7 @@ dependencies = [
 [[package]]
 name = "srp_client"
 version = "0.8.0"
-source = "git+https://github.com/errordnk/som?rev=26df1e8f373199653315a502efd1498578f6f072#26df1e8f373199653315a502efd1498578f6f072"
+source = "git+https://github.com/errordnk/som?rev=8b172457ac2c18f742608773d0ec442d26040cfa#8b172457ac2c18f742608773d0ec442d26040cfa"
 dependencies = [
  "anyhow",
  "chardetng",

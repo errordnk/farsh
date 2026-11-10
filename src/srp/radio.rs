@@ -7,7 +7,7 @@
 //! the track playing.
 
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicUsize, Ordering};
 
 use super::play::Entry;
 use srp_client::protocol::{NextTrack, RadioControl, RadioEvent, RadioTrack, SrvRequest};
@@ -15,6 +15,16 @@ use super::{Channel, Shared, new_ids};
 
 pub const YANDEX: &str = "yandex";
 pub const MY_WAVE: &str = "user:onyourwave";
+
+/// Radio Paradise: one radio of several stations, which the widget's double chevrons switch.
+pub const PARADISE: &str = "paradise";
+
+/// Radio Paradise's stations: the service's own name of each, how the widget names it, and
+/// the picture it gets in the running line.
+pub const STATIONS: [(&str, &str, &str); 3] = [("main-mix", "Main Mix", "globe"), ("mellow", "Mellow", "moon"), ("rock", "Rock", "guitar")];
+
+/// The step that goes to another station: forward like a "next", but not a skip.
+pub const STATION_JUMP: i32 = 3;
 
 /// The step that enters a branch: forward like a "next", but not a skip - the
 /// track was not rejected, a wave was asked of it.
@@ -48,6 +58,11 @@ pub struct State {
     wave_request: Mutex<Option<WaveRequest>>,
     /// Names the track a branch is built from.
     wave_label: Mutex<Option<String>>,
+    /// Radio Paradise: the station playing (an index of `STATIONS`) and the move the
+    /// chevrons asked for (-1 or 1) that the runner has not taken yet.
+    multi_station: AtomicBool,
+    station: AtomicUsize,
+    station_step: AtomicI32,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -75,17 +90,34 @@ fn names_yandex(line: &str) -> bool {
     line.to_ascii_lowercase().contains("yandex")
 }
 
+/// A playlist line that names Radio Paradise at all (its name or its stream link):
+/// it stands for the radio of its stations.
+fn names_paradise(line: &str) -> bool {
+    line.to_ascii_lowercase().contains("paradise")
+}
+
+/// The station a Radio Paradise line starts from: the one it names (`mellow`, `rock`), else the Main Mix.
+fn paradise_station(line: &str) -> &'static str {
+    let line = line.to_ascii_lowercase();
+    STATIONS.iter().skip(1).find(|(slug, ..)| line.contains(slug)).map_or(STATIONS[0].0, |(slug, ..)| slug)
+}
+
 /// The radio a playlist stands for: its one line. A radio plays on its own, so it
 /// cannot share a playlist with other entries (`Err`); a playlist without a radio
 /// line is `Ok(None)`.
 pub fn radio_in_playlist(entries: &[Entry]) -> Result<Option<(&'static str, String)>, String> {
-    if !entries.iter().any(|entry| names_yandex(&entry.target)) {
+    let yandex = entries.iter().any(|entry| names_yandex(&entry.target));
+    let paradise = entries.iter().find(|entry| names_paradise(&entry.target));
+    if !yandex && paradise.is_none() {
         return Ok(None);
     }
     if entries.len() > 1 {
         return Err("a radio plays on its own, it cannot share a playlist with other entries".to_string());
     }
-    Ok(Some((YANDEX, MY_WAVE.to_string())))
+    match paradise {
+        Some(entry) if !yandex => Ok(Some((PARADISE, paradise_station(&entry.target).to_string()))),
+        _ => Ok(Some((YANDEX, MY_WAVE.to_string()))),
+    }
 }
 
 /// What names the track a branch is made from: "artist - title, year".
@@ -113,8 +145,13 @@ pub fn announce_state(shared: &Shared, ids: (u32, u32)) {
     let liked = lock(&shared.radio.current).as_ref().is_some_and(|track| track.liked);
     let track_wave = shared.radio.track_wave.load(Ordering::Acquire);
     let wave_label = lock(&shared.radio.wave_label).clone();
-    let _ = Channel::connect()
-        .and_then(|channel| channel.send(&SrvRequest::AnnounceRadioState { session_id: ids.0, file_id: ids.1, liked, track_wave, wave_label }));
+    let station = shared.radio.multi_station.load(Ordering::Acquire).then(|| {
+        let (_, name, icon) = STATIONS[shared.radio.station.load(Ordering::Acquire) % STATIONS.len()];
+        srp_client::protocol::RadioStation { name: name.to_string(), icon: icon.to_string() }
+    });
+    let _ = Channel::connect().and_then(|channel| {
+        channel.send(&SrvRequest::AnnounceRadioState { session_id: ids.0, file_id: ids.1, liked, track_wave, wave_label, station })
+    });
 }
 
 /// A click on one of the radio widget's icons.
@@ -129,6 +166,13 @@ pub fn handle_control(shared: &Shared, ids: (u32, u32), control: RadioControl) {
             if let Some((track_id, liked)) = change {
                 lock(&radio.likes).push((track_id.clone(), liked));
                 let _ = Channel::connect().and_then(|channel| channel.send(&SrvRequest::RadioLike { service: YANDEX.to_string(), track_id, liked }));
+            }
+        }
+        RadioControl::PreviousStation | RadioControl::NextStation => {
+            if radio.multi_station.load(Ordering::Acquire) {
+                radio.station_step.store(if control == RadioControl::NextStation { 1 } else { -1 }, Ordering::Release);
+                // the click ends the track: it was not rejected, the station was changed
+                shared.step.store(STATION_JUMP, Ordering::Release);
             }
         }
         RadioControl::ToggleTrackWave => {
@@ -227,6 +271,13 @@ pub fn apply_wave_request(
 pub fn run(service: &'static str, station: &str, shared: &std::sync::Arc<Shared>) -> Result<(), String> {
     let radio = &shared.radio;
     radio.track_wave.store(false, Ordering::Release);
+    radio.multi_station.store(service == PARADISE, Ordering::Release);
+    radio.station_step.store(0, Ordering::Release);
+    let mut station = station.to_string();
+    if let Some(index) = STATIONS.iter().position(|(slug, ..)| *slug == station) {
+        radio.station.store(index, Ordering::Release);
+    }
+    let station = &mut station;
     *lock(&radio.wave_request) = None;
     *lock(&radio.wave_label) = None;
     let mut played = fetch_entries(service, station, None)?;
@@ -378,6 +429,32 @@ pub fn run(service: &'static str, station: &str, shared: &std::sync::Arc<Shared>
             cursor = cursor.saturating_sub(1);
             continue;
         }
+        // the chevrons: another station, its queue from its start (a station that gives nothing is stayed on)
+        if step == STATION_JUMP {
+            let moved = radio.station_step.swap(0, Ordering::AcqRel);
+            if moved != 0 {
+                let was = radio.station.load(Ordering::Acquire);
+                let index = (was + if moved > 0 { 1 } else { STATIONS.len() - 1 }) % STATIONS.len();
+                match fetch_entries(service, STATIONS[index].0, None) {
+                    Ok(tracks) if !tracks.is_empty() => {
+                        radio.station.store(index, Ordering::Release);
+                        *station = STATIONS[index].0.to_string();
+                        if let Some((_, fetch)) = prefetched.take() {
+                            fetch.abandon();
+                        }
+                        pending = None;
+                        in_branch = false;
+                        main_queue.clear();
+                        *lock(&radio.wave_label) = None;
+                        feedback(service, None, &tracks[0].station, &tracks[0].batch_id, RadioEvent::RadioStarted, 0.0);
+                        played = tracks;
+                        cursor = 0;
+                        continue;
+                    }
+                    _ => {}
+                }
+            }
+        }
         // the wave icon was clicked: a branch asked for plays at once (the click ended the track),
         // going back to main waits for here, the end of the track that played out
         let request = lock(&radio.wave_request).take();
@@ -500,6 +577,28 @@ mod tests {
         assert_eq!(radio_in_playlist(&[entry("yandex:track:38526")]), my_wave);
         assert_eq!(radio_in_playlist(&[entry("https://stream.example/a.mp3")]), Ok(None));
         assert!(radio_in_playlist(&[entry("yandex:wave"), entry("https://stream.example/a.mp3")]).is_err());
+    }
+
+    #[test]
+    fn a_playlist_line_naming_paradise_is_its_radio_from_the_station_it_names() {
+        let entry = |target: &str| Entry { target: target.to_string(), title: None, cue: None };
+        let main = Ok(Some(("paradise", "main-mix".to_string())));
+        assert_eq!(radio_in_playlist(&[entry("paradise")]), main);
+        assert_eq!(radio_in_playlist(&[entry("https://stream.radioparadise.com/flacm")]), main);
+        assert_eq!(radio_in_playlist(&[entry("https://stream.radioparadise.com/mellow-flac")]), Ok(Some(("paradise", "mellow".to_string()))));
+        assert_eq!(radio_in_playlist(&[entry("Radio Paradise Rock")]), Ok(Some(("paradise", "rock".to_string()))));
+        assert!(radio_in_playlist(&[entry("paradise"), entry("https://stream.example/a.mp3")]).is_err());
+        // Yandex wins a line that names both
+        assert_eq!(radio_in_playlist(&[entry("yandex paradise")]), Ok(Some(("yandex", "user:onyourwave".to_string()))));
+    }
+
+    #[test]
+    fn the_stations_are_the_three_the_chevrons_go_round() {
+        let slugs: Vec<&str> = STATIONS.iter().map(|(slug, ..)| *slug).collect();
+        assert_eq!(slugs, ["main-mix", "mellow", "rock"]);
+        // one step back from the first, one forward from the last
+        assert_eq!((0 + STATIONS.len() - 1) % STATIONS.len(), 2);
+        assert_eq!((2 + 1) % STATIONS.len(), 0);
     }
 
     #[test]
