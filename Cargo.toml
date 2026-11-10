@@ -19,7 +19,7 @@ portable-pty = "0.9.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # SRP's protocol, as Som's own crate (a rev of Som, moved on deliberately)
-srp_client = { git = "https://github.com/errordnk/som", rev = "8889f4c4cbb896fad08dac202b9af794d1f20e0e" }
+srp_client = { git = "https://github.com/errordnk/som", rev = "26df1e8f373199653315a502efd1498578f6f072" }
 sevenz-rust2 = { version = "0.24.2", features = ["deflate"] }
 tar = "0.4.46"
 vt100 = "0.18.1"
