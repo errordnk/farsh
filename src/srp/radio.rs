@@ -90,12 +90,11 @@ fn names_yandex(line: &str) -> bool {
     line.to_ascii_lowercase().contains("yandex")
 }
 
-/// A playlist line that names Radio Paradise (`paradise`, `Radio Paradise`): it stands for the
-/// radio of its stations, which always starts on the Main Mix. A real link (a stream of the
-/// station, for one) is not such a line: it plays as the stream it is.
+/// A playlist line that names Radio Paradise at all (`paradise`, or a link to one of its
+/// streams): it stands for the radio of its stations, which always starts on the Main Mix
+/// (the other stations are a click of a chevron away). A link to any other station is just a stream.
 fn names_paradise(line: &str) -> bool {
-    let line = line.to_ascii_lowercase();
-    line.contains("paradise") && !line.starts_with("http://") && !line.starts_with("https://")
+    line.to_ascii_lowercase().contains("paradise")
 }
 
 /// The radio a playlist stands for: its one line. A radio plays on its own, so it
@@ -581,9 +580,11 @@ mod tests {
         let main = Ok(Some(("paradise", "main-mix".to_string())));
         assert_eq!(radio_in_playlist(&[entry("paradise")]), main);
         assert_eq!(radio_in_playlist(&[entry("Radio Paradise Rock")]), main);
-        // a real link to a station is that stream, not the radio
-        assert_eq!(radio_in_playlist(&[entry("https://stream.radioparadise.com/mellow-flac")]), Ok(None));
-        assert_eq!(radio_in_playlist(&[entry("https://stream.radioparadise.com/flacm")]), Ok(None));
+        // a link to one of its streams is the radio too, whatever station it names: it starts on the Main Mix
+        assert_eq!(radio_in_playlist(&[entry("https://stream.radioparadise.com/mellow-flac")]), main);
+        assert_eq!(radio_in_playlist(&[entry("https://stream.radioparadise.com/flacm")]), main);
+        // a link to another station is a stream
+        assert_eq!(radio_in_playlist(&[entry("https://ice1.somafm.com/groovesalad-128-mp3")]), Ok(None));
         assert!(radio_in_playlist(&[entry("paradise"), entry("https://stream.example/a.mp3")]).is_err());
         // Yandex wins a line that names both
         assert_eq!(radio_in_playlist(&[entry("yandex paradise")]), Ok(Some(("yandex", "user:onyourwave".to_string()))));
