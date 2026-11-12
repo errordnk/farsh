@@ -56,13 +56,13 @@ right — farsh's panels, htop under them, on the left — a plain shell with
 fastfetch: farsh lives next to your programs, not instead of them.
 
 ![farsh on Windows 11: PowerShell 7.6, in the Som terminal](site/img/farsh-windows.webp)
-**Windows 11** — PowerShell 7.6, the Som terminal
+**Windows 11** — PowerShell 7.6, the [Som](https://github.com/errordnk/som) terminal
 
 ![farsh on macOS: zsh on a Mac mini M4](site/img/farsh-macos.webp)
-**macOS** — zsh on a Mac mini M4
+**macOS** — zsh 5.9 on a Mac mini M4, the [Som](https://github.com/errordnk/som) terminal
 
 ![farsh on Debian 13: bash 5.2](site/img/farsh-linux.webp)
-**Debian 13** — bash 5.2
+**Debian 13** — bash 5.2, the [Som](https://github.com/errordnk/som) terminal
 
 ## What is inside: Far 3 as you remember it, and what it never had
 
