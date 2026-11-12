@@ -323,23 +323,32 @@
   <div class="wrap">
     <div class="kicker">Установка</div>
     <h2>Пять минут — и у вас Far в родном шелле</h2>
-    <p class="lead">Готовых бинарников пока нет: farsh собирается из исходников. Нужен Rust 1.88 или новее (<a href="https://rustup.rs">rustup.rs</a>) и компилятор C (для tree-sitter).</p>
+    <p class="lead">Скачайте архив для своей системы из <a href="https://github.com/errordnk/farsh/releases/latest">последнего релиза</a>: внутри один бинарник, больше ставить ничего не нужно.</p>
+    <div class="cta" style="justify-content:flex-start;margin-top:22px">
+      <a class="btn primary" href="https://github.com/errordnk/farsh/releases/latest/download/farsh-windows-x64.zip">Windows x64</a>
+      <a class="btn primary" href="https://github.com/errordnk/farsh/releases/latest/download/farsh-macos-arm64.zip">macOS Apple silicon</a>
+      <a class="btn primary" href="https://github.com/errordnk/farsh/releases/latest/download/farsh-linux-amd64.zip">Linux x86_64</a>
+      <a class="btn primary" href="https://github.com/errordnk/farsh/releases/latest/download/farsh-linux-arm64.zip">Linux arm64</a>
+    </div>
     <div class="two">
       <div>
         <h3>Linux и macOS</h3>
-<pre><code>cargo install --locked --git https://github.com/errordnk/farsh --root ~/.local</code></pre>
-        <p>Бинарник окажется в <code>~/.local/bin/farsh</code>. Запустите его из терминала — или сделайте логин-шеллом:</p>
+<pre><code>curl -LO https://github.com/errordnk/farsh/releases/latest/download/farsh-linux-amd64.zip
+unzip -o farsh-linux-amd64.zip -d ~/.local/bin
+~/.local/bin/farsh</code></pre>
+        <p class="note">Для arm64 и macOS — <code>farsh-linux-arm64.zip</code> и <code>farsh-macos-arm64.zip</code>. Бинарникам для Linux нужен glibc 2.41 или новее (Debian 13, Ubuntu 25.04 и новее). На macOS файл, скачанный браузером, снимается с карантина: <code>xattr -d com.apple.quarantine ~/.local/bin/farsh</code>.</p>
+        <p>Хотите — сделайте его логин-шеллом:</p>
 <pre><code>echo ~/.local/bin/farsh | sudo tee -a /etc/shells
 chsh -s ~/.local/bin/farsh</code></pre>
         <p class="note">Работать при этом будет ваш прежний шелл: farsh берёт <code>$FARSH_SHELL</code>, или <code>Shell.Program</code> из своих настроек, или <code>$SHELL</code>, если это не farsh, иначе bash (на macOS — zsh).</p>
       </div>
       <div>
         <h3>Windows</h3>
-<pre><code>git clone https://github.com/errordnk/farsh
-cd farsh
-cargo build --release</code></pre>
-        <p>Сборке под Windows нужен FFmpeg из <a href="https://vcpkg.io">vcpkg</a> (им farsh перечисляет звуковые дорожки и субтитры видео): поставьте <code>ffmpeg:x64-windows</code> и укажите путь в <code>VCPKG_ROOT</code>. DLL FFmpeg упаковываются внутрь <code>farsh.exe</code> и загружаются, только когда они нужны, — так что готовый бинарник работает и там, где FFmpeg нет.</p>
-        <p class="note">Запускайте <code>target\release\farsh.exe</code> в Windows Terminal или Som. Шелл по умолчанию — PowerShell; Git Bash и bash из MSYS2 тоже работают.</p>
+        <p>Распакуйте <code>farsh.exe</code> в папку из <code>PATH</code> и запускайте в Windows Terminal или Som. Шелл по умолчанию — PowerShell; Git Bash и bash из MSYS2 тоже работают. FFmpeg (для звуковых дорожек и субтитров видео) уже упакован внутрь и загружается, только когда нужен.</p>
+        <h3 style="margin-top:26px">Из исходников</h3>
+        <p>Нужен Rust 1.88 или новее (<a href="https://rustup.rs">rustup.rs</a>) и компилятор C:</p>
+<pre><code>cargo install --locked --git https://github.com/errordnk/farsh --root ~/.local</code></pre>
+        <p class="note">Под Windows сборка берёт FFmpeg из <a href="https://vcpkg.io">vcpkg</a>: поставьте <code>ffmpeg:x64-windows</code> и укажите путь в <code>VCPKG_ROOT</code>.</p>
       </div>
     </div>
   </div>

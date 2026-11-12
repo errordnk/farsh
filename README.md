@@ -140,18 +140,29 @@ background of the media widgets. Below are real frames of that dialog.
 
 ## Install
 
-Five minutes — and you have Far in your own shell. There are no prebuilt
-binaries yet: farsh is built from source. You need Rust 1.88 or newer
-([rustup.rs](https://rustup.rs)) and a C compiler (for tree-sitter).
+Five minutes — and you have Far in your own shell. Take the archive for your
+system from the [latest release](https://github.com/errordnk/farsh/releases/latest): one binary, nothing else to install.
+
+| System | Archive |
+|---|---|
+| Windows x64 | [farsh-windows-x64.zip](https://github.com/errordnk/farsh/releases/latest/download/farsh-windows-x64.zip) |
+| macOS, Apple silicon | [farsh-macos-arm64.zip](https://github.com/errordnk/farsh/releases/latest/download/farsh-macos-arm64.zip) |
+| Linux x86_64 | [farsh-linux-amd64.zip](https://github.com/errordnk/farsh/releases/latest/download/farsh-linux-amd64.zip) |
+| Linux arm64 (Raspberry Pi 5 and others) | [farsh-linux-arm64.zip](https://github.com/errordnk/farsh/releases/latest/download/farsh-linux-arm64.zip) |
 
 **Linux and macOS**
 
 ```sh
-cargo install --locked --git https://github.com/errordnk/farsh --root ~/.local
+curl -LO https://github.com/errordnk/farsh/releases/latest/download/farsh-linux-amd64.zip   # or -linux-arm64, -macos-arm64
+unzip -o farsh-linux-amd64.zip -d ~/.local/bin
+~/.local/bin/farsh
 ```
 
-The binary lands in `~/.local/bin/farsh`. Run it from your terminal — or make
-it your login shell:
+The Linux binaries need glibc 2.41 or newer (Debian 13, Ubuntu 25.04 and
+later). On macOS a binary downloaded with a browser is quarantined: clear it
+with `xattr -d com.apple.quarantine ~/.local/bin/farsh`.
+
+Make it your login shell, if you like:
 
 ```sh
 echo ~/.local/bin/farsh | sudo tee -a /etc/shells
@@ -164,19 +175,21 @@ Your old shell still does the work: farsh takes `$FARSH_SHELL`, or
 
 **Windows**
 
+Unpack `farsh.exe` into a folder on your `PATH` and run it in Windows Terminal
+or Som. The default shell is PowerShell; Git Bash and MSYS2's bash work too.
+FFmpeg (for a video's audio tracks and subtitles) is packed inside and loaded
+only when needed.
+
+**From source**
+
+With Rust 1.88 or newer ([rustup.rs](https://rustup.rs)) and a C compiler:
+
 ```sh
-git clone https://github.com/errordnk/farsh
-cd farsh
-cargo build --release
+cargo install --locked --git https://github.com/errordnk/farsh --root ~/.local
 ```
 
-The Windows build needs FFmpeg from [vcpkg](https://vcpkg.io) (farsh lists a
-video's audio tracks and subtitles with it): install `ffmpeg:x64-windows` and
-point `VCPKG_ROOT` at it. The FFmpeg DLLs are packed into `farsh.exe` and
-loaded only when needed — so the binary also runs where there is no FFmpeg.
-
-Run `target\release\farsh.exe` in Windows Terminal or Som. The default shell is
-PowerShell; Git Bash and MSYS2's bash work too.
+On Windows the build links FFmpeg from [vcpkg](https://vcpkg.io): install
+`ffmpeg:x64-windows` and point `VCPKG_ROOT` at it.
 
 ## First steps: your hands remember everything
 
