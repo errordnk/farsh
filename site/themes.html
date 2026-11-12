@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Формат тем farsh</title>
+<meta name="description" content="Как устроена тема farsh: JSON-файл с цветами элементов Far, 16 консольными цветами и подсветкой кода в редакторе. Все ключи, правила и полный список из 146 элементов.">
+<style>
+  :root {
+    --bg0: #2e3440;
+    --bg1: #3b4252;
+    --bg2: #434c5e;
+    --bg3: #4c566a;
+    --fg0: #eceff4;
+    --fg1: #e5e9f0;
+    --fg2: #d8dee9;
+    --muted: #8b96ac;
+    --accent: #88c0d0;
+    --accent2: #81a1c1;
+    --green: #a3be8c;
+    --yellow: #ebcb8b;
+    --red: #bf616a;
+    --purple: #b48ead;
+    --far: #000080;
+    --radius: 10px;
+    --maxw: 1080px;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg0);
+    color: var(--fg1);
+    font-family: -apple-system, "Segoe UI", "SF Pro", "Noto Sans", system-ui, sans-serif;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  code, .mono { font-family: "FiraCode Nerd Font", "Fira Code", "Cascadia Code", Consolas, monospace; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  img { max-width: 100%; height: auto; display: block; }
+  .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 24px; }
+
+  nav {
+    position: sticky; top: 0; z-index: 50;
+    background: rgba(46, 52, 64, 0.85);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--bg2);
+  }
+  nav .wrap { display: flex; align-items: center; justify-content: space-between; height: 60px; gap: 16px; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 18px; color: var(--fg0); }
+  .brand:hover { text-decoration: none; }
+  .brand-mark {
+    width: 30px; height: 30px; border-radius: 7px;
+    background: var(--far); color: #ffff55;
+    display: grid; place-items: center;
+    font: 700 13px/1 Consolas, monospace;
+    box-shadow: inset 0 0 0 2px #00aaaa;
+  }
+  .links { display: flex; gap: 22px; font-size: 15px; }
+  .links a { color: var(--fg2); }
+  .links a:hover { color: var(--accent); text-decoration: none; }
+
+  section { padding: 72px 0; }
+  section.alt { background: var(--bg1); }
+  h1 { font-size: clamp(34px, 5.4vw, 58px); line-height: 1.08; margin: 0 0 20px; color: var(--fg0); letter-spacing: -0.02em; }
+  h2 { font-size: clamp(26px, 3.4vw, 36px); line-height: 1.15; margin: 0 0 14px; color: var(--fg0); letter-spacing: -0.01em; }
+  h3 { font-size: 19px; margin: 0 0 8px; color: var(--fg0); }
+  .lead { font-size: clamp(17px, 2vw, 20px); color: var(--fg2); max-width: 760px; }
+  .kicker { color: var(--accent); font-weight: 600; font-size: 14px; letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 10px; }
+  .hl { color: var(--yellow); }
+
+  .hero { padding: 80px 0 56px; text-align: center; }
+  .hero .lead { margin: 0 auto 30px; }
+  .cta { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
+  .btn {
+    display: inline-block; padding: 12px 24px; border-radius: 8px;
+    font-weight: 600; font-size: 16px; border: 1px solid var(--bg3); color: var(--fg0);
+  }
+  .btn:hover { text-decoration: none; border-color: var(--accent); }
+  .btn.primary { background: var(--accent); color: var(--bg0); border-color: var(--accent); }
+  .btn.primary:hover { background: #9fd0de; }
+  .shot {
+    border-radius: var(--radius);
+    border: 1px solid var(--bg3);
+    box-shadow: 0 30px 80px rgba(0, 0, 0, 0.45);
+    margin: 0 auto;
+  }
+
+  .flip { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; margin-top: 34px; }
+  .side { border-radius: var(--radius); padding: 26px; border: 1px solid var(--bg3); }
+  .side.old { background: rgba(191, 97, 106, 0.08); border-color: rgba(191, 97, 106, 0.35); }
+  .side.new { background: rgba(163, 190, 140, 0.08); border-color: rgba(163, 190, 140, 0.45); }
+  .side .tag { font-size: 13px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+  .side.old .tag { color: var(--red); }
+  .side.new .tag { color: var(--green); }
+  .side ul { margin: 12px 0 0; padding-left: 20px; }
+  .side li { margin: 6px 0; }
+
+  .diagram { display: grid; grid-template-columns: 1fr auto 1fr; gap: 18px; align-items: center; margin-top: 36px; }
+  .layer { border-radius: 8px; padding: 12px 16px; font-family: Consolas, monospace; font-size: 14px; text-align: center; }
+  .stack { display: grid; gap: 6px; }
+  .l-far { background: var(--far); color: #55ffff; border: 1px solid #00aaaa; }
+  .l-shell { background: #1d2a1d; color: var(--green); border: 1px solid #4e6b3f; }
+  .l-cmd { background: var(--bg2); color: var(--muted); border: 1px dashed var(--bg3); }
+  .arrow { font-size: 30px; color: var(--accent); }
+  .cap { text-align: center; color: var(--muted); font-size: 14px; margin-top: 8px; }
+
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-top: 34px; }
+  .card { background: var(--bg1); border: 1px solid var(--bg2); border-radius: var(--radius); padding: 22px; }
+  section.alt .card { background: var(--bg0); }
+  .card p { margin: 0; color: var(--fg2); font-size: 15.5px; }
+  .card .ico { font-size: 24px; margin-bottom: 8px; }
+
+  .themes { display: grid; grid-template-columns: 1fr 260px; gap: 22px; margin-top: 30px; align-items: start; }
+  .tlist { display: grid; gap: 8px; }
+  .tlist button {
+    text-align: left; font: inherit; font-size: 15px; color: var(--fg1);
+    background: var(--bg0); border: 1px solid var(--bg2); border-radius: 8px;
+    padding: 10px 14px; cursor: pointer; display: flex; align-items: center; gap: 10px;
+  }
+  .tlist button:hover { border-color: var(--accent2); }
+  .tlist button[aria-pressed="true"] { border-color: var(--accent); background: var(--bg2); }
+  .sw { width: 34px; height: 16px; border-radius: 4px; display: flex; overflow: hidden; flex: none; }
+  .sw i { flex: 1; }
+
+  pre {
+    background: #242933; border: 1px solid var(--bg2); border-radius: 8px;
+    padding: 14px 16px; overflow-x: auto; font-size: 14.5px; color: var(--fg1); margin: 10px 0 18px;
+  }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; margin-top: 26px; }
+  .note { color: var(--muted); font-size: 15px; }
+  /* a grid cell is as wide as its column, not as its longest line: a long
+     <pre> scrolls inside itself instead of widening the page */
+  .two > *, .flip > *, .grid > *, .themes > *, .diagram > *, .platforms > * { min-width: 0; }
+
+  table { width: 100%; border-collapse: collapse; margin-top: 24px; font-size: 15.5px; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--bg2); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; }
+  td:first-child { white-space: nowrap; }
+  kbd {
+    font-family: Consolas, monospace; font-size: 13px; background: var(--bg2);
+    border: 1px solid var(--bg3); border-bottom-width: 2px; border-radius: 5px; padding: 1px 6px; color: var(--fg0);
+  }
+
+  .platforms { display: grid; gap: 34px; margin-top: 34px; }
+  .platforms figure { margin: 0; }
+  .platforms figcaption { color: var(--muted); font-size: 15px; margin-top: 12px; text-align: center; }
+  .platforms figcaption b { color: var(--fg0); }
+
+  footer { padding: 40px 0; color: var(--muted); font-size: 14px; border-top: 1px solid var(--bg2); }
+  footer .wrap { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+
+  @media (max-width: 860px) {
+    .links { display: none; }
+    .flip, .two, .themes { grid-template-columns: 1fr; }
+    .grid { grid-template-columns: 1fr; }
+    .diagram { grid-template-columns: 1fr; }
+    .arrow { transform: rotate(90deg); justify-self: center; }
+    section { padding: 52px 0; }
+  }
+  @media (min-width: 861px) and (max-width: 1020px) {
+    .grid { grid-template-columns: repeat(2, 1fr); }
+  }
+</style>
+
+<style>
+  .doc { padding: 56px 0 72px; }
+  .doc h2 { margin-top: 56px; scroll-margin-top: 80px; }
+  .doc h3 { margin-top: 30px; scroll-margin-top: 80px; }
+  .doc p, .doc li { color: var(--fg2); font-size: 16.5px; }
+  .doc ul { padding-left: 22px; }
+  .doc code { color: var(--fg0); }
+  .toc { background: var(--bg1); border: 1px solid var(--bg2); border-radius: var(--radius); padding: 18px 24px; margin-top: 26px; columns: 2; column-gap: 40px; }
+  .toc a { display: block; padding: 3px 0; color: var(--fg2); }
+  .toc a:hover { color: var(--accent); }
+  .tbl { overflow-x: auto; }
+  table.els td, table.els th { padding: 7px 10px; font-size: 15px; }
+  table.els td:first-child { white-space: normal; }
+  .cs { display: inline-block; width: 14px; height: 14px; border-radius: 3px; vertical-align: -2px; margin-right: 7px; border: 1px solid var(--bg3); }
+  .cn { font-family: Consolas, monospace; font-size: 14px; color: var(--fg2); }
+  .smp { font-family: Consolas, monospace; padding: 1px 8px; border-radius: 3px; }
+  .callout { border-left: 3px solid var(--accent); background: var(--bg1); padding: 12px 18px; border-radius: 0 8px 8px 0; margin: 18px 0; }
+  .callout p { margin: 4px 0; }
+  @media (max-width: 860px) { .toc { columns: 1; } }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <a class="brand" href="./"><span class="brand-mark">F&gt;</span> farsh</a>
+    <div class="links">
+      <a href="./">Главная</a>
+      <a href="./#themes">Темы</a>
+      <a href="#reference">Все элементы</a>
+      <a href="https://github.com/errordnk/farsh">GitHub</a>
+    </div>
+  </div>
+</nav>
+
+<section class="doc">
+  <div class="wrap">
+    <div class="kicker">Справочник</div>
+    <h1>Формат тем farsh</h1>
+    <p class="lead">Тема farsh — это JSON-файл. Он говорит, какого цвета каждый элемент интерфейса Far (панели, меню, диалоги, кейбар, справка), какими будут 16 консольных цветов, которыми раскрашиваются файлы, и как выглядит код во встроенном редакторе. Ниже всё, что можно написать в теме, и полный список элементов.</p>
+
+    <div class="toc">
+      <a href="#where">Где лежат темы</a>
+      <a href="#shape">Общий вид файла</a>
+      <a href="#color">Как записывается цвет</a>
+      <a href="#name">name</a>
+      <a href="#palette">palette — свои имена цветов</a>
+      <a href="#console">console — 16 цветов консоли</a>
+      <a href="#default">default — цвета по умолчанию</a>
+      <a href="#elements">elements — цвета элементов</a>
+      <a href="#editor">editor — редактор и подсветка кода</a>
+      <a href="#order">Кто кого перекрывает</a>
+      <a href="#examples">Примеры</a>
+      <a href="#reference">Все элементы</a>
+    </div>
+
+    <h2 id="where">Где лежат темы</h2>
+    <ul>
+      <li><b>Встроенные</b> зашиты в farsh: <code>default</code> (цвета самого Far), <code>catppuccin</code>, <code>tokyo-night</code>, <code>one-dark</code>, <code>dracula</code>, <code>nord</code>. Их исходники — в <a href="https://github.com/errordnk/farsh/tree/main/assets/themes">assets/themes</a>, это лучшие примеры.</li>
+      <li><b>Свои</b> кладутся в <code>~/.config/farsh/themes/&lt;id&gt;.json</code> (на Windows — <code>%USERPROFILE%\.config\farsh\themes\</code>). Имя файла без <code>.json</code> — это id темы. Файл с именем встроенной темы (<code>nord.json</code>) заменяет её.</li>
+      <li>Тема выбирается в <b>F9 → Options → Themes</b>: слева список, справа живой пример farsh в теме под курсором. <kbd>Enter</kbd> делает её текущей, <kbd>Esc</kbd> оставляет прежнюю.</li>
+      <li>Выбор хранится в <code>~/.config/farsh/settings.json</code> как <code>"Theme": "&lt;id&gt;"</code>. Без этого ключа действует <code>default</code>.</li>
+      <li>Файл перечитывается при каждом открытии окна тем: поправили файл — открыли окно заново — видите результат. Тема с ошибкой видна в списке как «(cannot be read)», а на месте примера написано, что именно не так.</li>
+    </ul>
+
+    <h2 id="shape">Общий вид файла</h2>
+<pre><code>{
+  "name": "Моя тема",
+  "palette":  { "base": "#1e1e2e", "text": "#cdd6f4", "accent": "#89b4fa" },
+  "console":  { "blue": "#1e66f5", "lightgreen": "#a6e3a1" },
+  "default":  { "fg": "terminal", "bg": "terminal" },
+  "elements": {
+    "Panel.*":      { "fg": "text", "bg": "base" },
+    "Panel.Cursor": { "fg": "base", "bg": "accent" },
+    "Dialog.Edit":  ["text", "#181825"]
+  },
+  "editor": {
+    "extends": "builtin://dark",
+    "syntax": { "keyword": "accent", "string": "lightgreen" }
+  }
+}</code></pre>
+    <p>Любой ключ можно не писать. Пустой файл <code>{}</code> — это тема с цветами Far.</p>
+
+    <h2 id="color">Как записывается цвет</h2>
+    <p>Везде, где ожидается цвет, можно написать:</p>
+    <table>
+      <tr><th>Запись</th><th>Что это</th></tr>
+      <tr><td><code>"#rrggbb"</code>, <code>"#rgb"</code></td><td>цвет в RGB: <code>"#1e1e2e"</code>, <code>"#fff"</code></td></tr>
+      <tr><td><code>[r, g, b]</code></td><td>то же числами 0–255: <code>[30, 30, 46]</code></td></tr>
+      <tr><td><code>"terminal"</code></td><td>цвет самого терминала: его фон или его текст, смотря где стоит</td></tr>
+      <tr><td><code>"blue"</code>, <code>"lightcyan"</code>…</td><td>один из <a href="#console">16 консольных цветов</a> <b>этой</b> темы</td></tr>
+      <tr><td><code>"base"</code></td><td>имя из <a href="#palette">palette</a> этой темы</td></tr>
+    </table>
+
+    <h2 id="name">name</h2>
+    <p>Название темы в списке Options → Themes. Если не задано, показывается id (имя файла).</p>
+
+    <h2 id="palette">palette — свои имена цветов</h2>
+    <p>Словарь «имя → цвет», чтобы не повторять один и тот же <code>#rrggbb</code> в десяти местах. Имена из palette можно использовать во всех остальных разделах, в том числе в <code>console</code> и <code>editor</code>. Имя может ссылаться на другое имя:</p>
+<pre><code>"palette": { "base": "#1e1e2e", "panel": "base", "ink": "#cdd6f4" }</code></pre>
+    <p>Цепочка имён, замкнутая в круг (<code>a → b → a</code>), — ошибка.</p>
+
+    <h2 id="console">console — 16 цветов консоли</h2>
+    <p>Far рисует 16 цветами консоли, и в farsh они тоже остались. Тема переопределяет их.</p>
+    <div class="callout">
+      <p>Консольные цвета нужны в трёх местах:</p>
+      <p>— <b>раскраска файлов</b> (Options → Files highlighting): исполняемые светло-зелёные, архивы светло-фиолетовые, скрытые бирюзовые, временные коричневые;</p>
+      <p>— <b>цвета, выбранные в Options → Colors</b> (диалог выбора цвета — это 16 консольных цветов);</p>
+      <p>— <b>любой элемент, цвет которого тема не задала</b>: берётся цвет Far по умолчанию, и он переводится через эту таблицу.</p>
+    </div>
+    <p>Записать можно списком ровно из 16 цветов в порядке ниже или объектом по именам. В именах не важны регистр, пробелы, <code>-</code> и <code>_</code>: <code>"light cyan"</code> = <code>"LightCyan"</code> = <code>"lightcyan"</code>. Не указанные цвета остаются классическими цветами Far.</p>
+<pre><code>"console": { "blue": "#1e1e2e", "cyan": "#45475a", "lightgreen": "#a6e3a1", "white": "#eff1f5" }</code></pre>
+    <table>
+      <tr><th>№</th><th>Имя</th><th>Цвет</th><th>У Far</th></tr>
+      <tr><td>0</td><td><code>black</code></td><td>чёрный</td><td><span class="cs" style="background:#000000"></span><span class="cn">#000000</span></td></tr>
+<tr><td>1</td><td><code>blue</code></td><td>синий</td><td><span class="cs" style="background:#000080"></span><span class="cn">#000080</span></td></tr>
+<tr><td>2</td><td><code>green</code></td><td>зелёный</td><td><span class="cs" style="background:#008000"></span><span class="cn">#008000</span></td></tr>
+<tr><td>3</td><td><code>cyan</code></td><td>бирюзовый</td><td><span class="cs" style="background:#008080"></span><span class="cn">#008080</span></td></tr>
+<tr><td>4</td><td><code>red</code></td><td>красный</td><td><span class="cs" style="background:#800000"></span><span class="cn">#800000</span></td></tr>
+<tr><td>5</td><td><code>magenta</code></td><td>фиолетовый</td><td><span class="cs" style="background:#800080"></span><span class="cn">#800080</span></td></tr>
+<tr><td>6</td><td><code>brown</code></td><td>коричневый</td><td><span class="cs" style="background:#808000"></span><span class="cn">#808000</span></td></tr>
+<tr><td>7</td><td><code>lightgray</code></td><td>светло-серый</td><td><span class="cs" style="background:#c0c0c0"></span><span class="cn">#c0c0c0</span></td></tr>
+<tr><td>8</td><td><code>darkgray</code></td><td>тёмно-серый</td><td><span class="cs" style="background:#808080"></span><span class="cn">#808080</span></td></tr>
+<tr><td>9</td><td><code>lightblue</code></td><td>голубой</td><td><span class="cs" style="background:#0000ff"></span><span class="cn">#0000ff</span></td></tr>
+<tr><td>10</td><td><code>lightgreen</code></td><td>светло-зелёный</td><td><span class="cs" style="background:#00ff00"></span><span class="cn">#00ff00</span></td></tr>
+<tr><td>11</td><td><code>lightcyan</code></td><td>светло-бирюзовый</td><td><span class="cs" style="background:#00ffff"></span><span class="cn">#00ffff</span></td></tr>
+<tr><td>12</td><td><code>lightred</code></td><td>светло-красный</td><td><span class="cs" style="background:#ff0000"></span><span class="cn">#ff0000</span></td></tr>
+<tr><td>13</td><td><code>lightmagenta</code></td><td>светло-фиолетовый</td><td><span class="cs" style="background:#ff00ff"></span><span class="cn">#ff00ff</span></td></tr>
+<tr><td>14</td><td><code>yellow</code></td><td>жёлтый</td><td><span class="cs" style="background:#ffff00"></span><span class="cn">#ffff00</span></td></tr>
+<tr><td>15</td><td><code>white</code></td><td>белый</td><td><span class="cs" style="background:#ffffff"></span><span class="cn">#ffffff</span></td></tr>
+    </table>
+
+    <h2 id="default">default — цвета по умолчанию</h2>
+    <p>У консоли есть атрибут по умолчанию — светло-серый текст на чёрном. Far выводит его цветами самого терминала, и farsh тоже: так строка шелла под панелями, номера клавиш кейбара и всё, что оставлено светло-серым на чёрном, выглядит как ваш терминал.</p>
+<pre><code>"default": { "fg": "terminal", "bg": "terminal" }</code></pre>
+    <p>Можно задать свои: <code>{"fg": "#cdd6f4", "bg": "#11111b"}</code>. Любую часть можно не писать.</p>
+
+    <h2 id="elements">elements — цвета элементов</h2>
+    <p>Главная часть темы. Ключ — имя элемента из палитры Far (те же, что в F9 → Options → Colors; <a href="#reference">полный список ниже</a>), значение — его цвета:</p>
+<pre><code>"Panel.Text":   { "fg": "#cdd6f4", "bg": "#1e1e2e" },
+"Panel.Box":    { "fg": "#6c7086" },
+"Dialog.Edit":  ["#cdd6f4", "#181825"],
+"Menu.Box":     [null, "#313244"]</code></pre>
+    <ul>
+      <li><code>{"fg": .., "bg": ..}</code> — текст и фон, любую часть можно не писать;</li>
+      <li><code>[fg, bg]</code> — то же списком, <code>null</code> вместо части, которую тема не задаёт.</li>
+    </ul>
+    <h3>Маски</h3>
+    <p>Имя может кончаться на <code>.*</code>, а <code>*</code> один означает «всё». Для элемента <code>Dialog.List.Text</code> farsh ищет по очереди:</p>
+<pre><code>Dialog.List.Text  →  Dialog.List.*  →  Dialog.*  →  *</code></pre>
+    <p>Текст и фон ищутся <b>независимо</b>: каждая часть берётся из первого имени, где она задана. Поэтому можно одной строкой покрасить все диалоги, а потом поправить отдельные места:</p>
+<pre><code>"Dialog.*":               { "fg": "text", "bg": "surface" },
+"Dialog.Edit":            { "bg": "#181825" },
+"Dialog.Button.Selected": { "fg": "white", "bg": "sel" }</code></pre>
+    <p>Здесь у <code>Dialog.Edit</code> фон свой, а текст берётся из <code>Dialog.*</code>. Если часть не нашлась ни под одним именем, берётся цвет Far по умолчанию (он указан в справочнике), переведённый через <a href="#console">console</a> и <a href="#default">default</a>.</p>
+    <div class="callout">
+      <p>Фон, на котором Som рисует картинки, плеер и markdown (SRP), — тоже отсюда: в F3 это фон <code>Viewer.Text</code>, в быстром просмотре (<kbd>Ctrl+Q</kbd>) — <code>Panel.Text</code>.</p>
+    </div>
+
+    <h2 id="editor">editor — редактор и подсветка кода</h2>
+    <p>Встроенный редактор и просмотрщик farsh — это <a href="https://github.com/errordnk/fresh">fresh</a>, и раздел <code>editor</code> — тема fresh в его собственном формате. Она красит <kbd>F4</kbd>, <kbd>F3</kbd> и текст в быстром просмотре.</p>
+    <ul>
+      <li><b><code>extends</code></b> — тема fresh, поверх которой пишется ваша: <code>builtin://dark</code> (по умолчанию), <code>builtin://light</code>, <code>builtin://dracula</code>, <code>builtin://gruvbox</code>, <code>builtin://nord</code>, <code>builtin://nord-dark</code>, <code>builtin://nord-darker</code>, <code>builtin://solarized-dark</code>, <code>builtin://tokyo-night</code>, <code>builtin://high-contrast</code>, <code>builtin://nostalgia</code> (синий, как у Far), <code>builtin://terminal</code> (цвета терминала).</li>
+      <li><b>Разделы</b>: <code>editor</code> (курсор, текущая строка, номера строк, пробелы, скобки), <code>ui</code>, <code>syntax</code>, <code>search</code> (найденное), <code>diagnostic</code>. Названия ключей — как в темах fresh (<a href="https://github.com/errordnk/fresh/tree/master/crates/fresh-editor-core/themes">themes/*.json</a>).</li>
+      <li><b>Категории <code>syntax</code></b>: <code>keyword</code>, <code>string</code>, <code>comment</code>, <code>function</code>, <code>type</code>, <code>variable</code>, <code>variable_builtin</code>, <code>constant</code>, <code>operator</code>.</li>
+      <li><b>Цвета</b> пишутся как во всей теме (<code>#rrggbb</code>, имена из palette и console) или как во fresh: <code>[r, g, b]</code> и <code>{"color": .., "modifier": ["bold"]}</code>.</li>
+    </ul>
+<pre><code>"editor": {
+  "extends": "builtin://dark",
+  "editor": { "cursor": "#f5e0dc", "bracket_match_fg": "#fab387" },
+  "syntax": {
+    "keyword":  "#cba6f7",
+    "string":   "#a6e3a1",
+    "comment":  { "color": "#6c7086", "modifier": ["italic"] },
+    "function": "#89b4fa"
+  },
+  "search": { "match_bg": "#f9e2af", "match_fg": "#1e1e2e" }
+}</code></pre>
+    <div class="callout">
+      <p>Фон и текст самой области текста — <code>bg</code>, <code>after_eof_bg</code>, <code>fg</code>, <code>selection_bg</code>, <code>selection_fg</code>, <code>line_number_bg</code> — всегда берутся из <a href="#elements">elements</a>, а не отсюда: для редактора это <code>Editor.Text</code> и <code>Editor.Text.Selected</code>, для F3 — <code>Viewer.Text</code>, для быстрого просмотра — <code>Panel.Text</code>. Так панель и текст файла рядом с ней всегда одного цвета, а Options → Colors меняет и редактор. Текущую строку (<code>current_line_bg</code>) и номера строк (<code>line_number_fg</code>) можно задать здесь; если нет, они вычисляются из цвета текста.</p>
+    </div>
+
+    <h2 id="order">Кто кого перекрывает</h2>
+    <ol>
+      <li><b>Options → Colors.</b> Цвет, выбранный там руками, важнее всего. Он хранится отдельно для каждой темы (<code>Colors</code> в settings.json для default, <code>Themes.&lt;id&gt;.Colors</code> для остальных), так что, переключая темы, вы не переносите правки одной в другую. Options → Colors → Themes → Default сбрасывает их для текущей темы.</li>
+      <li><b>elements</b> темы: точное имя, затем маски.</li>
+      <li><b>Цвет Far по умолчанию</b>, переведённый через <code>console</code> и <code>default</code> темы.</li>
+    </ol>
+
+    <h2 id="examples">Примеры</h2>
+    <h3>Минимальная: классический Far потемнее</h3>
+<pre><code>{
+  "name": "Тёмно-синий Far",
+  "console": { "blue": "#0b1730", "cyan": "#1f4e79" }
+}</code></pre>
+    <p>Все элементы остаются на местах Far, меняются только синий (фон панелей) и бирюзовый (меню, курсор, кейбар).</p>
+    <h3>Короткая, но своя</h3>
+<pre><code>{
+  "name": "Ночь",
+  "palette": { "bg": "#16161e", "panel": "#1a1b26", "sel": "#33467c", "text": "#c0caf5", "accent": "#7aa2f7", "dim": "#565f89" },
+  "elements": {
+    "*":                   { "fg": "text", "bg": "panel" },
+    "Panel.Box":           { "fg": "dim" },
+    "Panel.Cursor":        { "bg": "sel" },
+    "Panel.Title.Selected":{ "fg": "bg", "bg": "accent" },
+    "Panel.Text.Selected": { "fg": "yellow" },
+    "Menu.Text.Selected":  { "bg": "sel" },
+    "Dialog.Button.Selected": { "bg": "sel" },
+    "Keybar.Num":          { "fg": "dim", "bg": "terminal" },
+    "Keybar.Background":   { "bg": "terminal" }
+  },
+  "editor": { "extends": "builtin://tokyo-night" }
+}</code></pre>
+    <p class="note">Маски бывают только вида «начало имени + <code>.*</code>»: <code>*.Selected</code> не сработает, выбранные элементы перечисляются по именам. Полные темы, где задано около двухсот элементов, — встроенные: <a href="https://github.com/errordnk/farsh/blob/main/assets/themes/catppuccin.json">catppuccin.json</a>, <a href="https://github.com/errordnk/farsh/blob/main/assets/themes/nord.json">nord.json</a> и другие.</p>
+
+    <h2 id="reference">Все элементы</h2>
+    <p>146 имён палитры Far, в том же порядке, что в F9 → Options → Colors. «Текст у Far» и «Фон у Far» — консольные цвета, которые элемент получает, если тема его не задала (<code>terminal</code> — цвет терминала, см. <a href="#default">default</a>).</p>
+    <h3 id="el-panelitems">Панель</h3>
+<div class="tbl"><table class="els"><tr><th>Пункт Options → Colors</th><th>Имя</th><th></th><th>Текст у Far</th><th>Фон у Far</th></tr>
+<tr><td>Обычный текст</td><td><code>Panel.Text</code></td><td><span class="smp" style="color:#00ffff;background:#000080">Aa</span></td><td><span class="cs" style="background:#00ffff"></span><span class="cn">lightcyan</span></td><td><span class="cs" style="background:#000080"></span><span class="cn">blue</span></td></tr>
+<tr><td>Выбранный текст</td><td><code>Panel.Text.Selected</code></td><td><span class="smp" style="color:#ffff00;background:#000080">Aa</span></td><td><span class="cs" style="background:#ffff00"></span><span class="cn">yellow</span></td><td><span class="cs" style="background:#000080"></span><span class="cn">blue</span></td></tr>
+<tr><td>Выделенный текст</td><td><code>Panel.Text.Highlight</code></td><td><span class="smp" style="color:#c0c0c0;background:#000080">Aa</span></td><td><span class="cn">terminal</span></td><td><span class="cs" style="background:#000080"></span><span class="cn">blue</span></td></tr>
+<tr><td>Выделенная информация</td><td><code>Panel.Text.Info</code></td><td><span class="smp" style="color:#ffff00;background:#000080">Aa</span></td><td><span class="cs" style="background:#ffff00"></span><span class="cn">yellow</span></td><td><span class="cs" style="background:#000080"></span><span class="cn">blue</span></td></tr>
+<tr><td>Перетаскиваемый текст</td><td><code>Panel.DragText</code></td><td><span class="smp" style="color:#ffff00;background:#008080">Aa</span></td><td><span class="cs" style="background:#ffff00"></span><span class="cn">yellow</span></td><td><span class="cs" style="background:#008080"></span><span class="cn">cyan</span></td></tr>
+<tr><td>Рамка</td><td><code>Panel.Box</code></td><td><span class="smp" style="color:#00ffff;background:#000080">Aa</span></td><td><span class="cs" style="background:#00ffff"></span><span class="cn">lightcyan</span></td><td><span class="cs" style="background:#000080"></span><span class="cn">blue</span></td></tr>
+<tr><td>Обычный курсор</td><td><code>Panel.Cursor</code></td><td><span class="smp" style="color:#000000;background:#008080">Aa</span></td><td><span class="cs" style="background:#000000"></span><span class="cn">black</span></td><td><span class="cs" style="background:#008080"></span><span class="cn">cyan</span></td></tr>
+<tr><td>Выделенный курсор</td><td><code>Panel.Cursor.Selected</code></td><td><span class="smp" style="color:#ffff00;background:#008080">Aa</span></td><td><span class="cs" style="background:#ffff00"></span><span class="cn">yellow</span></td><td><span class="cs" style="background:#008080"></span><span class="cn">cyan</span></td></tr>
+<tr><td>Обычный заголовок</td><td><code>Panel.Title</code></td><td><span class="smp" style="color:#00ffff;background:#000080">Aa</span></td><td><span class="cs" style="background:#00ffff"></span><span class="cn">lightcyan</span></td><td><span class="cs" style="background:#000080"></span><span class="cn">blue</span></td></tr>
+<tr><td>Выделенный заголовок</td><td><code>Panel.Title.Selected</code></td><td><span class="smp" style="color:#000000;background:#008080">Aa</span></td><td><span class="cs" style="background:#000000"></span><span class="cn">black</span></td><td><span class="cs" style="background:#008080"></span><span class="cn">cyan</span></td></tr>
+<tr><td>Заголовок колонки</td><td><code>Panel.Title.Column</code></td><td><span class="smp" style="color:#ffff00;background:#000080">Aa</span></td><td><span class="cs" style="background:#ffff00"></span><span class="cn">yellow</span></td><td><span class="cs" style="background:#000080"></span><span class="cn">blue</span></td></tr>
+<tr><td>Количество файлов</td><td><code>Panel.Info.Total</code></td><td><span class="smp" style="color:#00ffff;background:#000080">Aa</span></td><td><span class="cs" style="background:#00ffff"></span><span class="cn">lightcyan</span></td><td><span class="cs" style="background:#000080"></span><span class="cn">blue</span></td></tr>
+<tr><td>Количество выбранных файлов</td><td><code>Panel.Info.Selected</code></td><td><span class="smp" style="color:#ffff00;background:#008080">Aa</span></td><td><span class="cs" style="background:#ffff00"></span><span class="cn">yellow</span></td><td><span class="cs" style="background:#008080"></span><span class="cn">cyan</span></td></tr>
+<tr><td>Полоса прокрутки</td><td><code>Panel.Scrollbar</code></td><td><span class="smp" style="color:#00ffff;background:#000080">Aa</span></td><td><span class="cs" style="background:#00ffff"></span><span class="cn">lightcyan</span></td><td><span class="cs" style="background:#000080"></span><span class="cn">blue</span></td></tr>
+<tr><td>Количество фоновых экранов</td><td><code>Panel.ScreensNumber</code></td><td><span class="smp" style="color:#00ffff;background:#0c0c0c">Aa</span></td><td><span class="cs" style="background:#00ffff"></span><span class="cn">lightcyan</span></td><td><span class="cn">terminal</span></td></tr>
+</table></div>
+<h3 id="el-dialogitems">Диалог</h3>
+<div class="tbl"><table class="els"><tr><th>Пункт Options → Colors</th><th>Имя</th><th></th><th>Текст у Far</th><th>Фон у Far</th></tr>
+<tr><td>Обычный текст</td><td><code>Dialog.Text</code></td><td><span class="smp" style="color:#000000;background:#c0c0c0">Aa</span></td><td><span class="cs" style="background:#000000"></span><span class="cn">black</span></td><td><span class="cs" style="background:#c0c0c0"></span><span class="cn">lightgray</span></td></tr>
+<tr><td>Выделенный текст</td><td><code>Dialog.Text.Highlight</code></td><td><span class="smp" style="color:#ffff00;background:#c0c0c0">Aa</span></td><td><span class="cs" style="background:#ffff00"></span><span class="cn">yellow</span></td><td><span class="cs" style="background:#c0c0c0"></span><span class="cn">lightgray</span></td></tr>
+<tr><td>Блокированный текст</td><td><code>Dialog.Disabled</code></td><td><span class="smp" style="color:#808080;background:#c0c0c0">Aa</span></td><td><span class="cs" style="background:#808080"></span><span class="cn">darkgray</span></td><td><span class="cs" style="background:#c0c0c0"></span><span class="cn">lightgray</span></td></tr>
+<tr><td>Рамка</td><td><code>Dialog.Box</code></td><td><span class="smp" style="color:#000000;background:#c0c0c0">Aa</span></td><td><span class="cs" style="background:#000000"></span><span class="cn">black</span></td><td><span class="cs" style="background:#c0c0c0"></span><span class="cn">lightgray</span></td></tr>
+<tr><td>Заголовок рамки</td><td><code>Dialog.Box.Title</code></td><td><span class="smp" style="color:#000000;background:#c0c0c0">Aa</span></td><td><span class="cs" style="background:#000000"></span><span class="cn">black</span></td><td><span class="cs" style="background:#c0c0c0"></span><span class="cn">lightgray</span></td></tr>
+<tr><td>Выделенный заголовок рамки</td><td><code>Dialog.Box.Title.Highlight</code></td><td><span class="smp" style="color:#ffff00;background:#c0c0c0">Aa</span></td><td><span class="cs" style="background:#ffff00"></span><span class="cn">yellow</span></td><td><span class="cs" style="background:#c0c0c0"></span><span class="cn">lightgray</span></td></tr>
+<tr><td>Ввод текста</td><td><code>Dialog.Edit</code></td><td><span class="smp" style="color:#000000;background:#008080">Aa</span></td><td><span class="cs" style="background:#000000"></span><span class="cn">black</span></td><td><span class="cs" style="background:#008080"></span><span class="cn">cyan</span></td></tr>
+<tr><td>Неизмененный текст</td><td><code>Dialog.Edit.Unchanged</code></td><td><span class="smp" style="color:#c0c0c0;background:#008080">Aa</span></td><td><span class="cn">terminal</span></td><td><span class="cs" style="background:#008080"></span><span class="cn">cyan</span></td></tr>
+<tr><td>Ввод выделенного текста</td><td><code>Dialog.Edit.Selected</code></td><td><span class="smp" style="color:#ffffff;background:#0c0c0c">Aa</span></td><td><span class="cs" style="background:#ffffff"></span><span class="cn">white</span></td><td><span class="cn">terminal</span></td></tr>
+<tr><td>Блокированное поле ввода</td><td><code>Dialog.Edit.Disabled</code></td><td><span class="smp" style="color:#808080;background:#008080">Aa</span></td><td><span class="cs" style="background:#808080"></span><span class="cn">darkgray</span></td><td><span class="cs" style="background:#008080"></span><span class="cn">cyan</span></td></tr>
+<tr><td>Кнопки</td><td><code>Dialog.Button</code></td><td><span class="smp" style="color:#000000;background:#c0c0c0">Aa</span></td><td><span class="cs" style="background:#000000"></span><span class="cn">black</span></td><td><span class="cs" style="background:#c0c0c0"></span><span class="cn">lightgray</span></td></tr>
+<tr><td>Выбранные кнопки</td><td><code>Dialog.Button.Selected</code></td><td><span class="smp" style="color:#000000;background:#008080">Aa</span></td><td><span class="cs" style="background:#000000"></span><span class="cn">black</span></td><td><span class="cs" style="background:#008080"></span><span class="cn">cyan</span></td></tr>
+<tr><td>Выделенные кнопки</td><td><code>Dialog.Button.Highlight</code></td><td><span class="smp" style="color:#ffff00;background:#c0c0c0">Aa</span></td><td><span class="cs" style="background:#ffff00"></span><span class="cn">yellow</span></td><td><span class="cs" style="background:#c0c0c0"></span><span class="cn">lightgray</span></td></tr>
+<tr><td>Выбранные выделенные кнопки</td><td><code>Dialog.Button.Highlight.Selected</code></td><td><span class="smp" style="color:#ffff00;background:#008080">Aa</span></td><td><span class="cs" style="background:#ffff00"></span><span class="cn">yellow</span></td><td><span class="cs" style="background:#008080"></span><span class="cn">cyan</span></td></tr>
+<tr><td>Кнопка по умолчанию</td><td><code>Dialog.DefaultButton</code></td><td><span class="smp" style="color:#000000;background:#c0c0c0">Aa</span></td><td><span class="cs" style="background:#000000"></span><span class="cn">black</span></td><td><span class="cs" style="background:#c0c0c0"></span><span class="cn">lightgray</span></td></tr>
+<tr><td>Выбранная кнопка по умолчанию</td><td><code>Dialog.DefaultButton.Selected</code></td><td><span class="smp" style="color:#000000;background:#008080">Aa</span></td><td><span class="cs" style="background:#000000"></span><span class="cn">black</span></td><td><span class="cs" style="background:#008080"></span><span class="cn">cyan</span></td></tr>
+<tr><td>Выделенная кнопка по умолчанию</td><td><code>Dialog.DefaultButton.Highlight</code></td><td><span class="smp" style="color:#ffff00;background:#c0c0c0">Aa</span></td><td><span class="cs" style="background:#ffff00"></span><span class="cn">yellow</span></td><td><span class="cs" style="background:#c0c0c0"></span><span class="cn">lightgray</span></td></tr>
+<tr><td>Выбранная выделенная кнопка по умолчанию</td><td><code>Dialog.DefaultButton.Highlight.Selected</code></td><td><span class="smp" style="color:#ffff00;background:#008080">Aa</span></td><td><span class="cs" style="background:#ffff00"></span><span class="cn">yellow</span></td><td><span class="cs" style="background:#008080"></span><span class="cn">cyan</span></td></tr>
+<tr><td>Список → Обычный текст</td><td><code>Dialog.List.Text</code></td><td><span class="smp" style="color:#000000;background:#c0c0c0">Aa</span></td><td><span class="cs" style="background:#000000"></span><span class="cn">black</span></td><td><span class="cs" style="background:#c0c0c0"></span><span class="cn">lightgray</span></td></tr>
+<tr><td>Список → Выделенный текст</td><td><code>Dialog.List.Highlight</code></td><td><span class="smp" style="color:#ffff00;background:#c0c0c0">Aa</span></td><td><span class="cs" style="background:#ffff00"></span><span class="cn">yellow</span></td><td><span class="cs" style="background:#c0c0c0"></span><span class="cn">lightgray</span></td></tr>
+<tr><td>Список → Выбранный текст</td><td><code>Dialog.List.Text.Selected</code></td><td><span class="smp" style="color:#ffffff;background:#0c0c0c">Aa</span></td><td><span class="cs" style="background:#ffffff"></span><span class="cn">white</span></td><td><span class="cn">terminal</span></td></tr>
+<tr><td>Список → Выбранный выделенный текст</td><td><code>Dialog.List.Highlight.Selected</code></td><td><span class="smp" style="color:#ffff00;background:#0c0c0c">Aa</span></td><td><span class="cs" style="background:#ffff00"></span><span class="cn">yellow</span></td><td><span class="cn">terminal</span></td></tr>
+<tr><td>Список → Блокированный пункт</td><td><code>Dialog.List.Disabled</code></td><td><span class="smp" style="color:#808080;background:#c0c0c0">Aa</span></td><td><span class="cs" style="background:#808080"></span><span class="cn">darkgray</span></td><td><span class="cs" style="background:#c0c0c0"></span><span class="cn">lightgray</span></td></tr>
+<tr><td>Список → Рамка</td><td><code>Dialog.List.Box</code></td><td><span class="smp" style="color:#000000;background:#c0c0c0">Aa</span></td><td><span class="cs" style="background:#000000"></span><span class="cn">black</span></td><td><span class="cs" style="background:#c0c0c0"></span><span class="cn">lightgray</span></td></tr>
+<tr><td>Список → Заголовок рамки</td><td><code>Dialog.List.Title</code></td><td><span class="smp" style="color:#000000;background:#c0c0c0">Aa</span></td><td><span class="cs" style="background:#000000"></span><span class="cn">black</span></td><td><span class="cs" style="background:#c0c0c0"></span><span class="cn">lightgray</span></td></tr>
+<tr><td>Список → Полоса прокрутки</td><td><code>Dialog.List.Scrollbar</code></td><td><span class="smp" style="color:#000000;background:#c0c0c0">Aa</span></td><td><span class="cs" style="background:#000000"></span><span class="cn">black</span></td><td><span class="cs" style="background:#c0c0c0"></span><span class="cn">lightgray</span></td></tr>
+<tr><td>Список → Индикаторы длинных строк</td><td><code>Dialog.List.Arrows</code></td><td><span class="smp" style="color:#ffff00;background:#c0c0c0">Aa</span></td><td><span class="cs" style="background:#ffff00"></span><span class="cn">yellow</span></td><td><span class="cs" style="background:#c0c0c0"></span><span class="cn">lightgray</span></td></tr>
+<tr><td>Список → Выбранные индикаторы длинных строк</td><td><code>Dialog.List.Arrows.Selected</code></td><td><span class="smp" style="color:#ffff00;background:#0c0c0c">Aa</span></td><td><span class="cs" style="background:#ffff00"></span><span class="cn">yellow</span></td><td><span class="cn">terminal</span></td></tr>
+<tr><td>Список → Блокированные индикаторы длинных строк</td><td><code>Dialog.List.Arrows.Disabled</code></td><td><span class="smp" style="color:#808080;background:#c0c0c0">Aa</span></td><td><span class="cs" style="background:#808080"></span><span class="cn">darkgray</span></td><td><span class="cs" style="background:#c0c0c0"></span><span class="cn">lightgray</span></td></tr>
+<tr><td>Список → Серый текст списка</td><td><code>Dialog.List.GrayText</code></td><td><span class="smp" style="color:#808080;background:#c0c0c0">Aa</span></td><td><span class="cs" style="background:#808080"></span><span class="cn">darkgray</span></td><td><span class="cs" style="background:#c0c0c0"></span><span class="cn">lightgray</span></td></tr>
+<tr><td>Список → Выбранный серый текст списка</td><td><code>Dialog.List.GrayText.Selected</code></td><td><span class="smp" style="color:#c0c0c0;background:#0c0c0c">Aa</span></td><td><span class="cn">terminal</span></td><td><span class="cn">terminal</span></td></tr>
+<tr><td>Комбинированный список → Обычный текст</td><td><code>Dialog.Combo.Text</code></td><td><span class="smp" style="color:#ffffff;background:#008080">Aa</span></td><td><span class="cs" style="background:#ffffff"></span><span class="cn">white</span></td><td><span class="cs" style="background:#008080"></span><span class="cn">cyan</span></td></tr>
+<tr><td>Комбинированный список → Выделенный текст</td><td><code>Dialog.Combo.Highlight</code></td><td><span class="smp" style="color:#ffff00;background:#008080">Aa</span></td><td><span class="cs" style="background:#ffff00"></span><span class="cn">yellow</span></td><td><span class="cs" style="background:#008080"></span><span class="cn">cyan</span></td></tr>
+<tr><td>Комбинированный список → Выбранный текст</td><td><code>Dialog.Combo.Text.Selected</code></td><td><span class="smp" style="color:#ffffff;background:#0c0c0c">Aa</span></td><td><span class="cs" style="background:#ffffff"></span><span class="cn">white</span></td><td><span class="cn">terminal</span></td></tr>
+<tr><td>Комбинированный список → Выбранный выделенный текст</td><td><code>Dialog.Combo.Highlight.Selected</code></td><td><span class="smp" style="color:#ffff00;background:#0c0c0c">Aa</span></td><td><span class="cs" style="background:#ffff00"></span><span class="cn">yellow</span></td><td><span class="cn">terminal</span></td></tr>
+<tr><td>Комбинированный список → Блокированный пункт</td><td><code>Dialog.Combo.Disabled</code></td><td><span class="smp" style="color:#808080;background:#008080">Aa</span></td><td><span class="cs" style="background:#808080"></span><span class="cn">darkgray</span></td><td><span class="cs" style="background:#008080"></span><span class="cn">cyan</span></td></tr>
+<tr><td>Комбинированный список → Рамка</td><td><code>Dialog.Combo.Box</code></td><td><span class="smp" style="color:#ffffff;background:#008080">Aa</span></td><td><span class="cs" style="background:#ffffff"></span><span class="cn">white</span></td><td><span class="cs" style="background:#008080"></span><span class="cn">cyan</span></td></tr>
+<tr><td>Комбинированный список → Заголовок рамки</td><td><code>Dialog.Combo.Title</code></td><td><span class="smp" style="color:#ffffff;background:#008080">Aa</span></td><td><span class="cs" style="background:#ffffff"></span><span class="cn">white</span></td><td><span class="cs" style="background:#008080"></span><span class="cn">cyan</span></td></tr>
+<tr><td>Комбинированный список → Полоса прокрутки</td><td><code>Dialog.Combo.Scrollbar</code></td><td><span class="smp" style="color:#ffffff;background:#008080">Aa</span></td><td><span class="cs" style="background:#ffffff"></span><span class="cn">white</span></td><td><span class="cs" style="background:#008080"></span><span class="cn">cyan</span></td></tr>
+<tr><td>Комбинированный список → Индикаторы длинных строк</td><td><code>Dialog.Combo.Arrows</code></td><td><span class="smp" style="color:#ffff00;background:#008080">Aa</span></td><td><span class="cs" style="background:#ffff00"></span><span class="cn">yellow</span></td><td><span class="cs" style="background:#008080"></span><span class="cn">cyan</span></td></tr>
+<tr><td>Комбинированный список → Выбранные индикаторы длинных строк</td><td><code>Dialog.Combo.Arrows.Selected</code></td><td><span class="smp" style="color:#ffff00;background:#0c0c0c">Aa</span></td><td><span class="cs" style="background:#ffff00"></span><span class="cn">yellow</span></td><td><span class="cn">terminal</span></td></tr>
+<tr><td>Комбинированный список → Блокированные индикаторы длинных строк</td><td><code>Dialog.Combo.Arrows.Disabled</code></td><td><span class="smp" style="color:#808080;background:#008080">Aa</span></td><td><span class="cs" style="background:#808080"></span><span class="cn">darkgray</span></td><td><span class="cs" style="background:#008080"></span><span class="cn">cyan</span></td></tr>
+<tr><td>Комбинированный список → Серый текст списка</td><td><code>Dialog.Combo.GrayText</code></td><td><span class="smp" style="color:#808080;background:#008080">Aa</span></td><td><span class="cs" style="background:#808080"></span><span class="cn">darkgray</span></td><td><span class="cs" style="background:#008080"></span><span class="cn">cyan</span></td></tr>
+<tr><td>Комбинированный список → Выбранный серый текст списка</td><td><code>Dialog.Combo.GrayText.Selected</code></td><td><span class="smp" style="color:#c0c0c0;background:#0c0c0c">Aa</span></td><td><span class="cn">terminal</span></td><td><span class="cn">terminal</span></td></tr>
+</table></div>
+<h3 id="el-warndialogitems">Предупреждение</h3>
+<div class="tbl"><table class="els"><tr><th>Пункт Options → Colors</th><th>Имя</th><th></th><th>Текст у Far</th><th>Фон у Far</th></tr>
+<tr><td>Обычный текст</td><td><code>WarnDialog.Text</code></td><td><span class="smp" style="color:#ffffff;background:#800000">Aa</span></td><td><span class="cs" style="background:#ffffff"></span><span class="cn">white</span></td><td><span class="cs" style="background:#800000"></span><span class="cn">red</span></td></tr>
+<tr><td>Выделенный текст</td><td><code>WarnDialog.Text.Highlight</code></td><td><span class="smp" style="color:#ffff00;background:#800000">Aa</span></td><td><span class="cs" style="background:#ffff00"></span><span class="cn">yellow</span></td><td><span class="cs" style="background:#800000"></span><span class="cn">red</span></td></tr>
+<tr><td>Блокированный текст</td><td><code>WarnDialog.Disabled</code></td><td><span class="smp" style="color:#808080;background:#800000">Aa</span></td><td><span class="cs" style="background:#808080"></span><span class="cn">darkgray</span></td><td><span class="cs" style="background:#800000"></span><span class="cn">red</span></td></tr>
+<tr><td>Рамка</td><td><code>WarnDialog.Box</code></td><td><span class="smp" style="color:#ffffff;background:#800000">Aa</span></td><td><span class="cs" style="background:#ffffff"></span><span class="cn">white</span></td><td><span class="cs" style="background:#800000"></span><span class="cn">red</span></td></tr>
+<tr><td>Заголовок рамки</td><td><code>WarnDialog.Box.Title</code></td><td><span class="smp" style="color:#ffffff;background:#800000">Aa</span></td><td><span class="cs" style="background:#ffffff"></span><span class="cn">white</span></td><td><span class="cs" style="background:#800000"></span><span class="cn">red</span></td></tr>
+<tr><td>Выделенный заголовок рамки</td><td><code>WarnDialog.Box.Title.Highlight</code></td><td><span class="smp" style="color:#ffff00;background:#800000">Aa</span></td><td><span class="cs" style="background:#ffff00"></span><span class="cn">yellow</span></td><td><span class="cs" style="background:#800000"></span><span class="cn">red</span></td></tr>
+<tr><td>Ввод текста</td><td><code>WarnDialog.Edit</code></td><td><span class="smp" style="color:#000000;background:#008080">Aa</span></td><td><span class="cs" style="background:#000000"></span><span class="cn">black</span></td><td><span class="cs" style="background:#008080"></span><span class="cn">cyan</span></td></tr>
+<tr><td>Неизмененный текст</td><td><code>WarnDialog.Edit.Unchanged</code></td><td><span class="smp" style="color:#c0c0c0;background:#008080">Aa</span></td><td><span class="cn">terminal</span></td><td><span class="cs" style="background:#008080"></span><span class="cn">cyan</span></td></tr>
+<tr><td>Ввод выделенного текста</td><td><code>WarnDialog.Edit.Selected</code></td><td><span class="smp" style="color:#ffffff;background:#0c0c0c">Aa</span></td><td><span class="cs" style="background:#ffffff"></span><span class="cn">white</span></td><td><span class="cn">terminal</span></td></tr>
+<tr><td>Блокированное поле ввода</td><td><code>WarnDialog.Edit.Disabled</code></td><td><span class="smp" style="color:#808080;background:#008080">Aa</span></td><td><span class="cs" style="background:#808080"></span><span class="cn">darkgray</span></td><td><span class="cs" style="background:#008080"></span><span class="cn">cyan</span></td></tr>
+<tr><td>Кнопки</td><td><code>WarnDialog.Button</code></td><td><span class="smp" style="color:#ffffff;background:#800000">Aa</span></td><td><span class="cs" style="background:#ffffff"></span><span class="cn">white</span></td><td><span class="cs" style="background:#800000"></span><span class="cn">red</span></td></tr>
+<tr><td>Выбранные кнопки</td><td><code>WarnDialog.Button.Selected</code></td><td><span class="smp" style="color:#000000;background:#c0c0c0">Aa</span></td><td><span class="cs" style="background:#000000"></span><span class="cn">black</span></td><td><span class="cs" style="background:#c0c0c0"></span><span class="cn">lightgray</span></td></tr>
+<tr><td>Выделенные кнопки</td><td><code>WarnDialog.Button.Highlight</code></td><td><span class="smp" style="color:#ffff00;background:#800000">Aa</span></td><td><span class="cs" style="background:#ffff00"></span><span class="cn">yellow</span></td><td><span class="cs" style="background:#800000"></span><span class="cn">red</span></td></tr>
+<tr><td>Выбранные выделенные кнопки</td><td><code>WarnDialog.Button.Highlight.Selected</code></td><td><span class="smp" style="color:#ffff00;background:#c0c0c0">Aa</span></td><td><span class="cs" style="background:#ffff00"></span><span class="cn">yellow</span></td><td><span class="cs" style="background:#c0c0c0"></span><span class="cn">lightgray</span></td></tr>
+<tr><td>Кнопка по умолчанию</td><td><code>WarnDialog.DefaultButton</code></td><td><span class="smp" style="color:#ffffff;background:#800000">Aa</span></td><td><span class="cs" style="background:#ffffff"></span><span class="cn">white</span></td><td><span class="cs" style="background:#800000"></span><span class="cn">red</span></td></tr>
+<tr><td>Выбранная кнопка по умолчанию</td><td><code>WarnDialog.DefaultButton.Selected</code></td><td><span class="smp" style="color:#000000;background:#c0c0c0">Aa</span></td><td><span class="cs" style="background:#000000"></span><span class="cn">black</span></td><td><span class="cs" style="background:#c0c0c0"></span><span class="cn">lightgray</span></td></tr>
+<tr><td>Выделенная кнопка по умолчанию</td><td><code>WarnDialog.DefaultButton.Highlight</code></td><td><span class="smp" style="color:#ffff00;background:#800000">Aa</span></td><td><span class="cs" style="background:#ffff00"></span><span class="cn">yellow</span></td><td><span class="cs" style="background:#800000"></span><span class="cn">red</span></td></tr>
+<tr><td>Выбранная выделенная кнопка по умолчанию</td><td><code>WarnDialog.DefaultButton.Highlight.Selected</code></td><td><span class="smp" style="color:#ffff00;background:#c0c0c0">Aa</span></td><td><span class="cs" style="background:#ffff00"></span><span class="cn">yellow</span></td><td><span class="cs" style="background:#c0c0c0"></span><span class="cn">lightgray</span></td></tr>
+<tr><td>Список → Обычный текст</td><td><code>WarnDialog.List.Text</code></td><td><span class="smp" style="color:#ffffff;background:#800000">Aa</span></td><td><span class="cs" style="background:#ffffff"></span><span class="cn">white</span></td><td><span class="cs" style="background:#800000"></span><span class="cn">red</span></td></tr>
+<tr><td>Список → Выделенный текст</td><td><code>WarnDialog.List.Highlight</code></td><td><span class="smp" style="color:#ffff00;background:#800000">Aa</span></td><td><span class="cs" style="background:#ffff00"></span><span class="cn">yellow</span></td><td><span class="cs" style="background:#800000"></span><span class="cn">red</span></td></tr>
+<tr><td>Список → Выбранный текст</td><td><code>WarnDialog.List.Text.Selected</code></td><td><span class="smp" style="color:#000000;background:#c0c0c0">Aa</span></td><td><span class="cs" style="background:#000000"></span><span class="cn">black</span></td><td><span class="cs" style="background:#c0c0c0"></span><span class="cn">lightgray</span></td></tr>
+<tr><td>Список → Выбранный выделенный текст</td><td><code>WarnDialog.List.Highlight.Selected</code></td><td><span class="smp" style="color:#ffff00;background:#c0c0c0">Aa</span></td><td><span class="cs" style="background:#ffff00"></span><span class="cn">yellow</span></td><td><span class="cs" style="background:#c0c0c0"></span><span class="cn">lightgray</span></td></tr>
+<tr><td>Список → Блокированный пункт</td><td><code>WarnDialog.List.Disabled</code></td><td><span class="smp" style="color:#808080;background:#800000">Aa</span></td><td><span class="cs" style="background:#808080"></span><span class="cn">darkgray</span></td><td><span class="cs" style="background:#800000"></span><span class="cn">red</span></td></tr>
+<tr><td>Список → Рамка</td><td><code>WarnDialog.List.Box</code></td><td><span class="smp" style="color:#ffffff;background:#800000">Aa</span></td><td><span class="cs" style="background:#ffffff"></span><span class="cn">white</span></td><td><span class="cs" style="background:#800000"></span><span class="cn">red</span></td></tr>
+<tr><td>Список → Заголовок рамки</td><td><code>WarnDialog.List.Title</code></td><td><span class="smp" style="color:#ffffff;background:#800000">Aa</span></td><td><span class="cs" style="background:#ffffff"></span><span class="cn">white</span></td><td><span class="cs" style="background:#800000"></span><span class="cn">red</span></td></tr>
+<tr><td>Список → Полоса прокрутки</td><td><code>WarnDialog.List.Scrollbar</code></td><td><span class="smp" style="color:#ffffff;background:#800000">Aa</span></td><td><span class="cs" style="background:#ffffff"></span><span class="cn">white</span></td><td><span class="cs" style="background:#800000"></span><span class="cn">red</span></td></tr>
+<tr><td>Список → Индикаторы длинных строк</td><td><code>WarnDialog.List.Arrows</code></td><td><span class="smp" style="color:#ffff00;background:#800000">Aa</span></td><td><span class="cs" style="background:#ffff00"></span><span class="cn">yellow</span></td><td><span class="cs" style="background:#800000"></span><span class="cn">red</span></td></tr>
+<tr><td>Список → Выбранные индикаторы длинных строк</td><td><code>WarnDialog.List.Arrows.Selected</code></td><td><span class="smp" style="color:#ffff00;background:#c0c0c0">Aa</span></td><td><span class="cs" style="background:#ffff00"></span><span class="cn">yellow</span></td><td><span class="cs" style="background:#c0c0c0"></span><span class="cn">lightgray</span></td></tr>
+<tr><td>Список → Блокированные индикаторы длинных строк</td><td><code>WarnDialog.List.Arrows.Disabled</code></td><td><span class="smp" style="color:#808080;background:#800000">Aa</span></td><td><span class="cs" style="background:#808080"></span><span class="cn">darkgray</span></td><td><span class="cs" style="background:#800000"></span><span class="cn">red</span></td></tr>
+<tr><td>Список → Серый текст списка</td><td><code>WarnDialog.List.GrayText</code></td><td><span class="smp" style="color:#808080;background:#800000">Aa</span></td><td><span class="cs" style="background:#808080"></span><span class="cn">darkgray</span></td><td><span class="cs" style="background:#800000"></span><span class="cn">red</span></td></tr>
+<tr><td>Список → Выбранный серый текст списка</td><td><code>WarnDialog.List.GrayText.Selected</code></td><td><span class="smp" style="color:#000000;background:#c0c0c0">Aa</span></td><td><span class="cs" style="background:#000000"></span><span class="cn">black</span></td><td><span class="cs" style="background:#c0c0c0"></span><span class="cn">lightgray</span></td></tr>
+<tr><td>Комбинированный список → Обычный текст</td><td><code>WarnDialog.Combo.Text</code></td><td><span class="smp" style="color:#ffffff;background:#008080">Aa</span></td><td><span class="cs" style="background:#ffffff"></span><span class="cn">white</span></td><td><span class="cs" style="background:#008080"></span><span class="cn">cyan</span></td></tr>
+<tr><td>Комбинированный список → Выделенный текст</td><td><code>WarnDialog.Combo.Highlight</code></td><td><span class="smp" style="color:#ffff00;background:#008080">Aa</span></td><td><span class="cs" style="background:#ffff00"></span><span class="cn">yellow</span></td><td><span class="cs" style="background:#008080"></span><span class="cn">cyan</span></td></tr>
+<tr><td>Комбинированный список → Выбранный текст</td><td><code>WarnDialog.Combo.Text.Selected</code></td><td><span class="smp" style="color:#ffffff;background:#0c0c0c">Aa</span></td><td><span class="cs" style="background:#ffffff"></span><span class="cn">white</span></td><td><span class="cn">terminal</span></td></tr>
+<tr><td>Комбинированный список → Выбранный выделенный текст</td><td><code>WarnDialog.Combo.Highlight.Selected</code></td><td><span class="smp" style="color:#ffff00;background:#0c0c0c">Aa</span></td><td><span class="cs" style="background:#ffff00"></span><span class="cn">yellow</span></td><td><span class="cn">terminal</span></td></tr>
+<tr><td>Комбинированный список → Блокированный пункт</td><td><code>WarnDialog.Combo.Disabled</code></td><td><span class="smp" style="color:#808080;background:#008080">Aa</span></td><td><span class="cs" style="background:#808080"></span><span class="cn">darkgray</span></td><td><span class="cs" style="background:#008080"></span><span class="cn">cyan</span></td></tr>
+<tr><td>Комбинированный список → Рамка</td><td><code>WarnDialog.Combo.Box</code></td><td><span class="smp" style="color:#ffffff;background:#008080">Aa</span></td><td><span class="cs" style="background:#ffffff"></span><span class="cn">white</span></td><td><span class="cs" style="background:#008080"></span><span class="cn">cyan</span></td></tr>
+<tr><td>Комбинированный список → Заголовок рамки</td><td><code>WarnDialog.Combo.Title</code></td><td><span class="smp" style="color:#ffffff;background:#008080">Aa</span></td><td><span class="cs" style="background:#ffffff"></span><span class="cn">white</span></td><td><span class="cs" style="background:#008080"></span><span class="cn">cyan</span></td></tr>
+<tr><td>Комбинированный список → Полоса прокрутки</td><td><code>WarnDialog.Combo.Scrollbar</code></td><td><span class="smp" style="color:#ffffff;background:#008080">Aa</span></td><td><span class="cs" style="background:#ffffff"></span><span class="cn">white</span></td><td><span class="cs" style="background:#008080"></span><span class="cn">cyan</span></td></tr>
+<tr><td>Комбинированный список → Индикаторы длинных строк</td><td><code>WarnDialog.Combo.Arrows</code></td><td><span class="smp" style="color:#ffff00;background:#008080">Aa</span></td><td><span class="cs" style="background:#ffff00"></span><span class="cn">yellow</span></td><td><span class="cs" style="background:#008080"></span><span class="cn">cyan</span></td></tr>
+<tr><td>Комбинированный список → Выбранные индикаторы длинных строк</td><td><code>WarnDialog.Combo.Arrows.Selected</code></td><td><span class="smp" style="color:#ffff00;background:#0c0c0c">Aa</span></td><td><span class="cs" style="background:#ffff00"></span><span class="cn">yellow</span></td><td><span class="cn">terminal</span></td></tr>
+<tr><td>Комбинированный список → Блокированные индикаторы длинных строк</td><td><code>WarnDialog.Combo.Arrows.Disabled</code></td><td><span class="smp" style="color:#808080;background:#008080">Aa</span></td><td><span class="cs" style="background:#808080"></span><span class="cn">darkgray</span></td><td><span class="cs" style="background:#008080"></span><span class="cn">cyan</span></td></tr>
+<tr><td>Комбинированный список → Серый текст списка</td><td><code>WarnDialog.Combo.GrayText</code></td><td><span class="smp" style="color:#808080;background:#008080">Aa</span></td><td><span class="cs" style="background:#808080"></span><span class="cn">darkgray</span></td><td><span class="cs" style="background:#008080"></span><span class="cn">cyan</span></td></tr>
+<tr><td>Комбинированный список → Выбранный серый текст списка</td><td><code>WarnDialog.Combo.GrayText.Selected</code></td><td><span class="smp" style="color:#c0c0c0;background:#0c0c0c">Aa</span></td><td><span class="cn">terminal</span></td><td><span class="cn">terminal</span></td></tr>
+</table></div>
+<h3 id="el-menuitems">Меню</h3>
+<div class="tbl"><table class="els"><tr><th>Пункт Options → Colors</th><th>Имя</th><th></th><th>Текст у Far</th><th>Фон у Far</th></tr>
+<tr><td>Обычный текст</td><td><code>Menu.Text</code></td><td><span class="smp" style="color:#ffffff;background:#008080">Aa</span></td><td><span class="cs" style="background:#ffffff"></span><span class="cn">white</span></td><td><span class="cs" style="background:#008080"></span><span class="cn">cyan</span></td></tr>
+<tr><td>Выбранный текст</td><td><code>Menu.Text.Selected</code></td><td><span class="smp" style="color:#ffffff;background:#0c0c0c">Aa</span></td><td><span class="cs" style="background:#ffffff"></span><span class="cn">white</span></td><td><span class="cn">terminal</span></td></tr>
+<tr><td>Выделенный текст</td><td><code>Menu.Highlight</code></td><td><span class="smp" style="color:#ffff00;background:#008080">Aa</span></td><td><span class="cs" style="background:#ffff00"></span><span class="cn">yellow</span></td><td><span class="cs" style="background:#008080"></span><span class="cn">cyan</span></td></tr>
+<tr><td>Выбранный выделенный текст</td><td><code>Menu.Highlight.Selected</code></td><td><span class="smp" style="color:#ffff00;background:#0c0c0c">Aa</span></td><td><span class="cs" style="background:#ffff00"></span><span class="cn">yellow</span></td><td><span class="cn">terminal</span></td></tr>
+<tr><td>Блокированный текст</td><td><code>Menu.Text.Disabled</code></td><td><span class="smp" style="color:#808080;background:#008080">Aa</span></td><td><span class="cs" style="background:#808080"></span><span class="cn">darkgray</span></td><td><span class="cs" style="background:#008080"></span><span class="cn">cyan</span></td></tr>
+<tr><td>Рамка</td><td><code>Menu.Box</code></td><td><span class="smp" style="color:#ffffff;background:#008080">Aa</span></td><td><span class="cs" style="background:#ffffff"></span><span class="cn">white</span></td><td><span class="cs" style="background:#008080"></span><span class="cn">cyan</span></td></tr>
+<tr><td>Заголовок рамки</td><td><code>Menu.Title</code></td><td><span class="smp" style="color:#ffffff;background:#008080">Aa</span></td><td><span class="cs" style="background:#ffffff"></span><span class="cn">white</span></td><td><span class="cs" style="background:#008080"></span><span class="cn">cyan</span></td></tr>
+<tr><td>Полоса прокрутки</td><td><code>Menu.Scrollbar</code></td><td><span class="smp" style="color:#ffffff;background:#008080">Aa</span></td><td><span class="cs" style="background:#ffffff"></span><span class="cn">white</span></td><td><span class="cs" style="background:#008080"></span><span class="cn">cyan</span></td></tr>
+<tr><td>Индикаторы длинных строк</td><td><code>Menu.Arrows</code></td><td><span class="smp" style="color:#ffff00;background:#008080">Aa</span></td><td><span class="cs" style="background:#ffff00"></span><span class="cn">yellow</span></td><td><span class="cs" style="background:#008080"></span><span class="cn">cyan</span></td></tr>
+<tr><td>Выбранные индикаторы длинных строк</td><td><code>Menu.Arrows.Selected</code></td><td><span class="smp" style="color:#ffff00;background:#0c0c0c">Aa</span></td><td><span class="cs" style="background:#ffff00"></span><span class="cn">yellow</span></td><td><span class="cn">terminal</span></td></tr>
+<tr><td>Блокированные индикаторы длинных строк</td><td><code>Menu.Arrows.Disabled</code></td><td><span class="smp" style="color:#808080;background:#008080">Aa</span></td><td><span class="cs" style="background:#808080"></span><span class="cn">darkgray</span></td><td><span class="cs" style="background:#008080"></span><span class="cn">cyan</span></td></tr>
+<tr><td>Серый текст</td><td><code>Menu.GrayText</code></td><td><span class="smp" style="color:#808080;background:#008080">Aa</span></td><td><span class="cs" style="background:#808080"></span><span class="cn">darkgray</span></td><td><span class="cs" style="background:#008080"></span><span class="cn">cyan</span></td></tr>
+<tr><td>Выбранный серый текст</td><td><code>Menu.GrayText.Selected</code></td><td><span class="smp" style="color:#c0c0c0;background:#0c0c0c">Aa</span></td><td><span class="cn">terminal</span></td><td><span class="cn">terminal</span></td></tr>
+</table></div>
+<h3 id="el-hmenuitems">Горизонтальное меню</h3>
+<div class="tbl"><table class="els"><tr><th>Пункт Options → Colors</th><th>Имя</th><th></th><th>Текст у Far</th><th>Фон у Far</th></tr>
+<tr><td>Обычный текст</td><td><code>HMenu.Text</code></td><td><span class="smp" style="color:#000000;background:#008080">Aa</span></td><td><span class="cs" style="background:#000000"></span><span class="cn">black</span></td><td><span class="cs" style="background:#008080"></span><span class="cn">cyan</span></td></tr>
+<tr><td>Выбранный текст</td><td><code>HMenu.Text.Selected</code></td><td><span class="smp" style="color:#ffffff;background:#0c0c0c">Aa</span></td><td><span class="cs" style="background:#ffffff"></span><span class="cn">white</span></td><td><span class="cn">terminal</span></td></tr>
+<tr><td>Выделенный текст</td><td><code>HMenu.Highlight</code></td><td><span class="smp" style="color:#ffff00;background:#008080">Aa</span></td><td><span class="cs" style="background:#ffff00"></span><span class="cn">yellow</span></td><td><span class="cs" style="background:#008080"></span><span class="cn">cyan</span></td></tr>
+<tr><td>Выбранный выделенный текст</td><td><code>HMenu.Highlight.Selected</code></td><td><span class="smp" style="color:#ffff00;background:#0c0c0c">Aa</span></td><td><span class="cs" style="background:#ffff00"></span><span class="cn">yellow</span></td><td><span class="cn">terminal</span></td></tr>
+</table></div>
+<h3 id="el-keybaritems">Линейка клавиш</h3>
+<div class="tbl"><table class="els"><tr><th>Пункт Options → Colors</th><th>Имя</th><th></th><th>Текст у Far</th><th>Фон у Far</th></tr>
+<tr><td>Номера клавиш</td><td><code>Keybar.Num</code></td><td><span class="smp" style="color:#c0c0c0;background:#0c0c0c">Aa</span></td><td><span class="cn">terminal</span></td><td><span class="cn">terminal</span></td></tr>
+<tr><td>Названия клавиш</td><td><code>Keybar.Text</code></td><td><span class="smp" style="color:#000000;background:#008080">Aa</span></td><td><span class="cs" style="background:#000000"></span><span class="cn">black</span></td><td><span class="cs" style="background:#008080"></span><span class="cn">cyan</span></td></tr>
+<tr><td>Фон</td><td><code>Keybar.Background</code></td><td><span class="smp" style="color:#c0c0c0;background:#0c0c0c">Aa</span></td><td><span class="cn">terminal</span></td><td><span class="cn">terminal</span></td></tr>
+</table></div>
+<h3 id="el-commandlineitems">Командная строка</h3>
+<div class="tbl"><table class="els"><tr><th>Пункт Options → Colors</th><th>Имя</th><th></th><th>Текст у Far</th><th>Фон у Far</th></tr>
+<tr><td>Обычный текст</td><td><code>CommandLine</code></td><td><span class="smp" style="color:#c0c0c0;background:#0c0c0c">Aa</span></td><td><span class="cn">terminal</span></td><td><span class="cn">terminal</span></td></tr>
+<tr><td>Ввод выделенного текста</td><td><code>CommandLine.Selected</code></td><td><span class="smp" style="color:#000000;background:#008080">Aa</span></td><td><span class="cs" style="background:#000000"></span><span class="cn">black</span></td><td><span class="cs" style="background:#008080"></span><span class="cn">cyan</span></td></tr>
+<tr><td>Текст префикса</td><td><code>CommandLine.Prefix</code></td><td><span class="smp" style="color:#c0c0c0;background:#0c0c0c">Aa</span></td><td><span class="cn">terminal</span></td><td><span class="cn">terminal</span></td></tr>
+<tr><td>Пользовательский экран</td><td><code>CommandLine.UserScreen</code></td><td><span class="smp" style="color:#c0c0c0;background:#0c0c0c">Aa</span></td><td><span class="cn">terminal</span></td><td><span class="cn">terminal</span></td></tr>
+</table></div>
+<h3 id="el-clockitems">Часы</h3>
+<div class="tbl"><table class="els"><tr><th>Пункт Options → Colors</th><th>Имя</th><th></th><th>Текст у Far</th><th>Фон у Far</th></tr>
+<tr><td>Обычный текст (панели)</td><td><code>Clock</code></td><td><span class="smp" style="color:#000000;background:#008080">Aa</span></td><td><span class="cs" style="background:#000000"></span><span class="cn">black</span></td><td><span class="cs" style="background:#008080"></span><span class="cn">cyan</span></td></tr>
+<tr><td>Обычный текст (редактор)</td><td><code>Editor.Clock</code></td><td><span class="smp" style="color:#000000;background:#008080">Aa</span></td><td><span class="cs" style="background:#000000"></span><span class="cn">black</span></td><td><span class="cs" style="background:#008080"></span><span class="cn">cyan</span></td></tr>
+<tr><td>Обычный текст (вьювер)</td><td><code>Viewer.Clock</code></td><td><span class="smp" style="color:#000000;background:#008080">Aa</span></td><td><span class="cs" style="background:#000000"></span><span class="cn">black</span></td><td><span class="cs" style="background:#008080"></span><span class="cn">cyan</span></td></tr>
+</table></div>
+<h3 id="el-vieweritems">Просмотрщик</h3>
+<div class="tbl"><table class="els"><tr><th>Пункт Options → Colors</th><th>Имя</th><th></th><th>Текст у Far</th><th>Фон у Far</th></tr>
+<tr><td>Обычный текст</td><td><code>Viewer.Text</code></td><td><span class="smp" style="color:#00ffff;background:#000080">Aa</span></td><td><span class="cs" style="background:#00ffff"></span><span class="cn">lightcyan</span></td><td><span class="cs" style="background:#000080"></span><span class="cn">blue</span></td></tr>
+<tr><td>Выбранный текст</td><td><code>Viewer.Text.Selected</code></td><td><span class="smp" style="color:#000000;background:#008080">Aa</span></td><td><span class="cs" style="background:#000000"></span><span class="cn">black</span></td><td><span class="cs" style="background:#008080"></span><span class="cn">cyan</span></td></tr>
+<tr><td>Статус</td><td><code>Viewer.Status</code></td><td><span class="smp" style="color:#000000;background:#008080">Aa</span></td><td><span class="cs" style="background:#000000"></span><span class="cn">black</span></td><td><span class="cs" style="background:#008080"></span><span class="cn">cyan</span></td></tr>
+<tr><td>Стрелки сдвига экрана</td><td><code>Viewer.Arrows</code></td><td><span class="smp" style="color:#ffff00;background:#000080">Aa</span></td><td><span class="cs" style="background:#ffff00"></span><span class="cn">yellow</span></td><td><span class="cs" style="background:#000080"></span><span class="cn">blue</span></td></tr>
+<tr><td>Полоса прокрутки</td><td><code>Viewer.Scrollbar</code></td><td><span class="smp" style="color:#00ffff;background:#000080">Aa</span></td><td><span class="cs" style="background:#00ffff"></span><span class="cn">lightcyan</span></td><td><span class="cs" style="background:#000080"></span><span class="cn">blue</span></td></tr>
+</table></div>
+<h3 id="el-editoritems">Редактор</h3>
+<div class="tbl"><table class="els"><tr><th>Пункт Options → Colors</th><th>Имя</th><th></th><th>Текст у Far</th><th>Фон у Far</th></tr>
+<tr><td>Обычный текст</td><td><code>Editor.Text</code></td><td><span class="smp" style="color:#00ffff;background:#000080">Aa</span></td><td><span class="cs" style="background:#00ffff"></span><span class="cn">lightcyan</span></td><td><span class="cs" style="background:#000080"></span><span class="cn">blue</span></td></tr>
+<tr><td>Выбранный текст</td><td><code>Editor.Text.Selected</code></td><td><span class="smp" style="color:#000000;background:#008080">Aa</span></td><td><span class="cs" style="background:#000000"></span><span class="cn">black</span></td><td><span class="cs" style="background:#008080"></span><span class="cn">cyan</span></td></tr>
+<tr><td>Статус</td><td><code>Editor.Status</code></td><td><span class="smp" style="color:#000000;background:#008080">Aa</span></td><td><span class="cs" style="background:#000000"></span><span class="cn">black</span></td><td><span class="cs" style="background:#008080"></span><span class="cn">cyan</span></td></tr>
+<tr><td>Полоса прокрутки</td><td><code>Editor.Scrollbar</code></td><td><span class="smp" style="color:#00ffff;background:#000080">Aa</span></td><td><span class="cs" style="background:#00ffff"></span><span class="cn">lightcyan</span></td><td><span class="cs" style="background:#000080"></span><span class="cn">blue</span></td></tr>
+</table></div>
+<h3 id="el-helpitems">Помощь</h3>
+<div class="tbl"><table class="els"><tr><th>Пункт Options → Colors</th><th>Имя</th><th></th><th>Текст у Far</th><th>Фон у Far</th></tr>
+<tr><td>Обычный текст</td><td><code>Help.Text</code></td><td><span class="smp" style="color:#000000;background:#008080">Aa</span></td><td><span class="cs" style="background:#000000"></span><span class="cn">black</span></td><td><span class="cs" style="background:#008080"></span><span class="cn">cyan</span></td></tr>
+<tr><td>Выделенный текст</td><td><code>Help.Text.Highlight</code></td><td><span class="smp" style="color:#ffffff;background:#008080">Aa</span></td><td><span class="cs" style="background:#ffffff"></span><span class="cn">white</span></td><td><span class="cs" style="background:#008080"></span><span class="cn">cyan</span></td></tr>
+<tr><td>Ссылка</td><td><code>Help.Topic</code></td><td><span class="smp" style="color:#ffff00;background:#008080">Aa</span></td><td><span class="cs" style="background:#ffff00"></span><span class="cn">yellow</span></td><td><span class="cs" style="background:#008080"></span><span class="cn">cyan</span></td></tr>
+<tr><td>Выбранная ссылка</td><td><code>Help.Topic.Selected</code></td><td><span class="smp" style="color:#ffffff;background:#0c0c0c">Aa</span></td><td><span class="cs" style="background:#ffffff"></span><span class="cn">white</span></td><td><span class="cn">terminal</span></td></tr>
+<tr><td>Рамка</td><td><code>Help.Box</code></td><td><span class="smp" style="color:#000000;background:#008080">Aa</span></td><td><span class="cs" style="background:#000000"></span><span class="cn">black</span></td><td><span class="cs" style="background:#008080"></span><span class="cn">cyan</span></td></tr>
+<tr><td>Заголовок рамки</td><td><code>Help.Box.Title</code></td><td><span class="smp" style="color:#000000;background:#008080">Aa</span></td><td><span class="cs" style="background:#000000"></span><span class="cn">black</span></td><td><span class="cs" style="background:#008080"></span><span class="cn">cyan</span></td></tr>
+<tr><td>Полоса прокрутки</td><td><code>Help.Scrollbar</code></td><td><span class="smp" style="color:#000000;background:#008080">Aa</span></td><td><span class="cs" style="background:#000000"></span><span class="cn">black</span></td><td><span class="cs" style="background:#008080"></span><span class="cn">cyan</span></td></tr>
+</table></div>
+
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div>farsh — свободная программа под GPL-3.0-or-later. Справка Far — по BSD-лицензии Far Manager.</div>
+    <div><a href="https://github.com/errordnk/farsh">GitHub</a> · терминал <a href="https://som.sarnet.ru">Som</a></div>
+  </div>
+</footer>
+</body>
+</html>

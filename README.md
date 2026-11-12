@@ -128,7 +128,8 @@ the file manager.
 Options → Themes shows a live example of farsh in each theme: a panel with
 files and the editor with code. Far's classic blue, Catppuccin Mocha, Tokyo
 Night, One Dark, Dracula and Nord are built in; write your own in JSON and put
-it into `~/.config/farsh/themes` ([format](docs/themes.md)). A theme colors
+it into `~/.config/farsh/themes` — the theme format, every key and all 146
+elements, is described in full on [farsh.sarnet.ru/themes.html](https://farsh.sarnet.ru/themes.html) (in Russian). A theme colors
 everything: panels, dialogs, menus, the editor's code highlighting and the
 background of the media widgets. Below are real frames of that dialog.
 
