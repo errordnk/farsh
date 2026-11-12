@@ -43,6 +43,10 @@ pub fn default_of(name: &str) -> (u8, u8) {
 
 /// What Options > Colors set a color to, if it did (in the theme in use).
 fn user(name: &str) -> Option<(u8, u8)> {
+    // another theme's example (Options > Themes): its own changes, read as they are
+    if crate::theme::is_previewing() {
+        return changed().get(name).copied();
+    }
     {
         let guard = CHANGED.read().unwrap_or_else(|e| e.into_inner());
         if let Some(map) = guard.as_ref() {

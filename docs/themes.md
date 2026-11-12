@@ -1,14 +1,21 @@
 # farsh themes
 
-Options > Themes (right after Colors) chooses the theme. Built in: Default
+Options > Themes (right after Colors) is a dialog: the themes on the left,
+and on the right an example of farsh in the theme under the cursor - a file
+panel (Far's default highlighting, a marked file, the cursor, the totals), the
+editor with "hello, world" in C (fresh, with the theme's syntax colors) and the
+key bar. The arrows, PgUp/PgDn, Home/End, a letter (the next name starting
+with it) or the mouse move the cursor; Enter or OK makes it the theme, Esc
+keeps the one there was. Built in: Default
 (Far's own colors), Catppuccin Mocha, Tokyo Night, One Dark, Dracula, Nord
 (`assets/themes/*.json`). More themes are JSON files in
 `~/.config/farsh/themes/` (Windows: `%USERPROFILE%\.config\farsh\themes\`);
 the file name without `.json` is the theme's id, and a file named like a
 built-in one (`nord.json`) takes its place. The choice is the setting `Theme`
 in `settings.json` (no setting: `default`). Choosing a theme reads its file
-again, so a theme being written is seen by choosing it once more. A file that
-does not read is listed as "(cannot be read)"; choosing it says why.
+again, so a theme being written is seen by opening the dialog once more. A
+file that does not read is listed as "(cannot be read)", and the example's
+place says why.
 
 A theme colors the whole of farsh: the panels, menus, dialogs, key bar, help,
 the F3/F4 screens, the editor's and viewer's text (fresh) and the background of

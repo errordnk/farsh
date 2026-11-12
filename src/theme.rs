@@ -334,6 +334,20 @@ pub fn list() -> Vec<Listed> {
     out
 }
 
+/// Every theme of [`list`], read: its id, whether it is the user's, the theme or why not.
+pub fn load_all() -> Vec<(String, bool, Result<Arc<Theme>, String>)> {
+    list()
+        .into_iter()
+        .map(|listed| {
+            let theme = match listed.name {
+                Ok(_) => source(&listed.id).ok_or_else(|| "gone".to_string()).and_then(|(text, _)| Theme::parse(&listed.id, &text)).map(Arc::new),
+                Err(error) => Err(error),
+            };
+            (listed.id, listed.user, theme)
+        })
+        .collect()
+}
+
 /// A theme by its id (`None`: no such theme, or it does not read).
 pub fn load(id: &str) -> Option<Theme> {
     let (text, _) = source(id)?;
@@ -360,8 +374,30 @@ pub fn active() -> Arc<Theme> {
     theme
 }
 
+thread_local! {
+    /// The theme Options > Themes is showing an example of, while it paints it.
+    static PREVIEW: std::cell::RefCell<Option<Arc<Theme>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Runs `f` as if `theme` were the theme in use (on this thread): what it
+/// paints, and the fresh sessions it opens, are in that theme's colors.
+pub fn previewing<R>(theme: &Arc<Theme>, f: impl FnOnce() -> R) -> R {
+    let before = PREVIEW.with(|p| p.replace(Some(theme.clone())));
+    let result = f();
+    PREVIEW.with(|p| *p.borrow_mut() = before);
+    result
+}
+
+/// Whether a theme is being previewed (not the one in use).
+pub fn is_previewing() -> bool {
+    PREVIEW.with(|p| p.borrow().is_some())
+}
+
 /// Runs `f` with the theme in use, without taking a reference of it.
 pub fn with<R>(f: impl FnOnce(&Theme) -> R) -> R {
+    if let Some(theme) = PREVIEW.with(|p| p.borrow().clone()) {
+        return f(&theme);
+    }
     if let Some(theme) = ACTIVE.read().unwrap_or_else(|e| e.into_inner()).as_ref() {
         return f(theme);
     }

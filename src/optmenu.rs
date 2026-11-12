@@ -537,49 +537,25 @@ impl App {
             O::Reset => crate::colors::set(picker.name, None),
         }
     }
-    /// Options > Themes: the built-in themes, then the user's (`~/.config/farsh/themes`).
+    /// Options > Themes: the themes and an example of farsh in each (`src/themepick.rs`).
     pub(crate) fn open_themes(&mut self) {
-        let chosen = crate::theme::chosen();
-        let (mut entries, mut ids) = (Vec::new(), Vec::new());
-        let mut user = false;
-        for theme in crate::theme::list() {
-            if theme.user && !user && !entries.is_empty() {
-                entries.push(Entry::separator(""));
-                ids.push(None);
-            }
-            user |= theme.user;
-            let text = match &theme.name {
-                Ok(name) => name.clone(),
-                Err(_) => format!("{} ({})", theme.id, lang::tr("cannot be read")),
-            };
-            entries.push(Entry::new(text).checked((theme.id == chosen).then_some('\u{221A}')));
-            ids.push(Some(theme.id));
-        }
-        let mut menu = VMenu::with(&lang::tr("Themes"), entries);
-        menu.show_ampersand = true;
-        menu.bottom = crate::theme::user_dir().display().to_string();
-        if let Some(at) = ids.iter().position(|id| id.as_deref() == Some(chosen.as_str())) {
-            menu.select(at);
-        }
-        self.overlay = Overlay::List(Box::new(List::FarshThemes(menu, ids)));
+        self.overlay = Overlay::Themes(Box::new(crate::themepick::Picker::new()));
     }
 
-    pub(crate) fn farsh_themes_key(&mut self, mut menu: VMenu, ids: Vec<Option<String>>, key: crossterm::event::KeyEvent) {
-        match menu.key(key) {
-            Outcome::Chosen(index) => {
-                let Some(Some(id)) = ids.get(index) else {
-                    return self.overlay = Overlay::List(Box::new(List::FarshThemes(menu, ids)));
-                };
-                match crate::theme::choose(id) {
-                    Ok(()) => self.panels.theme_changed(),
-                    Err(error) => {
-                        let file = crate::theme::user_dir().join(format!("{id}.json"));
-                        self.overlay = Overlay::Dialog(Dialog::error(&format!("{}\n{error}", file.display())));
-                    }
+    pub(crate) fn themes_outcome(&mut self, picker: Box<crate::themepick::Picker>, outcome: crate::themepick::Outcome) {
+        use crate::themepick::Outcome as O;
+        match outcome {
+            O::Open => self.overlay = Overlay::Themes(picker),
+            O::Closed => {}
+            O::Chosen(id) => match crate::theme::choose(&id) {
+                Ok(()) => self.panels.theme_changed(),
+                Err(error) => {
+                    let file = crate::theme::user_dir().join(format!("{id}.json"));
+                    self.under.push(Overlay::Themes(picker));
+                    self.overlay = Overlay::Dialog(Dialog::error(&format!("{}
+{error}", file.display())));
                 }
-            }
-            Outcome::Closed => {}
-            _ => self.overlay = Overlay::List(Box::new(List::FarshThemes(menu, ids))),
+            },
         }
     }
 

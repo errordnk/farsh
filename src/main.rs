@@ -60,6 +60,7 @@ mod sortmenu;
 mod subst;
 mod tasklist;
 mod theme;
+mod themepick;
 mod usermenu;
 mod viewer;
 mod vmenu;
@@ -255,6 +256,8 @@ enum Overlay {
     Find(Box<findfile::Results>),
     /// Options > Colors: the color dialog.
     ColorPick(Box<colorpick::Picker>),
+    /// Options > Themes: the themes and an example of each.
+    Themes(Box<themepick::Picker>),
     /// far:config, typed on the command line.
     FarConfig(Box<farconfig::FarConfig>),
     /// F1: Far's help.
@@ -583,6 +586,10 @@ impl App {
                 picker.paint(frame);
                 cursor = None;
             }
+            Overlay::Themes(picker) => {
+                picker.paint(frame);
+                cursor = None;
+            }
             Overlay::FarConfig(config) => {
                 config.paint(frame);
                 cursor = None;
@@ -679,6 +686,10 @@ impl App {
                 let outcome = picker.key(key);
                 self.color_pick_outcome(picker, outcome);
             }
+            Overlay::Themes(mut picker) => {
+                let outcome = picker.key(key);
+                self.themes_outcome(picker, outcome);
+            }
             Overlay::Help(mut help) => {
                 let outcome = help.key(key);
                 self.help_outcome(help, outcome);
@@ -766,6 +777,10 @@ impl App {
             Overlay::ColorPick(mut picker) => {
                 let outcome = picker.click(event);
                 self.color_pick_outcome(picker, outcome);
+            }
+            Overlay::Themes(mut picker) => {
+                let outcome = picker.click(event);
+                self.themes_outcome(picker, outcome);
             }
             Overlay::Help(mut help) => {
                 let outcome = help.mouse(event);

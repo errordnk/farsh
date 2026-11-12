@@ -44,8 +44,6 @@ pub enum List {
     ColorGroups(VMenu),
     ColorItems(VMenu, &'static [crate::colordata::Item], (u16, u16)),
     Themes(VMenu),
-    /// Options > Themes (farsh's, `src/theme.rs`): the theme of each row (`None`: a separator).
-    FarshThemes(VMenu, Vec<Option<String>>),
     /// Options > Files highlighting and sort groups: what each row is.
     Highlight(VMenu, Vec<crate::optmenu::HiRow>),
 }
@@ -74,7 +72,6 @@ impl List {
             | List::ColorGroups(m)
             | List::ColorItems(m, _, _)
             | List::Themes(m)
-            | List::FarshThemes(m, _)
             | List::Highlight(m, _)
             | List::MaskGroups(m, _, _) => m,
         }
@@ -332,7 +329,6 @@ impl App {
                 Outcome::Closed => {}
                 _ => self.overlay = Overlay::List(Box::new(List::Themes(menu))),
             },
-            List::FarshThemes(menu, ids) => self.farsh_themes_key(menu, ids, key),
             List::History(mut menu) => {
                 let which = menu.which;
                 let outcome = menu.key(key, self.history_of(which));

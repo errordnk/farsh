@@ -440,7 +440,12 @@ over the shell screen.
     editor/viewer text. Built in (`assets/themes/`): default (Far's colors,
     exactly as before), catppuccin, tokyo-night, one-dark, dracula, nord;
     the user's in `~/.config/farsh/themes/` (a built-in's name replaces it).
-    The setting `Theme` (not Far's, so not in `settings::DEFAULTS`). Options >
+    The dialog (`src/themepick.rs`, the user's design) is the list and an
+    example of farsh in the theme under the cursor: a file panel, the editor
+    (a read-only fresh session over `%TEMP%\farsh-theme-example\hello.c`,
+    opened again for each theme) and the key bar, painted under
+    `theme::previewing` (a thread-local theme), so the theme in use changes
+    only on Enter. The setting `Theme` (not Far's, so not in `settings::DEFAULTS`). Options >
     Colors' changes are kept per theme (`Colors` for default,
     `Themes.<id>.Colors`). `palette::fg/bg` are the theme's console colors;
     SRP widgets follow it through the placeholder cells' background. The
