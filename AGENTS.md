@@ -466,6 +466,10 @@ over the shell screen.
   then compare `sha256sum` on both sides. `site/img/themes-*.webp` are drawn
   from the Themes dialog's real cells (a dump of the grid rendered with Cascadia
   Mono), not mock-ups; `farsh-*.webp` are the user's screenshots.
+  `site/themes.html` is the theme format in full (Russian); its table of
+  elements lists all 146 names of `src/colordata.rs` with Far's defaults and
+  the Colors menu's Russian labels from `assets/lang/ru.tsv`: a change there
+  or in `src/theme.rs` goes into it too (and into `docs/themes.md`).
 - Tests: `cargo test` (the shell test starts cmd.exe on Windows, /bin/sh elsewhere).
 - Code, comments and logs in English; talk to the user in Russian.
 
