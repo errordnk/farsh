@@ -1,0 +1,2 @@
+# the site is documentation, not code: GitHub counts only the Rust
+site/** linguist-documentation
