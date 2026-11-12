@@ -1,0 +1,17 @@
+{
+  "name": "Default",
+  "editor": {
+    "extends": "builtin://dark",
+    "syntax": {
+      "keyword": "white",
+      "string": "lightgreen",
+      "comment": "darkgray",
+      "function": "yellow",
+      "type": "lightmagenta",
+      "variable": "lightcyan",
+      "variable_builtin": "lightmagenta",
+      "constant": "yellow",
+      "operator": "white"
+    }
+  }
+}

@@ -433,6 +433,19 @@ over the shell screen.
     dialog (`src/colorpick.rs`) with the 16 console colors and Default; the
     code, 256-color and RGB fields and the styles are disabled. Panels,
     menus, dialogs, viewer, key bar and clock take them.
+  - Themes (Options > Themes, after Colors; farsh's own, not Far's: the
+    user's request of 2026-11-12) are JSON (`src/theme.rs`, the format in
+    `docs/themes.md`): RGB for Far's palette names (`Prefix.*` patterns), the
+    16 console colors, the default attribute and fresh's theme for the
+    editor/viewer text. Built in (`assets/themes/`): default (Far's colors,
+    exactly as before), catppuccin, tokyo-night, one-dark, dracula, nord;
+    the user's in `~/.config/farsh/themes/` (a built-in's name replaces it).
+    The setting `Theme` (not Far's, so not in `settings::DEFAULTS`). Options >
+    Colors' changes are kept per theme (`Colors` for default,
+    `Themes.<id>.Colors`). `palette::fg/bg` are the theme's console colors;
+    SRP widgets follow it through the placeholder cells' background. The
+    built-in JSONs are generated from one element table (a script, not kept):
+    edit them alike.
   - Files highlighting and sort groups (`src/highlight.rs`): Far's six
     default groups, the four parts, the filter dialog with its colors part
     (a color button opens the color dialog); the sort groups order the files

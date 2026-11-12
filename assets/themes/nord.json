@@ -1,0 +1,541 @@
+{
+  "name": "Nord",
+  "palette": {
+    "bg": "#2e3440",
+    "surface": "#3b4252",
+    "sel": "#4c566a",
+    "edit_bg": "#272c36",
+    "border": "#616e88",
+    "text": "#d8dee9",
+    "text_hi": "#eceff4",
+    "text_dim": "#b8c0cc",
+    "muted": "#7b88a1",
+    "accent": "#88c0d0",
+    "accent2": "#81a1c1",
+    "title": "#8fbcbb",
+    "yellow": "#ebcb8b",
+    "on_accent": "#2e3440",
+    "on_yellow": "#2e3440",
+    "red": "#bf616a",
+    "warn_bg": "#4b3138",
+    "warn_sel": "#6a3c45"
+  },
+  "console": {
+    "black": "#272c36",
+    "blue": "#5e81ac",
+    "green": "#a3be8c",
+    "cyan": "#8fbcbb",
+    "red": "#bf616a",
+    "magenta": "#b48ead",
+    "brown": "#d08770",
+    "lightgray": "#d8dee9",
+    "darkgray": "#616e88",
+    "lightblue": "#81a1c1",
+    "lightgreen": "#a3be8c",
+    "lightcyan": "#88c0d0",
+    "lightred": "#bf616a",
+    "lightmagenta": "#b48ead",
+    "yellow": "#ebcb8b",
+    "white": "#eceff4"
+  },
+  "default": {
+    "fg": "terminal",
+    "bg": "terminal"
+  },
+  "elements": {
+    "Panel.*": {
+      "fg": "text",
+      "bg": "bg"
+    },
+    "Panel.Text.Selected": {
+      "fg": "yellow"
+    },
+    "Panel.Text.Highlight": {
+      "fg": "text_dim"
+    },
+    "Panel.Text.Info": {
+      "fg": "yellow"
+    },
+    "Panel.Cursor": {
+      "fg": "text_hi",
+      "bg": "sel"
+    },
+    "Panel.Cursor.Selected": {
+      "fg": "yellow",
+      "bg": "sel"
+    },
+    "Panel.Title": {
+      "fg": "text_dim"
+    },
+    "Panel.Title.Selected": {
+      "fg": "on_accent",
+      "bg": "accent"
+    },
+    "Panel.Title.Column": {
+      "fg": "accent2"
+    },
+    "Panel.Info.Total": {
+      "fg": "text"
+    },
+    "Panel.Info.Selected": {
+      "fg": "on_yellow",
+      "bg": "yellow"
+    },
+    "Panel.DragText": {
+      "fg": "yellow",
+      "bg": "sel"
+    },
+    "Panel.Box": {
+      "fg": "border"
+    },
+    "Panel.Scrollbar": {
+      "fg": "border"
+    },
+    "Panel.ScreensNumber": {
+      "fg": "text",
+      "bg": "surface"
+    },
+    "Menu.*": {
+      "fg": "text",
+      "bg": "surface"
+    },
+    "Menu.Text.Selected": {
+      "fg": "text_hi",
+      "bg": "sel"
+    },
+    "Menu.Highlight": {
+      "fg": "yellow"
+    },
+    "Menu.Highlight.Selected": {
+      "fg": "yellow",
+      "bg": "sel"
+    },
+    "Menu.Text.Disabled": {
+      "fg": "muted"
+    },
+    "Menu.Box": {
+      "fg": "border"
+    },
+    "Menu.Title": {
+      "fg": "title"
+    },
+    "Menu.Scrollbar": {
+      "fg": "border"
+    },
+    "Menu.Arrows": {
+      "fg": "yellow"
+    },
+    "Menu.Arrows.Selected": {
+      "fg": "yellow",
+      "bg": "sel"
+    },
+    "Menu.Arrows.Disabled": {
+      "fg": "muted"
+    },
+    "Menu.GrayText": {
+      "fg": "muted"
+    },
+    "Menu.GrayText.Selected": {
+      "fg": "text_dim",
+      "bg": "sel"
+    },
+    "HMenu.*": {
+      "fg": "text",
+      "bg": "surface"
+    },
+    "HMenu.Text.Selected": {
+      "fg": "text_hi",
+      "bg": "sel"
+    },
+    "HMenu.Highlight": {
+      "fg": "yellow"
+    },
+    "HMenu.Highlight.Selected": {
+      "fg": "yellow",
+      "bg": "sel"
+    },
+    "Dialog.*": {
+      "fg": "text",
+      "bg": "surface"
+    },
+    "Dialog.Text.Highlight": {
+      "fg": "yellow"
+    },
+    "Dialog.Disabled": {
+      "fg": "muted"
+    },
+    "Dialog.Box": {
+      "fg": "border"
+    },
+    "Dialog.Box.Title": {
+      "fg": "title"
+    },
+    "Dialog.Box.Title.Highlight": {
+      "fg": "yellow"
+    },
+    "Dialog.Edit": {
+      "fg": "text",
+      "bg": "edit_bg"
+    },
+    "Dialog.Edit.Unchanged": {
+      "fg": "text_dim",
+      "bg": "edit_bg"
+    },
+    "Dialog.Edit.Selected": {
+      "fg": "on_accent",
+      "bg": "accent"
+    },
+    "Dialog.Edit.Disabled": {
+      "fg": "muted",
+      "bg": "edit_bg"
+    },
+    "Dialog.Button.Selected": {
+      "fg": "text_hi",
+      "bg": "sel"
+    },
+    "Dialog.Button.Highlight": {
+      "fg": "yellow"
+    },
+    "Dialog.Button.Highlight.Selected": {
+      "fg": "yellow",
+      "bg": "sel"
+    },
+    "Dialog.DefaultButton": {
+      "fg": "text_hi"
+    },
+    "Dialog.DefaultButton.Selected": {
+      "fg": "text_hi",
+      "bg": "sel"
+    },
+    "Dialog.DefaultButton.Highlight": {
+      "fg": "yellow"
+    },
+    "Dialog.DefaultButton.Highlight.Selected": {
+      "fg": "yellow",
+      "bg": "sel"
+    },
+    "Dialog.List.*": {
+      "fg": "text",
+      "bg": "surface"
+    },
+    "Dialog.List.Text.Selected": {
+      "fg": "text_hi",
+      "bg": "sel"
+    },
+    "Dialog.List.Highlight": {
+      "fg": "yellow"
+    },
+    "Dialog.List.Highlight.Selected": {
+      "fg": "yellow",
+      "bg": "sel"
+    },
+    "Dialog.List.Disabled": {
+      "fg": "muted"
+    },
+    "Dialog.List.Box": {
+      "fg": "border"
+    },
+    "Dialog.List.Title": {
+      "fg": "title"
+    },
+    "Dialog.List.Scrollbar": {
+      "fg": "border"
+    },
+    "Dialog.List.Arrows": {
+      "fg": "yellow"
+    },
+    "Dialog.List.Arrows.Selected": {
+      "fg": "yellow",
+      "bg": "sel"
+    },
+    "Dialog.List.Arrows.Disabled": {
+      "fg": "muted"
+    },
+    "Dialog.List.GrayText": {
+      "fg": "muted"
+    },
+    "Dialog.List.GrayText.Selected": {
+      "fg": "text_dim",
+      "bg": "sel"
+    },
+    "Dialog.Combo.*": {
+      "fg": "text",
+      "bg": "edit_bg"
+    },
+    "Dialog.Combo.Text.Selected": {
+      "fg": "text_hi",
+      "bg": "sel"
+    },
+    "Dialog.Combo.Highlight": {
+      "fg": "yellow"
+    },
+    "Dialog.Combo.Highlight.Selected": {
+      "fg": "yellow",
+      "bg": "sel"
+    },
+    "Dialog.Combo.Disabled": {
+      "fg": "muted"
+    },
+    "Dialog.Combo.Box": {
+      "fg": "border"
+    },
+    "Dialog.Combo.Title": {
+      "fg": "title"
+    },
+    "Dialog.Combo.Scrollbar": {
+      "fg": "border"
+    },
+    "Dialog.Combo.Arrows": {
+      "fg": "yellow"
+    },
+    "Dialog.Combo.Arrows.Selected": {
+      "fg": "yellow",
+      "bg": "sel"
+    },
+    "Dialog.Combo.Arrows.Disabled": {
+      "fg": "muted"
+    },
+    "Dialog.Combo.GrayText": {
+      "fg": "muted"
+    },
+    "Dialog.Combo.GrayText.Selected": {
+      "fg": "text_dim",
+      "bg": "sel"
+    },
+    "WarnDialog.*": {
+      "fg": "text_hi",
+      "bg": "warn_bg"
+    },
+    "WarnDialog.Text.Highlight": {
+      "fg": "yellow"
+    },
+    "WarnDialog.Disabled": {
+      "fg": "muted"
+    },
+    "WarnDialog.Box": {
+      "fg": "red"
+    },
+    "WarnDialog.Box.Title": {
+      "fg": "text_hi"
+    },
+    "WarnDialog.Box.Title.Highlight": {
+      "fg": "yellow"
+    },
+    "WarnDialog.Edit": {
+      "fg": "text",
+      "bg": "edit_bg"
+    },
+    "WarnDialog.Edit.Unchanged": {
+      "fg": "text_dim",
+      "bg": "edit_bg"
+    },
+    "WarnDialog.Edit.Selected": {
+      "fg": "on_accent",
+      "bg": "accent"
+    },
+    "WarnDialog.Edit.Disabled": {
+      "fg": "muted",
+      "bg": "edit_bg"
+    },
+    "WarnDialog.Button.Selected": {
+      "fg": "text_hi",
+      "bg": "warn_sel"
+    },
+    "WarnDialog.Button.Highlight": {
+      "fg": "yellow"
+    },
+    "WarnDialog.Button.Highlight.Selected": {
+      "fg": "yellow",
+      "bg": "warn_sel"
+    },
+    "WarnDialog.DefaultButton": {
+      "fg": "text_hi"
+    },
+    "WarnDialog.DefaultButton.Selected": {
+      "fg": "text_hi",
+      "bg": "warn_sel"
+    },
+    "WarnDialog.DefaultButton.Highlight": {
+      "fg": "yellow"
+    },
+    "WarnDialog.DefaultButton.Highlight.Selected": {
+      "fg": "yellow",
+      "bg": "warn_sel"
+    },
+    "WarnDialog.List.*": {
+      "fg": "text_hi",
+      "bg": "warn_bg"
+    },
+    "WarnDialog.List.Text.Selected": {
+      "fg": "text_hi",
+      "bg": "warn_sel"
+    },
+    "WarnDialog.List.Highlight": {
+      "fg": "yellow"
+    },
+    "WarnDialog.List.Highlight.Selected": {
+      "fg": "yellow",
+      "bg": "warn_sel"
+    },
+    "WarnDialog.List.Disabled": {
+      "fg": "muted"
+    },
+    "WarnDialog.List.Box": {
+      "fg": "border"
+    },
+    "WarnDialog.List.Title": {
+      "fg": "title"
+    },
+    "WarnDialog.List.Scrollbar": {
+      "fg": "border"
+    },
+    "WarnDialog.List.Arrows": {
+      "fg": "yellow"
+    },
+    "WarnDialog.List.Arrows.Selected": {
+      "fg": "yellow",
+      "bg": "warn_sel"
+    },
+    "WarnDialog.List.Arrows.Disabled": {
+      "fg": "muted"
+    },
+    "WarnDialog.List.GrayText": {
+      "fg": "muted"
+    },
+    "WarnDialog.List.GrayText.Selected": {
+      "fg": "text_dim",
+      "bg": "warn_sel"
+    },
+    "WarnDialog.Combo.*": {
+      "fg": "text",
+      "bg": "edit_bg"
+    },
+    "WarnDialog.Combo.Text.Selected": {
+      "fg": "text_hi",
+      "bg": "sel"
+    },
+    "WarnDialog.Combo.Highlight": {
+      "fg": "yellow"
+    },
+    "WarnDialog.Combo.Highlight.Selected": {
+      "fg": "yellow",
+      "bg": "sel"
+    },
+    "WarnDialog.Combo.Disabled": {
+      "fg": "muted"
+    },
+    "WarnDialog.Combo.Box": {
+      "fg": "border"
+    },
+    "WarnDialog.Combo.Title": {
+      "fg": "title"
+    },
+    "WarnDialog.Combo.Scrollbar": {
+      "fg": "border"
+    },
+    "WarnDialog.Combo.Arrows": {
+      "fg": "yellow"
+    },
+    "WarnDialog.Combo.Arrows.Selected": {
+      "fg": "yellow",
+      "bg": "sel"
+    },
+    "WarnDialog.Combo.Arrows.Disabled": {
+      "fg": "muted"
+    },
+    "WarnDialog.Combo.GrayText": {
+      "fg": "muted"
+    },
+    "WarnDialog.Combo.GrayText.Selected": {
+      "fg": "text_dim",
+      "bg": "sel"
+    },
+    "Keybar.Num": {
+      "fg": "text_dim",
+      "bg": "terminal"
+    },
+    "Keybar.Text": {
+      "fg": "text",
+      "bg": "surface"
+    },
+    "Keybar.Background": {
+      "fg": "text",
+      "bg": "terminal"
+    },
+    "CommandLine.Selected": {
+      "fg": "on_accent",
+      "bg": "accent"
+    },
+    "Clock": {
+      "fg": "text",
+      "bg": "surface"
+    },
+    "Viewer.*": {
+      "fg": "text",
+      "bg": "bg"
+    },
+    "Viewer.Text.Selected": {
+      "fg": "on_accent",
+      "bg": "accent"
+    },
+    "Viewer.Status": {
+      "fg": "text",
+      "bg": "surface"
+    },
+    "Viewer.Arrows": {
+      "fg": "yellow"
+    },
+    "Viewer.Scrollbar": {
+      "fg": "border"
+    },
+    "Viewer.Clock": {
+      "fg": "text",
+      "bg": "surface"
+    },
+    "Editor.*": {
+      "fg": "text",
+      "bg": "bg"
+    },
+    "Editor.Text.Selected": {
+      "fg": "on_accent",
+      "bg": "accent"
+    },
+    "Editor.Status": {
+      "fg": "text",
+      "bg": "surface"
+    },
+    "Editor.Scrollbar": {
+      "fg": "border"
+    },
+    "Editor.Clock": {
+      "fg": "text",
+      "bg": "surface"
+    },
+    "Help.*": {
+      "fg": "text",
+      "bg": "surface"
+    },
+    "Help.Text.Highlight": {
+      "fg": "text_hi"
+    },
+    "Help.Topic": {
+      "fg": "yellow"
+    },
+    "Help.Topic.Selected": {
+      "fg": "on_yellow",
+      "bg": "yellow"
+    },
+    "Help.Box": {
+      "fg": "border"
+    },
+    "Help.Box.Title": {
+      "fg": "title"
+    },
+    "Help.Scrollbar": {
+      "fg": "border"
+    }
+  },
+  "editor": {
+    "extends": "builtin://nord"
+  }
+}

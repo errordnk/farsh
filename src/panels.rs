@@ -1658,6 +1658,15 @@ impl Panels {
 
     /// The quick view's editor goes about its own business (a file read, the
     /// highlighting, an animation): `true` when what it shows has changed.
+    /// Another theme: the quick view's text is opened again in its colors
+    /// (a fresh session keeps the theme it was opened with).
+    pub fn theme_changed(&mut self) {
+        self.qeditor = None;
+        if let Some(state) = &mut self.qview {
+            state.reopen();
+        }
+    }
+
     pub fn tick(&mut self) -> bool {
         let counted = self.poll_scans();
         let shown = |panel: &Panel| panel.visible && panel.kind == Kind::QuickView;

@@ -155,6 +155,11 @@ impl State {
         }
     }
 
+    /// The file is given to a new editor at the next paint.
+    pub fn reopen(&mut self) {
+        self.opened = false;
+    }
+
     /// Gives the editor this state's file (once it is text and has waited).
     fn load(&mut self, editor: &mut Option<EditorView>, width: u16, height: u16) {
         self.resolve();

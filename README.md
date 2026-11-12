@@ -26,6 +26,8 @@ shell screen; the command line under the panels is the shell's own prompt line.
 | `far:config` + `Enter` | Far's configuration editor: every Far setting (the ones farsh does not use yet are grey); `Enter`/`F4` change, `Shift+F4` hex, `Alt+F4` binary, `Del` default, `Ctrl+H` only the changed |
 | `Ctrl+O` | show / hide the panels |
 
+Themes: Options > Themes (Catppuccin, Tokyo Night, One Dark, Dracula, Nord built in; your own as JSON in `~/.config/farsh/themes`, see [docs/themes.md](docs/themes.md)).
+
 `FARSH_SHELL` overrides the shell (default: `$SHELL` unless that is farsh, else bash / zsh / pwsh).
 
 On Linux/macOS farsh can be your login shell: add its path to `/etc/shells` and run `chsh -s <path>`. `ssh host cmd`, scp and rsync keep working (a command, a script or a pipe goes to the real shell untouched), and if farsh ever fails to start the session the real shell takes over. The real shell is `$FARSH_SHELL`, or `Shell.Program` in the profile's settings, else bash (zsh on macOS).

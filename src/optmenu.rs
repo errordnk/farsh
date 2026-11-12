@@ -112,6 +112,7 @@ impl App {
             }
             Opt::CodePages => return self.overlay = Overlay::List(Box::new(List::CodePages(codepages::CodePagesMenu::new()))),
             Opt::Colors => return self.open_colors(),
+            Opt::Themes => return self.open_themes(),
             Opt::Highlighting => return self.open_highlighting(),
             Opt::PanelModes => return self.open_panel_modes(),
         };
@@ -536,6 +537,52 @@ impl App {
             O::Reset => crate::colors::set(picker.name, None),
         }
     }
+    /// Options > Themes: the built-in themes, then the user's (`~/.config/farsh/themes`).
+    pub(crate) fn open_themes(&mut self) {
+        let chosen = crate::theme::chosen();
+        let (mut entries, mut ids) = (Vec::new(), Vec::new());
+        let mut user = false;
+        for theme in crate::theme::list() {
+            if theme.user && !user && !entries.is_empty() {
+                entries.push(Entry::separator(""));
+                ids.push(None);
+            }
+            user |= theme.user;
+            let text = match &theme.name {
+                Ok(name) => name.clone(),
+                Err(_) => format!("{} ({})", theme.id, lang::tr("cannot be read")),
+            };
+            entries.push(Entry::new(text).checked((theme.id == chosen).then_some('\u{221A}')));
+            ids.push(Some(theme.id));
+        }
+        let mut menu = VMenu::with(&lang::tr("Themes"), entries);
+        menu.show_ampersand = true;
+        menu.bottom = crate::theme::user_dir().display().to_string();
+        if let Some(at) = ids.iter().position(|id| id.as_deref() == Some(chosen.as_str())) {
+            menu.select(at);
+        }
+        self.overlay = Overlay::List(Box::new(List::FarshThemes(menu, ids)));
+    }
+
+    pub(crate) fn farsh_themes_key(&mut self, mut menu: VMenu, ids: Vec<Option<String>>, key: crossterm::event::KeyEvent) {
+        match menu.key(key) {
+            Outcome::Chosen(index) => {
+                let Some(Some(id)) = ids.get(index) else {
+                    return self.overlay = Overlay::List(Box::new(List::FarshThemes(menu, ids)));
+                };
+                match crate::theme::choose(id) {
+                    Ok(()) => self.panels.theme_changed(),
+                    Err(error) => {
+                        let file = crate::theme::user_dir().join(format!("{id}.json"));
+                        self.overlay = Overlay::Dialog(Dialog::error(&format!("{}\n{error}", file.display())));
+                    }
+                }
+            }
+            Outcome::Closed => {}
+            _ => self.overlay = Overlay::List(Box::new(List::FarshThemes(menu, ids))),
+        }
+    }
+
     pub(crate) fn open_highlighting(&mut self) {
         let (menu, rows) = highlight_menu(0);
         self.overlay = Overlay::List(Box::new(List::Highlight(menu, rows)));

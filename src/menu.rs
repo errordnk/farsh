@@ -121,6 +121,7 @@ pub enum Opt {
     Editor,
     CodePages,
     Colors,
+    Themes,
     Highlighting,
     SaveSetup,
 }
@@ -284,6 +285,7 @@ fn titles(modes: [u8; 2], states: [(Kind, bool, bool); 2]) -> Vec<Title> {
                 item("Code pages", "", Some(Command::Set(Opt::CodePages))),
                 SEPARATOR,
                 item("Co&lors", "", Some(Command::Set(Opt::Colors))),
+                item("Themes", "", Some(Command::Set(Opt::Themes))),
                 item("Files &highlighting and sort groups", "", Some(Command::Set(Opt::Highlighting))),
                 SEPARATOR,
                 item("&Save setup", "Shift+F9", Some(Command::Set(Opt::SaveSetup))),

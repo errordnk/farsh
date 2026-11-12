@@ -217,33 +217,16 @@ pub fn viewer_options_in(text: &str, selected: &str) -> EmbedOptions {
     }
 }
 
-/// What fresh's syntax categories look like on Far's blue: the ONE table of
-/// them (console color indices; farsh's own theme format will replace it).
-const SYNTAX: [(&str, u8); 9] = [
-    ("keyword", palette::WHITE),
-    ("string", palette::LIGHT_GREEN),
-    ("comment", palette::DARK_GRAY),
-    ("function", palette::YELLOW),
-    ("type", palette::LIGHT_MAGENTA),
-    ("variable", palette::LIGHT_CYAN),
-    ("variable_builtin", palette::LIGHT_MAGENTA),
-    ("constant", palette::YELLOW),
-    ("operator", palette::WHITE),
-];
-
 fn json_color(color: Color) -> serde_json::Value {
-    match color {
-        Color::Rgb { r, g, b } => serde_json::json!([r, g, b]),
-        _ => serde_json::json!("Default"),
-    }
+    crate::theme::fresh_color(color)
 }
 
-/// A fresh theme (JSON, over its dark one) that paints text and selection in
-/// farsh's colors `text` and `selected`: the viewer's panel looks like the file
-/// panel next to it, and syntax categories take the table above.
+/// A fresh theme (JSON) that paints text and selection in farsh's colors
+/// `text` and `selected`: the viewer's panel looks like the file panel next to
+/// it. The rest (syntax, search, diagnostics...) is the farsh theme's `editor`
+/// part (`src/theme.rs`), over fresh's dark theme unless it `extends` another.
 pub fn theme_json(text: &str, selected: &str) -> String {
     let (fg, bg) = (json_color(colors::fg(text)), json_color(colors::bg(text)));
-    // muted, as in fresh itself: Far's dark gray (the same as comments) on the text background
     // the current line: the background a fifth of the way to the text
     let current_line = match (colors::bg(text), colors::fg(text)) {
         (Color::Rgb { r, g, b }, Color::Rgb { r: fr, g: fg_, b: fb }) => {
@@ -252,21 +235,23 @@ pub fn theme_json(text: &str, selected: &str) -> String {
         }
         _ => bg.clone(),
     };
+    // muted, as in fresh itself: the console's dark gray
     let line_numbers = json_color(palette::fg(palette::DARK_GRAY));
     let (sel_fg, sel_bg) = (json_color(colors::fg(selected)), json_color(colors::bg(selected)));
-    let syntax: serde_json::Map<String, serde_json::Value> =
-        SYNTAX.iter().map(|(name, index)| ((*name).to_string(), json_color(palette::fg(*index)))).collect();
-    serde_json::json!({
-        "name": "farsh",
-        "extends": "builtin://dark",
-        "editor": {
-            "bg": bg, "after_eof_bg": bg, "fg": fg, "current_line_bg": current_line,
-            "selection_bg": sel_bg, "selection_fg": sel_fg,
-            "line_number_bg": bg, "line_number_fg": line_numbers,
-        },
-        "syntax": syntax,
-    })
-    .to_string()
+    let mut theme = crate::theme::with(|t| t.editor.clone()).unwrap_or_else(|| serde_json::json!({}));
+    let Some(root) = theme.as_object_mut() else { unreachable!("a theme's editor part is an object") };
+    root.insert("name".into(), "farsh".into());
+    root.entry("extends").or_insert_with(|| "builtin://dark".into());
+    let editor = root.entry("editor").or_insert_with(|| serde_json::json!({}));
+    if let Some(editor) = editor.as_object_mut() {
+        // the text area is farsh's element: Options > Colors' changes of it show
+        for (key, value) in [("bg", &bg), ("after_eof_bg", &bg), ("fg", &fg), ("selection_bg", &sel_bg), ("selection_fg", &sel_fg), ("line_number_bg", &bg)] {
+            editor.insert(key.into(), value.clone());
+        }
+        editor.entry("current_line_bg").or_insert(current_line);
+        editor.entry("line_number_fg").or_insert(line_numbers);
+    }
+    theme.to_string()
 }
 
 /// Where the embedded editor keeps its config and data: the user's fresh
@@ -463,6 +448,22 @@ mod tests {
         assert!(view.session().read_only());
         view.event(key(KeyCode::Char('Q')), 0, 0).unwrap();
         assert!(!view.session().modified());
+    }
+
+    #[test]
+    fn fresh_takes_the_editor_part_of_every_built_in_theme() {
+        let temp = tempfile::tempdir().unwrap();
+        let file = temp.path().join("text.rs");
+        std::fs::write(&file, "fn main() {}
+").unwrap();
+        for listed in crate::theme::list() {
+            let theme = crate::theme::load(&listed.id).unwrap();
+            let mut editor = theme.editor.clone().unwrap_or_else(|| serde_json::json!({}));
+            editor["name"] = "farsh".into();
+            let mut options = options(&temp.path().join("dirs"), true);
+            options.theme_json = Some(editor.to_string());
+            EditorView::open(&file, 30, 6, options).unwrap_or_else(|e| panic!("{}: {e}", listed.id));
+        }
     }
 
     #[test]

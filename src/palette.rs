@@ -4,29 +4,12 @@
 //! — the console's default attribute — arrive as the terminal's own default
 //! colors. Measured in Som: blue is (0,0,128), cyan (0,128,128), light cyan
 //! (0,255,255); the key bar numbers take Som's own foreground and background.
+//! That is the `default` theme; another theme (`src/theme.rs`) has its own 16
+//! colors and its own default attribute.
 
 use crossterm::style::Color;
 
 use crate::grid::Grid;
-
-const TABLE: [(u8, u8, u8); 16] = [
-    (0, 0, 0),
-    (0, 0, 128),
-    (0, 128, 0),
-    (0, 128, 128),
-    (128, 0, 0),
-    (128, 0, 128),
-    (128, 128, 0),
-    (192, 192, 192),
-    (128, 128, 128),
-    (0, 0, 255),
-    (0, 255, 0),
-    (0, 255, 255),
-    (255, 0, 0),
-    (255, 0, 255),
-    (255, 255, 0),
-    (255, 255, 255),
-];
 
 pub const BLACK: u8 = 0;
 #[allow(dead_code)]
@@ -45,28 +28,29 @@ pub const LIGHT_MAGENTA: u8 = 13;
 pub const YELLOW: u8 = 14;
 pub const WHITE: u8 = 15;
 
-const fn rgb(index: u8) -> Color {
-    let (r, g, b) = TABLE[(index & 15) as usize];
-    Color::Rgb { r, g, b }
+/// A Far foreground color as the terminal gets it: the theme's console color,
+/// light gray (the default attribute's) the theme's default foreground.
+pub fn fg(index: u8) -> Color {
+    crate::theme::with(|t| if index == LIGHT_GRAY { t.default_fg } else { t.console[(index & 15) as usize] })
 }
 
-/// A Far foreground color as the terminal gets it.
-pub const fn fg(index: u8) -> Color {
-    if index == LIGHT_GRAY { Color::Reset } else { rgb(index) }
-}
-
-/// A Far background color as the terminal gets it.
-pub const fn bg(index: u8) -> Color {
-    if index == BLACK { Color::Reset } else { rgb(index) }
+/// A Far background color as the terminal gets it (black: the default background).
+pub fn bg(index: u8) -> Color {
+    crate::theme::with(|t| if index == BLACK { t.default_bg } else { t.console[(index & 15) as usize] })
 }
 
 /// The Far color index of a terminal color (`Reset`: the default attribute).
 fn index_of(color: Color, foreground: bool) -> Option<u8> {
-    match color {
-        Color::Reset => Some(if foreground { LIGHT_GRAY } else { BLACK }),
-        Color::Rgb { r, g, b } => TABLE.iter().position(|&c| c == (r, g, b)).map(|i| i as u8),
-        _ => None,
-    }
+    crate::theme::with(|t| {
+        let default = if foreground { (t.default_fg, LIGHT_GRAY) } else { (t.default_bg, BLACK) };
+        if color == default.0 {
+            return Some(default.1);
+        }
+        match color {
+            Color::Reset => Some(if foreground { LIGHT_GRAY } else { BLACK }),
+            _ => t.console.iter().position(|&c| c == color).map(|i| i as u8),
+        }
+    })
 }
 
 /// Far's shadow (scrbuf.cpp `apply_nt_index_shadow`): a bright color loses

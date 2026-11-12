@@ -59,6 +59,7 @@ mod settings;
 mod sortmenu;
 mod subst;
 mod tasklist;
+mod theme;
 mod usermenu;
 mod viewer;
 mod vmenu;
