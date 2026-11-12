@@ -89,6 +89,9 @@ next to your programs, not instead of them.
   by track, renders markdown documents with their pictures, and streams
   internet radio. In any other terminal F3 shows text as text and tells a
   binary file apart instead of dumping it.
+
+  ![farsh's quick view in Som: an animated GIF plays in the panel next to the file list](site/img/farsh-srp-quickview.webp)
+
 - **Themes:** Options > Themes shows a live example of farsh in each theme — a
   file panel and the editor with code — before you pick one. Far's classic
   blue, Catppuccin Mocha, Tokyo Night, One Dark, Dracula and Nord are built in;
