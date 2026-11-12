@@ -194,7 +194,7 @@ On Windows the build links FFmpeg from [vcpkg](https://vcpkg.io): install
 ## First steps: your hands remember everything
 
 If you have worked in Far, you can already work in farsh. Here is what is worth
-knowing on top of that.
+knowing in case you have forgotten.
 
 | Key | What it does |
 |---|---|
