@@ -102,7 +102,7 @@ a console dump — cell by cell, attribute by attribute, not by eye.
 
 ## Media right in the terminal: F3 on a picture shows the picture. On an mp4 — the video
 
-In the [Som](https://som.sarnet.ru) terminal, farsh's viewer speaks its
+In the [Som](https://github.com/errordnk/som) terminal, farsh's viewer speaks its
 rich-content protocol — and the terminal becomes a media centre without leaving
 the file manager.
 
@@ -176,7 +176,7 @@ Your old shell still does the work: farsh takes `$FARSH_SHELL`, or
 **Windows**
 
 Unpack `farsh.exe` into a folder on your `PATH` and run it in Windows Terminal
-or Som. The default shell is PowerShell; Git Bash and MSYS2's bash work too.
+or [Som](https://github.com/errordnk/som). The default shell is PowerShell; Git Bash and MSYS2's bash work too.
 FFmpeg (for a video's audio tracks and subtitles) is packed inside and loaded
 only when needed.
 
