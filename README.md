@@ -1,116 +1,148 @@
 # farsh
 
-**Far Manager, built into your real shell.** Not the other way round.
+**bash · zsh · PowerShell + Far Manager 3**
 
-![farsh: the Themes dialog in Catppuccin Mocha — a file panel and the editor with hello world in C](site/img/themes-catppuccin.webp)
+## Not Far with a shell built in. A shell with Far built in.
 
-Far Manager has always had a command line. It was Far's own: a single edit
-box that hands your command to `cmd.exe` and forgets it. No completion of your
-shell, no aliases, no functions, no prompt, no history search, no PSReadLine,
-no fzf. A file manager with a shell bolted on.
+farsh starts your real bash, zsh or PowerShell and lays Far Manager's panels
+over it — exactly as in Far 3, cell for cell. The command line under the panels
+is the shell's own line, with your prompt, your aliases and your history. Press
+`Ctrl+O` and you are looking at a clean shell, as if farsh were never there.
 
-**farsh turns that upside down.** It starts your real shell — bash, zsh or
-PowerShell — in a PTY, exactly as a terminal would, and puts Far's panels on
-top of it. The line under the panels *is your shell's prompt line*: your
-starship/oh-my-zsh/oh-my-posh prompt is there, what you type goes into the
-shell's own line editor, your aliases, functions and history are the shell's.
-Press `Ctrl+O` and the panels are gone: what is left is your shell, untouched —
-every key is its own again (Tab completion, `Ctrl+R`, your bindings), with your
-terminal's own scrollback, selection, mouse and hyperlinks. Press it again and
-Far is back, re-read, cursor where you left it.
+**[Install](#install)** · **[farsh.sarnet.ru](https://farsh.sarnet.ru)** (the site, in Russian)
 
-It is a shell you can make your login shell. It is a Far Manager that feels
-like Far 3 down to the cell. It is a viewer that plays video in the terminal.
-It is one binary, on Windows, Linux and macOS.
+## Upside down: for twenty-five years it was the other way round
 
-## On every system
+Far has always had a command line. Its own: one edit box that hands your
+command to `cmd.exe` and forgets about it at once. No completion of your
+shell, no functions, no prompt, no PSReadLine, no fzf. A file manager with a
+stump of a shell bolted on. farsh turns that construction upside down.
 
-The same farsh in PowerShell on Windows, zsh on macOS and bash on Debian — the panels top
-right, htop under them, a plain shell with fastfetch on the left: farsh lives
-next to your programs, not instead of them.
+```
+   how it was                          how it is in farsh
 
-![farsh on Windows 11, PowerShell 7.6, in Som](site/img/farsh-windows.webp)
+ ┌──────────────────────────┐        ┌──────────────────────────────────────┐
+ │ Far Manager — the boss   │        │ Far's panels — a guest on top        │
+ ├──────────────────────────┤   ⟶    ├──────────────────────────────────────┤
+ │ its edit box → cmd.exe   │        │ your bash / zsh / PowerShell in a    │
+ └──────────────────────────┘        │ PTY — the boss                       │
+                                     └──────────────────────────────────────┘
+```
 
-![farsh on macOS, zsh, Mac mini M4](site/img/farsh-macos.webp)
+**Far with a command line**
 
-![farsh on Debian 13, bash 5.2](site/img/farsh-linux.webp)
+- the command line is an edit box of its own, not your shell;
+- aliases, functions, profile, prompt — all missed;
+- completion and history search — its own, cut down;
+- command output lives in someone else's buffer;
+- you cannot make it your login shell.
 
-## Why it is different
+**farsh**
 
-- **The shell is the boss, Far is the guest.** farsh never parses or
-  re-implements your command line. Everything you type goes to the shell's own
-  line editor; farsh only reads the screen to know where the prompt is. Enter on
-  a typed command runs it in the shell and the panels step aside for its
-  output.
-- **Without the panels, farsh is invisible.** The shell owns the terminal's
-  main screen and its output goes to the terminal byte for byte — your
-  terminal's history, reflow, selection, OSC 7/8 and mouse modes work as if
-  farsh were not there. The panels live on the alternate screen; whatever the
-  shell prints while they are up is held and delivered when they go.
-- **A login shell that cannot lock you out.** On Linux/macOS put farsh in
-  `/etc/shells` and `chsh -s` to it. `ssh host cmd`, scp, rsync, scripts,
-  `-c`, pipes — anything that is not an interactive session on a terminal is
-  handed straight to the real shell, silently. If farsh ever fails to start or
-  panics, the real shell takes over the session. Login files are read in a real
-  login shell's order.
-- **Far 3, cell for cell.** The panels, view modes and column widths, sorting
-  with Far's own string order, highlighting groups, the key bar that changes
-  while you hold Shift/Ctrl/Alt, dialogs and menus laid out by Far's own rules,
-  Far's help files with their markup and links, `far:config` with all 297 of
-  Far's settings under Far's own names. Checked against real Far 3.0.6446 by
-  dumping both consoles cell by cell, not by eye.
-- **Every shortcut works in the Russian layout too** (Far's Xlat), and the
-  whole interface speaks Russian with Far's own translation.
+- under the panels is the line of your real shell: everything you type goes
+  into its own line editor;
+- your starship / oh-my-zsh / oh-my-posh, aliases, functions, history — all
+  there;
+- without the panels every key is the shell's again: Tab completion,
+  `Ctrl+R`, your bindings;
+- output goes to the terminal byte for byte: native scrollback, selection,
+  mouse, links;
+- you can make it your login shell — and it will not lock you out.
 
-## What is inside
+## One farsh — three systems
 
-- **Files:** copy, move, rename, delete and wipe with Far's confirmations and
-  progress; Recycle Bin; attributes, times and owner (`Ctrl+A`); hard links,
-  junctions and symlinks (`Alt+F6`); file masks and mask groups; filters
-  (`Ctrl+I`); select/deselect/invert groups; descriptions (`Ctrl+Z`); folder
-  shortcuts; Find file (`Alt+F7`); compare folders; the user menu (Far's own
-  `FarMenu.ini`); file associations; command, view and folder histories.
-- **Elevation on Windows:** an "Access denied" offers Far's elevation dialog;
-  a UAC copy of farsh does the job over a pipe only it and you can open.
-- **Archives as panels:** Far's arclite, ported — 7z, zip, tar and gzip open
-  with Enter and are browsed like folders; extract with `F5`, add to and
-  delete from a zip, create archives (`Shift+F1`), test them. Pure Rust, no
-  7-Zip needed.
-- **A real editor and viewer:** `F4` and `F3` are
-  [fresh](https://github.com/errordnk/fresh), a modern editor built in as a
-  library — tree-sitter syntax highlighting, mouse, selection, search —
-  inside Far's status bar and key bar. `Ctrl+Q` quick view shows highlighted
-  text of the file under the cursor as you move.
-- **Pictures, music, video and markdown in the terminal.** In
-  [Som](https://som.sarnet.ru), farsh's viewer speaks Som's rich-content
-  protocol: `F3` or the quick view shows PNG, JPEG and animated GIF, plays
-  mp3/flac/ogg with a player widget, plays mp4/mkv/avi (switch audio tracks
-  with `a`, subtitles with `s`), plays `.m3u` playlists and `.cue` sheets track
-  by track, renders markdown documents with their pictures, and streams
-  internet radio. In any other terminal F3 shows text as text and tells a
-  binary file apart instead of dumping it.
+The same farsh in PowerShell on Windows, zsh on macOS and bash on Debian. Top
+right — farsh's panels, htop under them, on the left — a plain shell with
+fastfetch: farsh lives next to your programs, not instead of them.
 
-  ![farsh's quick view in Som: an animated GIF plays in the panel next to the file list](site/img/farsh-srp-quickview.webp)
+![farsh on Windows 11: PowerShell 7.6, in the Som terminal](site/img/farsh-windows.webp)
+**Windows 11** — PowerShell 7.6, the Som terminal
 
-- **Themes:** Options > Themes shows a live example of farsh in each theme — a
-  file panel and the editor with code — before you pick one. Far's classic
-  blue, Catppuccin Mocha, Tokyo Night, One Dark, Dracula and Nord are built in;
-  add your own as JSON in `~/.config/farsh/themes`
-  ([format](docs/themes.md)). A theme colors everything: panels, dialogs,
-  menus, the editor's syntax, the background of the media widgets.
-- **Settings the Far way:** every option under Far's own name and default,
-  kept in `~/.config/farsh/settings.json` on every system, saved the moment it
-  changes.
+![farsh on macOS: zsh on a Mac mini M4](site/img/farsh-macos.webp)
+**macOS** — zsh on a Mac mini M4
 
-| | | |
-|---|---|---|
-| ![Far's classic colors](site/img/themes-default.webp) | ![Tokyo Night](site/img/themes-tokyo-night.webp) | ![Dracula](site/img/themes-dracula.webp) |
-| Far's classic | Tokyo Night | Dracula |
+![farsh on Debian 13: bash 5.2](site/img/farsh-linux.webp)
+**Debian 13** — bash 5.2
+
+## What is inside: Far 3 as you remember it, and what it never had
+
+farsh's panels, dialogs and menus are checked against the real Far 3.0.6446 by
+a console dump — cell by cell, attribute by attribute, not by eye.
+
+- **Panels as in Far 3.** Ten view modes, column widths, `Folder`/`Up`, sizes
+  in K/M/G, sorting in Far's string order (digits as numbers), highlighting
+  groups, a key bar that changes while you hold Shift/Ctrl/Alt.
+- **Your shell, not a stump.** The command line is the shell's own line. Enter
+  runs the command in the shell, the panels step aside for its output and come
+  back with a fresh file list and the cursor where it was.
+- **A login shell without risk.** `chsh -s farsh` — and everything that is not
+  an interactive session (ssh commands, scp, rsync, scripts, `-c`, pipes)
+  quietly goes to the real shell. If farsh ever crashes, the real shell picks
+  the session up.
+- **A real editor.** `F4` and `F3` are the built-in modern editor
+  [fresh](https://github.com/errordnk/fresh): tree-sitter highlighting, mouse,
+  selection, search — inside Far's status bar and key bar. `Ctrl+Q` shows the
+  highlighted text of the file under the cursor.
+- **Archives as folders.** arclite, ported: 7z, zip, tar and gzip open with
+  Enter and are browsed like folders. Extracting, creating, adding to and
+  deleting from a zip, testing an archive. Pure Rust, no 7-Zip needed.
+- **Every file operation.** Copy, move, delete to the Recycle Bin and Wipe with
+  Far's confirmations and progress, attributes and times (`Ctrl+A`), hard
+  links, junctions and symlinks (`Alt+F6`), filters, find file, compare
+  folders, descriptions.
+- **Elevation.** "Access denied" on Windows — and you get Far's elevation
+  dialog. A copy of farsh started through UAC does the job over a pipe only you
+  can open.
+- **Settings the Far way.** Every option under Far's name and with Far's
+  default. `far:config` with all 297 settings, Far's help with links and
+  search, a user menu in the `FarMenu.ini` format, associations, histories.
+- **Russian — all of it.** The interface and the help in Russian from Far's own
+  translation. Every shortcut works in the Russian layout too — like Xlat in
+  Far.
+
+## Media right in the terminal: F3 on a picture shows the picture. On an mp4 — the video
+
+In the [Som](https://som.sarnet.ru) terminal, farsh's viewer speaks its
+rich-content protocol — and the terminal becomes a media centre without leaving
+the file manager.
+
+![farsh's quick view in Som: an animated GIF plays in the panel next to the file list](site/img/farsh-srp-quickview.webp)
+**`Ctrl+Q`** — the quick view: the cursor on `giphy.gif`, and the animation plays right in the panel, on the theme's background
+
+- **Pictures and GIF.** PNG, JPEG, animated GIF — in `F3` over the whole screen
+  or in the quick view panel while you move the cursor over the files.
+- **Music and playlists.** mp3, flac, ogg with a player widget; `.m3u` and
+  `.cue` playlists track by track, `n`/`p` to switch; internet radio.
+- **Video.** mp4, mkv, avi right in the terminal. `a` — the next audio track,
+  `s` — subtitles.
+- **Markdown.** A `.md` document is drawn as a document — with headings, lists
+  and embedded pictures, scrollable.
+- **In the theme's colors.** The background of the widgets and of the margins
+  around pictures follows farsh's theme.
+- **In any other terminal.** farsh works everywhere: Windows Terminal, kitty,
+  iTerm2, Alacritty. Text is shown as text, a binary file is honestly called
+  binary.
+
+## Themes: look before you choose
+
+Options → Themes shows a live example of farsh in each theme: a panel with
+files and the editor with code. Far's classic blue, Catppuccin Mocha, Tokyo
+Night, One Dark, Dracula and Nord are built in; write your own in JSON and put
+it into `~/.config/farsh/themes` ([format](docs/themes.md)). A theme colors
+everything: panels, dialogs, menus, the editor's code highlighting and the
+background of the media widgets. Below are real frames of that dialog.
+
+| | |
+|---|---|
+| ![Far's classic](site/img/themes-default.webp) Far's classic | ![Catppuccin Mocha](site/img/themes-catppuccin.webp) Catppuccin Mocha |
+| ![Tokyo Night](site/img/themes-tokyo-night.webp) Tokyo Night | ![One Dark](site/img/themes-one-dark.webp) One Dark |
+| ![Dracula](site/img/themes-dracula.webp) Dracula | ![Nord](site/img/themes-nord.webp) Nord |
 
 ## Install
 
-There are no prebuilt binaries yet: farsh is built from source with Rust
-(1.88 or newer) and a C compiler (for tree-sitter).
+Five minutes — and you have Far in your own shell. There are no prebuilt
+binaries yet: farsh is built from source. You need Rust 1.88 or newer
+([rustup.rs](https://rustup.rs)) and a C compiler (for tree-sitter).
 
 **Linux and macOS**
 
@@ -118,17 +150,17 @@ There are no prebuilt binaries yet: farsh is built from source with Rust
 cargo install --locked --git https://github.com/errordnk/farsh --root ~/.local
 ```
 
-That puts `farsh` into `~/.local/bin`. Run it from your terminal, or make it
-your login shell:
+The binary lands in `~/.local/bin/farsh`. Run it from your terminal — or make
+it your login shell:
 
 ```sh
 echo ~/.local/bin/farsh | sudo tee -a /etc/shells
 chsh -s ~/.local/bin/farsh
 ```
 
-farsh then runs `$FARSH_SHELL`, or `Shell.Program` from its settings, or
-`$SHELL` if that is not farsh, else bash (zsh on macOS) — so your old shell is
-still the one doing the work.
+Your old shell still does the work: farsh takes `$FARSH_SHELL`, or
+`Shell.Program` from its settings, or `$SHELL` if that is not farsh, else bash
+(zsh on macOS).
 
 **Windows**
 
@@ -138,42 +170,40 @@ cd farsh
 cargo build --release
 ```
 
-The Windows build links FFmpeg (for listing a video's audio and subtitle
-streams) from a [vcpkg](https://vcpkg.io) tree: install `ffmpeg:x64-windows`
-there and point `VCPKG_ROOT` at it. The FFmpeg DLLs are packed into
-`farsh.exe` and loaded only when a video's streams are asked for, so the
-binary runs on machines without FFmpeg. Run `target\release\farsh.exe` in
-Windows Terminal or Som; PowerShell is the default shell, Git Bash and MSYS2
-bash work too.
+The Windows build needs FFmpeg from [vcpkg](https://vcpkg.io) (farsh lists a
+video's audio tracks and subtitles with it): install `ffmpeg:x64-windows` and
+point `VCPKG_ROOT` at it. The FFmpeg DLLs are packed into `farsh.exe` and
+loaded only when needed — so the binary also runs where there is no FFmpeg.
 
-## First steps
+Run `target\release\farsh.exe` in Windows Terminal or Som. The default shell is
+PowerShell; Git Bash and MSYS2's bash work too.
+
+## First steps: your hands remember everything
+
+If you have worked in Far, you can already work in farsh. Here is what is worth
+knowing on top of that.
 
 | Key | What it does |
 |---|---|
-| `Ctrl+O` | panels on / off — off, you are in your plain shell |
-| type anything | it goes to your shell's command line; `Enter` runs it |
-| `Tab` | the other panel (with the panels off, Tab is your shell's completion) |
-| `Ctrl+E` `Ctrl+X` | shell history up / down (the arrows move the panel cursor) |
-| `F3` `F4` | view / edit; `Ctrl+Q` quick view in the other panel |
+| `Ctrl+O` | panels on / off — without them you are in a clean shell |
+| any text | goes to the shell's command line, `Enter` runs it |
+| `Tab` | the other panel (without the panels Tab is your shell's completion) |
+| `Ctrl+E` `Ctrl+X` | shell history back / forward (the arrows move the panel cursor) |
+| `F3` `F4` `Ctrl+Q` | view, edit, quick view in the other panel |
 | `F5` `F6` `F7` `F8` | copy, move, make folder, delete |
 | `Alt+F7` | find file |
-| `F9` | the menu bar: Left, Files, Commands, Options, Right |
-| `Ctrl+1`..`Ctrl+0` | Far's ten view modes |
-| `Ctrl+F3`..`Ctrl+F12` | sorting |
+| `F9` | the menu: Left, Files, Commands, Options (Themes is there), Right |
+| `Ctrl+1`…`Ctrl+0` | Far's ten view modes |
+| `Ctrl+F3`…`Ctrl+F12` | sorting |
 | `F1` | Far's help, with links |
 | `far:config` + `Enter` | every setting |
 | `F10` | quit |
 
-## Status
-
-farsh is young and moving fast. The panels, file operations, dialogs, menus,
-archives, the editor and viewer, themes and Som's media are done; plugins
-(they will be Lua) are not. Known, deliberate differences from Far are written
-down in [AGENTS.md](AGENTS.md).
-
 ## License
 
-GPL-3.0-or-later (see `LICENSE`), so that [fresh](https://github.com/errordnk/fresh)
-(GPL-3.0) can be built in as the editor and viewer. Far Manager's help files in
-`assets/help` are Far's, under its BSD license (beside them). Versions released
-before the move to GPL were MIT.
+farsh is free software under GPL-3.0-or-later (see `LICENSE`), so that
+[fresh](https://github.com/errordnk/fresh) (GPL-3.0) can be built in as its
+editor and viewer. Far's help files in `assets/help` are under Far Manager's
+BSD license (beside them). Versions released before the move to GPL were MIT.
+Known, deliberate differences from Far are written down in
+[AGENTS.md](AGENTS.md).
