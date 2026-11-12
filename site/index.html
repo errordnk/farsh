@@ -130,6 +130,9 @@
   }
   .two { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; margin-top: 26px; }
   .note { color: var(--muted); font-size: 15px; }
+  /* a grid cell is as wide as its column, not as its longest line: a long
+     <pre> scrolls inside itself instead of widening the page */
+  .two > *, .flip > *, .grid > *, .themes > *, .diagram > *, .platforms > * { min-width: 0; }
 
   table { width: 100%; border-collapse: collapse; margin-top: 24px; font-size: 15.5px; }
   th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--bg2); vertical-align: top; }
