@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>farsh — Far Manager внутри настоящего шелла</title>
+<meta name="description" content="farsh — это ваш настоящий bash, zsh или PowerShell со встроенным Far Manager. Не Far с огрызком командной строки, а полноценный шелл, в который встроены панели Far 3 клетка в клетку. Редактор с подсветкой, архивы как папки, темы, картинки, музыка и видео прямо в терминале. Windows, Linux, macOS.">
+<style>
+  :root {
+    --bg0: #2e3440;
+    --bg1: #3b4252;
+    --bg2: #434c5e;
+    --bg3: #4c566a;
+    --fg0: #eceff4;
+    --fg1: #e5e9f0;
+    --fg2: #d8dee9;
+    --muted: #8b96ac;
+    --accent: #88c0d0;
+    --accent2: #81a1c1;
+    --green: #a3be8c;
+    --yellow: #ebcb8b;
+    --red: #bf616a;
+    --purple: #b48ead;
+    --far: #000080;
+    --radius: 10px;
+    --maxw: 1080px;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg0);
+    color: var(--fg1);
+    font-family: -apple-system, "Segoe UI", "SF Pro", "Noto Sans", system-ui, sans-serif;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  code, .mono { font-family: "FiraCode Nerd Font", "Fira Code", "Cascadia Code", Consolas, monospace; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  img { max-width: 100%; height: auto; display: block; }
+  .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 24px; }
+
+  nav {
+    position: sticky; top: 0; z-index: 50;
+    background: rgba(46, 52, 64, 0.85);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--bg2);
+  }
+  nav .wrap { display: flex; align-items: center; justify-content: space-between; height: 60px; gap: 16px; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 18px; color: var(--fg0); }
+  .brand:hover { text-decoration: none; }
+  .brand-mark {
+    width: 30px; height: 30px; border-radius: 7px;
+    background: var(--far); color: #ffff55;
+    display: grid; place-items: center;
+    font: 700 13px/1 Consolas, monospace;
+    box-shadow: inset 0 0 0 2px #00aaaa;
+  }
+  .links { display: flex; gap: 22px; font-size: 15px; }
+  .links a { color: var(--fg2); }
+  .links a:hover { color: var(--accent); text-decoration: none; }
+
+  section { padding: 72px 0; }
+  section.alt { background: var(--bg1); }
+  h1 { font-size: clamp(34px, 5.4vw, 58px); line-height: 1.08; margin: 0 0 20px; color: var(--fg0); letter-spacing: -0.02em; }
+  h2 { font-size: clamp(26px, 3.4vw, 36px); line-height: 1.15; margin: 0 0 14px; color: var(--fg0); letter-spacing: -0.01em; }
+  h3 { font-size: 19px; margin: 0 0 8px; color: var(--fg0); }
+  .lead { font-size: clamp(17px, 2vw, 20px); color: var(--fg2); max-width: 760px; }
+  .kicker { color: var(--accent); font-weight: 600; font-size: 14px; letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 10px; }
+  .hl { color: var(--yellow); }
+
+  .hero { padding: 80px 0 56px; text-align: center; }
+  .hero .lead { margin: 0 auto 30px; }
+  .cta { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; margin-bottom: 46px; }
+  .btn {
+    display: inline-block; padding: 12px 24px; border-radius: 8px;
+    font-weight: 600; font-size: 16px; border: 1px solid var(--bg3); color: var(--fg0);
+  }
+  .btn:hover { text-decoration: none; border-color: var(--accent); }
+  .btn.primary { background: var(--accent); color: var(--bg0); border-color: var(--accent); }
+  .btn.primary:hover { background: #9fd0de; }
+  .shot {
+    border-radius: var(--radius);
+    border: 1px solid var(--bg3);
+    box-shadow: 0 30px 80px rgba(0, 0, 0, 0.45);
+    margin: 0 auto;
+  }
+
+  .flip { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; margin-top: 34px; }
+  .side { border-radius: var(--radius); padding: 26px; border: 1px solid var(--bg3); }
+  .side.old { background: rgba(191, 97, 106, 0.08); border-color: rgba(191, 97, 106, 0.35); }
+  .side.new { background: rgba(163, 190, 140, 0.08); border-color: rgba(163, 190, 140, 0.45); }
+  .side .tag { font-size: 13px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+  .side.old .tag { color: var(--red); }
+  .side.new .tag { color: var(--green); }
+  .side ul { margin: 12px 0 0; padding-left: 20px; }
+  .side li { margin: 6px 0; }
+
+  .diagram { display: grid; grid-template-columns: 1fr auto 1fr; gap: 18px; align-items: center; margin-top: 36px; }
+  .layer { border-radius: 8px; padding: 12px 16px; font-family: Consolas, monospace; font-size: 14px; text-align: center; }
+  .stack { display: grid; gap: 6px; }
+  .l-far { background: var(--far); color: #55ffff; border: 1px solid #00aaaa; }
+  .l-shell { background: #1d2a1d; color: var(--green); border: 1px solid #4e6b3f; }
+  .l-cmd { background: var(--bg2); color: var(--muted); border: 1px dashed var(--bg3); }
+  .arrow { font-size: 30px; color: var(--accent); }
+  .cap { text-align: center; color: var(--muted); font-size: 14px; margin-top: 8px; }
+
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-top: 34px; }
+  .card { background: var(--bg1); border: 1px solid var(--bg2); border-radius: var(--radius); padding: 22px; }
+  section.alt .card { background: var(--bg0); }
+  .card p { margin: 0; color: var(--fg2); font-size: 15.5px; }
+  .card .ico { font-size: 24px; margin-bottom: 8px; }
+
+  .themes { display: grid; grid-template-columns: 1fr 260px; gap: 22px; margin-top: 30px; align-items: start; }
+  .tlist { display: grid; gap: 8px; }
+  .tlist button {
+    text-align: left; font: inherit; font-size: 15px; color: var(--fg1);
+    background: var(--bg0); border: 1px solid var(--bg2); border-radius: 8px;
+    padding: 10px 14px; cursor: pointer; display: flex; align-items: center; gap: 10px;
+  }
+  .tlist button:hover { border-color: var(--accent2); }
+  .tlist button[aria-pressed="true"] { border-color: var(--accent); background: var(--bg2); }
+  .sw { width: 34px; height: 16px; border-radius: 4px; display: flex; overflow: hidden; flex: none; }
+  .sw i { flex: 1; }
+
+  pre {
+    background: #242933; border: 1px solid var(--bg2); border-radius: 8px;
+    padding: 14px 16px; overflow-x: auto; font-size: 14.5px; color: var(--fg1); margin: 10px 0 18px;
+  }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; margin-top: 26px; }
+  .note { color: var(--muted); font-size: 15px; }
+
+  table { width: 100%; border-collapse: collapse; margin-top: 24px; font-size: 15.5px; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--bg2); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; }
+  td:first-child { white-space: nowrap; }
+  kbd {
+    font-family: Consolas, monospace; font-size: 13px; background: var(--bg2);
+    border: 1px solid var(--bg3); border-bottom-width: 2px; border-radius: 5px; padding: 1px 6px; color: var(--fg0);
+  }
+
+  .platforms { display: grid; gap: 34px; margin-top: 34px; }
+  .platforms figure { margin: 0; }
+  .platforms figcaption { color: var(--muted); font-size: 15px; margin-top: 12px; text-align: center; }
+  .platforms figcaption b { color: var(--fg0); }
+
+  footer { padding: 40px 0; color: var(--muted); font-size: 14px; border-top: 1px solid var(--bg2); }
+  footer .wrap { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+
+  @media (max-width: 860px) {
+    .links { display: none; }
+    .flip, .two, .themes { grid-template-columns: 1fr; }
+    .grid { grid-template-columns: 1fr; }
+    .diagram { grid-template-columns: 1fr; }
+    .arrow { transform: rotate(90deg); justify-self: center; }
+    section { padding: 52px 0; }
+  }
+  @media (min-width: 861px) and (max-width: 1020px) {
+    .grid { grid-template-columns: repeat(2, 1fr); }
+  }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <a class="brand" href="#"><span class="brand-mark">F&gt;</span> farsh</a>
+    <div class="links">
+      <a href="#why">Почему</a>
+      <a href="#platforms">Платформы</a>
+      <a href="#features">Возможности</a>
+      <a href="#media">Медиа</a>
+      <a href="#themes">Темы</a>
+      <a href="#install">Установка</a>
+      <a href="https://github.com/errordnk/farsh">GitHub</a>
+    </div>
+  </div>
+</nav>
+
+<section class="hero">
+  <div class="wrap">
+    <div class="kicker">bash · zsh · PowerShell + Far Manager 3</div>
+    <h1>Не Far со встроенным шеллом.<br><span class="hl">Шелл со встроенным Far.</span></h1>
+    <p class="lead">farsh запускает ваш настоящий bash, zsh или PowerShell и кладёт поверх него панели Far Manager — точь-в-точь как в Far 3, клетка в клетку. Командная строка под панелями — это строка самого шелла, с вашим промптом, алиасами и историей. Нажали <kbd>Ctrl+O</kbd> — и перед вами чистый шелл, как будто farsh тут и не было.</p>
+    <div class="cta">
+      <a class="btn primary" href="#install">Установить</a>
+      <a class="btn" href="https://github.com/errordnk/farsh">Исходники на GitHub</a>
+    </div>
+    <img class="shot" src="img/themes-catppuccin.webp" width="1352" height="702" alt="farsh: окно выбора темы — панель с файлами и редактор с hello world на C в теме Catppuccin Mocha">
+  </div>
+</section>
+
+<section class="alt" id="why">
+  <div class="wrap">
+    <div class="kicker">С головы на ноги</div>
+    <h2>Двадцать пять лет всё было наоборот</h2>
+    <p class="lead">У Far всегда была командная строка. Своя: одно поле ввода, которое отдаёт команду в <code>cmd.exe</code> и тут же о ней забывает. Ни дополнения вашего шелла, ни функций, ни промпта, ни PSReadLine, ни fzf. Файловый менеджер, к которому прикрутили обрубок шелла. farsh переворачивает эту конструкцию.</p>
+
+    <div class="diagram">
+      <div>
+        <div class="stack">
+          <div class="layer l-far">Far Manager — главный</div>
+          <div class="layer l-cmd">его поле ввода → cmd.exe</div>
+        </div>
+        <div class="cap">как было</div>
+      </div>
+      <div class="arrow">⟶</div>
+      <div>
+        <div class="stack">
+          <div class="layer l-far">панели Far — гость сверху</div>
+          <div class="layer l-shell">ваш bash / zsh / PowerShell в PTY — главный</div>
+        </div>
+        <div class="cap">как в farsh</div>
+      </div>
+    </div>
+
+    <div class="flip">
+      <div class="side old">
+        <div class="tag">Far с командной строкой</div>
+        <ul>
+          <li>командная строка — своё поле ввода, а не ваш шелл;</li>
+          <li>алиасы, функции, профиль, промпт — мимо;</li>
+          <li>дополнение и поиск по истории — свои, урезанные;</li>
+          <li>вывод команд живёт в чужом буфере;</li>
+          <li>сделать его логин-шеллом нельзя.</li>
+        </ul>
+      </div>
+      <div class="side new">
+        <div class="tag">farsh</div>
+        <ul>
+          <li>под панелями — строка вашего настоящего шелла, всё, что набрано, уходит в его редактор строки;</li>
+          <li>ваш starship / oh-my-zsh / oh-my-posh, алиасы, функции, история — на месте;</li>
+          <li>без панелей каждая клавиша снова шелла: Tab-дополнение, <kbd>Ctrl+R</kbd>, ваши привязки;</li>
+          <li>вывод идёт в терминал байт в байт: родная прокрутка, выделение, мышь, ссылки;</li>
+          <li>его можно сделать логин-шеллом — и он не запрёт вас снаружи.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="platforms">
+  <div class="wrap">
+    <div class="kicker">Windows · macOS · Linux</div>
+    <h2>Один farsh — три системы</h2>
+    <p class="lead">Один и тот же farsh в PowerShell на Windows, в zsh на macOS и в bash на Debian. Справа сверху — панели farsh, под ними htop, слева — обычный шелл с fastfetch: farsh живёт рядом с вашими программами, а не вместо них.</p>
+    <div class="platforms">
+      <figure>
+        <img class="shot" src="img/farsh-windows.webp" width="2000" height="1071" alt="farsh на Windows 11 в PowerShell 7: панели Far над командной строкой, рядом htop и fastfetch">
+        <figcaption><b>Windows 11</b> — PowerShell 7.6, терминал Som</figcaption>
+      </figure>
+      <figure>
+        <img class="shot" src="img/farsh-macos.webp" width="2000" height="1068" alt="farsh на macOS в zsh: панели Far над командной строкой, рядом htop и fastfetch">
+        <figcaption><b>macOS</b> — zsh на Mac mini M4</figcaption>
+      </figure>
+      <figure>
+        <img class="shot" src="img/farsh-linux.webp" width="2000" height="1069" alt="farsh на Debian 13 в bash: панели Far над командной строкой, рядом htop и fastfetch">
+        <figcaption><b>Debian 13</b> — bash 5.2</figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<section class="alt" id="features">
+  <div class="wrap">
+    <div class="kicker">Что внутри</div>
+    <h2>Far 3, каким вы его помните. И то, чего в нём никогда не было</h2>
+    <p class="lead">Панели, диалоги и меню farsh сверены с настоящим Far 3.0.6446 дампом консоли — клетка к клетке, атрибут к атрибуту, а не на глаз.</p>
+    <div class="grid">
+      <div class="card"><div class="ico">🗂</div><h3>Панели как в Far 3</h3><p>Десять режимов просмотра, ширины колонок, <code>Folder</code>/<code>Up</code>, размеры в K/M/G, сортировка Far-овским порядком строк (цифры как числа), группы раскраски, кейбар, который меняется, пока держите Shift/Ctrl/Alt.</p></div>
+      <div class="card"><div class="ico">⌨️</div><h3>Ваш шелл, а не обрубок</h3><p>Командная строка — строка самого шелла. Enter запускает команду в шелле, панели уступают место её выводу и возвращаются со свежим списком файлов и курсором на месте.</p></div>
+      <div class="card"><div class="ico">🔐</div><h3>Логин-шелл без риска</h3><p><code>chsh -s farsh</code> — и всё, что не интерактивная сессия (ssh-команды, scp, rsync, скрипты, <code>-c</code>, пайпы), молча уходит в настоящий шелл. Если farsh упадёт — сессию подхватит настоящий шелл.</p></div>
+      <div class="card"><div class="ico">📝</div><h3>Настоящий редактор</h3><p><kbd>F4</kbd> и <kbd>F3</kbd> — встроенный современный редактор fresh: подсветка tree-sitter, мышь, выделение, поиск — внутри статусной строки и кейбара Far. <kbd>Ctrl+Q</kbd> показывает подсвеченный текст файла под курсором.</p></div>
+      <div class="card"><div class="ico">📦</div><h3>Архивы как папки</h3><p>Портированный arclite: 7z, zip, tar, gzip открываются по Enter и листаются как каталоги. Распаковка, создание, добавление и удаление в zip, проверка архива. Чистый Rust, 7-Zip не нужен.</p></div>
+      <div class="card"><div class="ico">🛠</div><h3>Все файловые операции</h3><p>Копирование, перенос, удаление в Корзину и Wipe с Far-овскими подтверждениями и прогрессом, атрибуты и время (<kbd>Ctrl+A</kbd>), жёсткие ссылки, junction и симлинки (<kbd>Alt+F6</kbd>), фильтры, поиск файлов, сравнение папок, описания.</p></div>
+      <div class="card"><div class="ico">🛡</div><h3>Повышение прав</h3><p>«Доступ запрещён» на Windows — и вы видите Far-овский диалог повышения. Копия farsh через UAC делает работу по каналу, который можете открыть только вы.</p></div>
+      <div class="card"><div class="ico">⚙️</div><h3>Настройки по-фаровски</h3><p>Каждая опция — под именем и со значением по умолчанию из Far. <code>far:config</code> со всеми 297 настройками, справка Far со ссылками и поиском, пользовательское меню в формате <code>FarMenu.ini</code>, ассоциации, истории.</p></div>
+      <div class="card"><div class="ico">🇷🇺</div><h3>По-русски — целиком</h3><p>Интерфейс и справка на русском из перевода самого Far. Все сочетания клавиш работают и в русской раскладке — как Xlat в Far.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="media">
+  <div class="wrap">
+    <div class="kicker">Медиа прямо в терминале</div>
+    <h2>F3 на картинке показывает картинку. На mp4 — видео</h2>
+    <p class="lead">В терминале <a href="https://som.sarnet.ru">Som</a> вьювер farsh говорит на его протоколе богатого контента — и терминал превращается в медиацентр, не выходя из файлового менеджера.</p>
+    <div class="grid">
+      <div class="card"><div class="ico">🖼</div><h3>Картинки и GIF</h3><p>PNG, JPEG, анимированный GIF — в <kbd>F3</kbd> на весь экран или в панели быстрого просмотра, пока ходите курсором по файлам.</p></div>
+      <div class="card"><div class="ico">🎵</div><h3>Музыка и плейлисты</h3><p>mp3, flac, ogg с виджетом плеера; плейлисты <code>.m3u</code> и <code>.cue</code> трек за треком, переключение <kbd>n</kbd>/<kbd>p</kbd>; интернет-радио.</p></div>
+      <div class="card"><div class="ico">🎬</div><h3>Видео</h3><p>mp4, mkv, avi прямо в терминале. <kbd>a</kbd> — следующая звуковая дорожка, <kbd>s</kbd> — субтитры.</p></div>
+      <div class="card"><div class="ico">📖</div><h3>Markdown</h3><p>Документ <code>.md</code> отрисовывается как документ — с заголовками, списками и встроенными картинками, с прокруткой.</p></div>
+      <div class="card"><div class="ico">🎨</div><h3>В цветах темы</h3><p>Фон виджетов и полей вокруг картинок следует выбранной теме farsh.</p></div>
+      <div class="card"><div class="ico">🖥</div><h3>В любом другом терминале</h3><p>farsh работает везде: Windows Terminal, kitty, iTerm2, Alacritty. Текст покажет текстом, двоичный файл — честно назовёт двоичным.</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="alt" id="themes">
+  <div class="wrap">
+    <div class="kicker">Темы</div>
+    <h2>Посмотрите, прежде чем выбрать</h2>
+    <p class="lead">Options → Themes показывает живой пример farsh в каждой теме: панель с файлами и редактор с кодом. Классический синий Far, Catppuccin Mocha, Tokyo Night, One Dark, Dracula и Nord встроены; свою тему можно написать в JSON и положить в <code>~/.config/farsh/themes</code>. Тема красит всё: панели, диалоги, меню, подсветку кода в редакторе и фон медиа-виджетов. Ниже — настоящие кадры этого окна.</p>
+    <div class="themes">
+      <img class="shot" id="theme-shot" src="img/themes-default.webp" width="1352" height="702" alt="Окно тем farsh в классических цветах Far">
+      <div class="tlist" role="group" aria-label="Тема">
+        <button aria-pressed="true" data-id="default" data-name="классических цветах Far"><span class="sw"><i style="background:#000080"></i><i style="background:#00ffff"></i><i style="background:#ffff00"></i></span>Far классический</button>
+        <button aria-pressed="false" data-id="catppuccin" data-name="теме Catppuccin Mocha"><span class="sw"><i style="background:#1e1e2e"></i><i style="background:#89b4fa"></i><i style="background:#cba6f7"></i></span>Catppuccin Mocha</button>
+        <button aria-pressed="false" data-id="tokyo-night" data-name="теме Tokyo Night"><span class="sw"><i style="background:#1a1b26"></i><i style="background:#7aa2f7"></i><i style="background:#bb9af7"></i></span>Tokyo Night</button>
+        <button aria-pressed="false" data-id="one-dark" data-name="теме One Dark"><span class="sw"><i style="background:#282c34"></i><i style="background:#61afef"></i><i style="background:#c678dd"></i></span>One Dark</button>
+        <button aria-pressed="false" data-id="dracula" data-name="теме Dracula"><span class="sw"><i style="background:#282a36"></i><i style="background:#bd93f9"></i><i style="background:#ff79c6"></i></span>Dracula</button>
+        <button aria-pressed="false" data-id="nord" data-name="теме Nord"><span class="sw"><i style="background:#2e3440"></i><i style="background:#88c0d0"></i><i style="background:#81a1c1"></i></span>Nord</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="install">
+  <div class="wrap">
+    <div class="kicker">Установка</div>
+    <h2>Пять минут — и у вас Far в родном шелле</h2>
+    <p class="lead">Готовых бинарников пока нет: farsh собирается из исходников. Нужен Rust 1.88 или новее (<a href="https://rustup.rs">rustup.rs</a>) и компилятор C (для tree-sitter).</p>
+    <div class="two">
+      <div>
+        <h3>Linux и macOS</h3>
+<pre><code>cargo install --locked --git https://github.com/errordnk/farsh --root ~/.local</code></pre>
+        <p>Бинарник окажется в <code>~/.local/bin/farsh</code>. Запустите его из терминала — или сделайте логин-шеллом:</p>
+<pre><code>echo ~/.local/bin/farsh | sudo tee -a /etc/shells
+chsh -s ~/.local/bin/farsh</code></pre>
+        <p class="note">Работать при этом будет ваш прежний шелл: farsh берёт <code>$FARSH_SHELL</code>, или <code>Shell.Program</code> из своих настроек, или <code>$SHELL</code>, если это не farsh, иначе bash (на macOS — zsh).</p>
+      </div>
+      <div>
+        <h3>Windows</h3>
+<pre><code>git clone https://github.com/errordnk/farsh
+cd farsh
+cargo build --release</code></pre>
+        <p>Сборке под Windows нужен FFmpeg из <a href="https://vcpkg.io">vcpkg</a> (им farsh перечисляет звуковые дорожки и субтитры видео): поставьте <code>ffmpeg:x64-windows</code> и укажите путь в <code>VCPKG_ROOT</code>. DLL FFmpeg упаковываются внутрь <code>farsh.exe</code> и загружаются, только когда они нужны, — так что готовый бинарник работает и там, где FFmpeg нет.</p>
+        <p class="note">Запускайте <code>target\release\farsh.exe</code> в Windows Terminal или Som. Шелл по умолчанию — PowerShell; Git Bash и bash из MSYS2 тоже работают.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="alt" id="keys">
+  <div class="wrap">
+    <div class="kicker">Первые шаги</div>
+    <h2>Руки помнят всё</h2>
+    <p class="lead">Если вы работали в Far, вы уже умеете работать в farsh. Вот что стоит знать сверх того.</p>
+    <table>
+      <tr><th>Клавиша</th><th>Что делает</th></tr>
+      <tr><td><kbd>Ctrl+O</kbd></td><td>панели вкл/выкл — без них вы в чистом шелле</td></tr>
+      <tr><td>любой текст</td><td>уходит в командную строку шелла, <kbd>Enter</kbd> запускает</td></tr>
+      <tr><td><kbd>Tab</kbd></td><td>другая панель (без панелей Tab — дополнение вашего шелла)</td></tr>
+      <tr><td><kbd>Ctrl+E</kbd> <kbd>Ctrl+X</kbd></td><td>история шелла назад/вперёд (стрелки двигают курсор панели)</td></tr>
+      <tr><td><kbd>F3</kbd> <kbd>F4</kbd> <kbd>Ctrl+Q</kbd></td><td>просмотр, редактор, быстрый просмотр в соседней панели</td></tr>
+      <tr><td><kbd>F5</kbd> <kbd>F6</kbd> <kbd>F7</kbd> <kbd>F8</kbd></td><td>копировать, перенести, создать папку, удалить</td></tr>
+      <tr><td><kbd>Alt+F7</kbd></td><td>поиск файлов</td></tr>
+      <tr><td><kbd>F9</kbd></td><td>меню: Left, Files, Commands, Options (там и Themes), Right</td></tr>
+      <tr><td><kbd>Ctrl+1</kbd>…<kbd>Ctrl+0</kbd></td><td>десять режимов просмотра Far</td></tr>
+      <tr><td><kbd>Ctrl+F3</kbd>…<kbd>Ctrl+F12</kbd></td><td>сортировка</td></tr>
+      <tr><td><kbd>F1</kbd></td><td>справка Far со ссылками</td></tr>
+      <tr><td><code>far:config</code> + <kbd>Enter</kbd></td><td>все настройки</td></tr>
+      <tr><td><kbd>F10</kbd></td><td>выход</td></tr>
+    </table>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div>farsh — свободная программа под GPL-3.0-or-later. Справка Far — по BSD-лицензии Far Manager.</div>
+    <div><a href="https://github.com/errordnk/farsh">GitHub</a> · <a href="https://som.sarnet.ru">терминал Som</a></div>
+  </div>
+</footer>
+
+<script>
+  (function () {
+    var shot = document.getElementById('theme-shot');
+    var buttons = document.querySelectorAll('.tlist button');
+    buttons.forEach(function (b) {
+      b.addEventListener('click', function () {
+        buttons.forEach(function (o) { o.setAttribute('aria-pressed', o === b ? 'true' : 'false'); });
+        shot.src = 'img/themes-' + b.dataset.id + '.webp';
+        shot.alt = 'Окно тем farsh в ' + b.dataset.name;
+      });
+    });
+  })();
+</script>
+</body>
+</html>

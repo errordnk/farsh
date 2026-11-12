@@ -297,7 +297,7 @@ fn titles(modes: [u8; 2], states: [(Kind, bool, bool); 2]) -> Vec<Title> {
 
 /// The menu bar alone (Interface settings' "Always show the menu bar").
 pub fn paint_bar(grid: &mut Grid) {
-    let menu = Menu { titles: titles([2, 2], [(Kind::Files, true, true); 2]), current: usize::MAX, item: 0, dropped: false };
+    let menu = Menu { titles: titles([2, 2], [(Kind::Files, true, true); 2]), current: usize::MAX, item: 0, dropped: false, top: 0, screen_rows: u16::MAX };
     let cols = grid.cols;
     grid.fill_with(0, 0, cols, 1, BAR_TEXT(), BG());
     for (title, (col, _)) in menu.titles.iter().zip(menu.title_spans()) {
@@ -344,6 +344,10 @@ pub struct Menu {
     item: usize,
     /// Whether the drop-down is shown, or only the bar.
     dropped: bool,
+    /// The first item the drop-down shows, and the screen's height at the last
+    /// paint: a list taller than the screen scrolls, as Far's VMenu does.
+    top: usize,
+    screen_rows: u16,
 }
 
 impl Menu {
@@ -359,7 +363,7 @@ impl Menu {
                 item.label = crate::lang::tr(item.label);
             }
         }
-        let mut menu = Self { titles, current: 0, item: 0, dropped: false };
+        let mut menu = Self { titles, current: 0, item: 0, dropped: false, top: 0, screen_rows: u16::MAX };
         menu.open(current);
         menu
     }
@@ -372,6 +376,7 @@ impl Menu {
     fn open(&mut self, index: usize) {
         self.current = index % self.titles.len();
         self.item = 0;
+        self.top = 0;
     }
 
     fn items(&self) -> &[Item] {
@@ -472,20 +477,38 @@ impl Menu {
             .collect()
     }
 
-    /// The drop-down's frame: column, row, width, height.
+    /// The drop-down's frame: column, row, width, height; no taller than the
+    /// screen below the bar (the rest of the list scrolls).
     fn drop_down(&self, cols: u16) -> (u16, u16, u16, u16) {
         let items = self.items();
         let label = items.iter().map(|i| plain(i.label).chars().count()).max().unwrap_or(0) as u16;
         let shortcut = items.iter().map(|i| i.shortcut.chars().count()).max().unwrap_or(0) as u16;
         // ║ √ label  shortcut ║
         let width = 1 + 2 + label + if shortcut > 0 { 2 + shortcut } else { 0 } + 2;
-        let height = items.len() as u16 + 2;
+        let height = (items.len() as u16 + 2).min(self.screen_rows.saturating_sub(1).max(3));
         let col = self.title_spans()[self.current].0.min(cols.saturating_sub(width + 2));
         (col, 1, width, height)
     }
 
-    pub fn paint(&self, grid: &mut Grid) {
+    /// The items the drop-down has room for.
+    fn visible(&self, h: u16) -> usize {
+        usize::from(h.saturating_sub(2)).max(1)
+    }
+
+    /// The highlighted item in sight, the list's end at the bottom at most.
+    fn keep_in_sight(&mut self, visible: usize) {
+        let len = self.items().len();
+        if self.item < self.top {
+            self.top = self.item;
+        } else if self.item >= self.top + visible {
+            self.top = self.item + 1 - visible;
+        }
+        self.top = self.top.min(len.saturating_sub(visible));
+    }
+
+    pub fn paint(&mut self, grid: &mut Grid) {
         let cols = grid.cols;
+        self.screen_rows = grid.rows;
         grid.fill_with(0, 0, cols, 1, BAR_TEXT(), BG());
         for (index, (title, (col, width))) in self.titles.iter().zip(self.title_spans()).enumerate() {
             if index == self.current {
@@ -507,8 +530,11 @@ impl Menu {
         grid.put(x, y, &format!("\u{2554}{line}\u{2557}"), TEXT(), BG());
         grid.put(x, y + h - 1, &format!("\u{255A}{line}\u{255D}"), TEXT(), BG());
         let shortcut_col = x + w - 2 - self.items().iter().map(|i| i.shortcut.chars().count()).max().unwrap_or(0) as u16;
-        for (index, item) in self.items().iter().enumerate() {
-            let row = y + 1 + index as u16;
+        let visible = self.visible(h);
+        self.keep_in_sight(visible);
+        let len = self.items().len();
+        for (index, item) in self.items().iter().enumerate().skip(self.top).take(visible) {
+            let row = y + 1 + (index - self.top) as u16;
             if item.label == "-" {
                 let thin = "\u{2500}".repeat(w.saturating_sub(2) as usize);
                 grid.put(x, row, &format!("\u{255F}{thin}\u{2562}"), TEXT(), BG());
@@ -531,12 +557,29 @@ impl Menu {
             put_label(grid, x + 3, row, item.label, fg, bg, hot);
             grid.put(shortcut_col, row, item.shortcut, fg, bg);
         }
+        // Far's scroll bar on the right border when the list does not fit
+        if visible < len && visible >= 2 {
+            let bar = crate::vmenu::scroll_bar(visible, self.top, self.top + visible, len);
+            for (i, c) in bar.chars().enumerate() {
+                grid.put(x + w - 1, y + 1 + i as u16, &c.to_string(), TEXT(), BG());
+            }
+        }
     }
 
     /// A left click: a title opens, an item is chosen, outside closes.
     pub fn click(&mut self, event: MouseEvent, cols: u16) -> Outcome {
-        if event.kind != MouseEventKind::Down(MouseButton::Left) {
-            return Outcome::Open;
+        // the wheel moves the highlight of a dropped list (and so scrolls it)
+        match event.kind {
+            MouseEventKind::ScrollUp if self.dropped => {
+                self.step(-1);
+                return Outcome::Open;
+            }
+            MouseEventKind::ScrollDown if self.dropped => {
+                self.step(1);
+                return Outcome::Open;
+            }
+            MouseEventKind::Down(MouseButton::Left) => {}
+            _ => return Outcome::Open,
         }
         let (col, row) = (event.column, event.row);
         if row == 0 {
@@ -551,7 +594,10 @@ impl Menu {
         }
         let (x, y, w, h) = self.drop_down(cols);
         if col > x && col + 1 < x + w && row > y && row + 1 < y + h {
-            let index = (row - y - 1) as usize;
+            let index = self.top + (row - y - 1) as usize;
+            if index >= self.items().len() {
+                return Outcome::Open;
+            }
             if self.items()[index].label != "-" {
                 self.item = index;
             }
@@ -593,6 +639,33 @@ mod tests {
         let mut menu = Menu::new(0, [2, 2], FILES);
         menu.key(key(KeyCode::Down));
         assert_eq!(menu.key(key(KeyCode::Enter)), Outcome::Chosen(Command::View { right: false, mode: 1 }));
+    }
+
+    #[test]
+    fn a_list_taller_than_the_screen_scrolls_with_a_scroll_bar() {
+        // Options on a screen of 12 rows: the frame ends on the last row
+        let mut menu = Menu::new(3, [2, 2], FILES);
+        menu.dropped = true;
+        let mut grid = Grid::new(100, 12);
+        menu.paint(&mut grid);
+        let (x, y, w, h) = menu.drop_down(100);
+        assert_eq!((y, h), (1, 11), "from under the bar to the bottom");
+        let text = |grid: &mut Grid, col: u16, row: u16| grid.cell_mut(col, row).unwrap().text.clone();
+        assert_eq!(text(&mut grid, x + w - 1, 2), "\u{25B2}", "the scroll bar's arrow on the right border");
+        assert_eq!(text(&mut grid, x + w - 1, h - 1), "\u{25BC}");
+        // End: the last item is in sight, the first is not
+        menu.key(key(KeyCode::End));
+        menu.paint(&mut grid);
+        let rows: Vec<String> = (0..grid.rows).map(|r| (0..grid.cols).map(|c| text(&mut grid, c, r)).collect()).collect();
+        let last = plain(menu.items().last().unwrap().label);
+        let first = plain(menu.items()[0].label);
+        assert!(rows.iter().any(|r| r.contains(&last)), "{rows:#?}");
+        assert!(!rows[1..].iter().any(|r| r.contains(&first)), "{rows:#?}");
+        // a click on the last row of the list is the last item
+        let click = MouseEvent { kind: MouseEventKind::Down(MouseButton::Left), column: x + 3, row: y + h - 2, modifiers: KeyModifiers::NONE };
+        let want = menu.items().last().unwrap().command.map_or(Outcome::Open, Outcome::Chosen);
+        assert_eq!(menu.click(click, 100), want);
+        assert_eq!(menu.item, menu.items().len() - 1);
     }
 
     #[test]

@@ -457,6 +457,15 @@ over the shell screen.
     with "Use sort groups". The color example and the marks in the panel
     are not drawn. Groups of file masks (`<arc>`, `<exec>`, `%PATHEXT%`) work
     in every mask.
+- The site (`https://farsh.sarnet.ru/`, Russian; README.md is its English
+  counterpart, keep the two in step) is `site/` (index.html, img/). It is
+  served by nginx on the `vpn` host (146.103.40.167, user dnk; the
+  `farsh.sarnet.ru` server in `/etc/nginx/sites-available/sarnet.ru`) from
+  `/home/dnk/farsh/site`: a plain copy, NOT a git clone; `git push` does not
+  publish it. Publish only when asked: `scp` index.html and the changed images,
+  then compare `sha256sum` on both sides. `site/img/themes-*.webp` are drawn
+  from the Themes dialog's real cells (a dump of the grid rendered with Cascadia
+  Mono), not mock-ups; `farsh-*.webp` are the user's screenshots.
 - Tests: `cargo test` (the shell test starts cmd.exe on Windows, /bin/sh elsewhere).
 - Code, comments and logs in English; talk to the user in Russian.
 
