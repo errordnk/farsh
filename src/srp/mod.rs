@@ -289,6 +289,12 @@ impl Shared {
         self.touch();
     }
 
+    /// Som told the document's real number of rows (at least one, as it starts).
+    fn set_rows(&self, rows: u32) {
+        self.rows.store(rows.clamp(1, srp_client::placeholder::MAX_CELLS), Ordering::Relaxed);
+        self.touch();
+    }
+
     fn set_position(&self, position: Option<(usize, usize)>) {
         *self.position.lock().unwrap_or_else(|e| e.into_inner()) = position;
         self.touch();

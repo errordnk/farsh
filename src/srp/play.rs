@@ -151,8 +151,13 @@ pub fn run_markdown(path: &Path, shared: &Arc<Shared>) -> Result<(), String> {
         std::thread::spawn(move || {
             while let Ok(incoming) = grower.next_forwarded() {
                 match incoming {
-                    SrvRequest::GrowMarkdownRows { session_id, file_id, additional_rows } if (session_id, file_id) == ids => {
-                        shared.grow_rows(additional_rows)
+                    // the real total, when Som tells it: the increments alone overshoot once the
+                    // text is laid out into fewer rows (a wider window) or Som counts afresh
+                    SrvRequest::GrowMarkdownRows { session_id, file_id, additional_rows, total_rows } if (session_id, file_id) == ids => {
+                        match total_rows {
+                            Some(total) => shared.set_rows(total),
+                            None => shared.grow_rows(additional_rows),
+                        }
                     }
                     SrvRequest::EndPlayback { session_id, file_id } if (session_id, file_id) == ids => break,
                     _ => {}
