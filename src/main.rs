@@ -639,14 +639,21 @@ impl App {
     fn on_key(&mut self, key: KeyEvent) {
         let key = keys::normalize(key);
         // farsh's keys have one modifier at most: a chord is none of them.
-        // Over the panels it is the shell's; in a window it does nothing.
+        // Over the panels it is the shell's; in a window of farsh's it does
+        // nothing. The viewer's embedded fresh is not farsh's own keys: its
+        // keymap lives on chords (block selection Alt+Shift+arrows, the
+        // cursors of Ctrl+Alt+Up/Down), so there the chord is the editor's.
         let key = match keys::chord(key) {
             keys::Chord::Text(key) | keys::Chord::Single(key) => key,
             keys::Chord::Many(key) => {
-                if matches!(self.overlay, Overlay::None) {
-                    self.send_to_shell(key);
+                if matches!(self.overlay, Overlay::Viewer(_)) {
+                    key
+                } else {
+                    if matches!(self.overlay, Overlay::None) {
+                        self.send_to_shell(key);
+                    }
+                    return;
                 }
-                return;
             }
         };
         // Ctrl+O over a window shows the shell's screen, as over the panels; it brings the window back

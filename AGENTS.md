@@ -346,7 +346,11 @@ over the shell screen.
     not a list.
   - Every key of farsh has no modifier or one (the user's rule):
     `keys::chord` stops any key with two or more before panels, menus and
-    dialogs see it (over the panels it goes to the shell). So Far's
+    dialogs see it (over the panels it goes to the shell). The one exception
+    is the viewer/editor overlay: its embedded fresh has a keymap of its own
+    that lives on chords (block selection Alt+Shift+arrows, the cursors of
+    Ctrl+Alt+Up/Down), so there a chord reaches the editor (`App::on_key`).
+    So Far's
     Ctrl+Shift+Enter, RightCtrl/Ctrl+Shift+0..9, Ctrl+Shift+F3/F4,
     Alt+Shift+F9 are left out, Alt++ is the keypad's (the main keyboard's
     `+` takes Shift), and the key bar changes only for Shift, Ctrl or Alt
