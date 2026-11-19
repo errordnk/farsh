@@ -137,6 +137,20 @@ impl State {
         matches!(self.phase, Phase::Waiting) || (self.phase == Phase::Text && !self.opened)
     }
 
+    /// The wheel over the panel: a document Som shows (markdown) scrolls by
+    /// its rows, as the wheel over the whole-screen viewer does. Nothing
+    /// while the file is text (the editor's own wheel) or not a document.
+    pub fn wheel(&mut self, kind: crossterm::event::MouseEventKind) {
+        if let Some(viewer) = &mut self.viewer {
+            viewer.mouse(crossterm::event::MouseEvent {
+                kind,
+                column: 0,
+                row: 0,
+                modifiers: crossterm::event::KeyModifiers::NONE,
+            });
+        }
+    }
+
     /// A test waits less than the real 150 ms (or more, to see it wait).
     #[cfg(test)]
     pub fn set_debounce(&mut self, debounce: std::time::Duration) {

@@ -2113,6 +2113,9 @@ impl Panels {
                     {
                         let wheel = crossterm::event::Event::Mouse(MouseEvent { kind: event.kind, column: col, row, modifiers: event.modifiers });
                         let _ = view.event(wheel, self.qrect.0, self.qrect.1);
+                    } else if let Some(state) = &mut self.qview {
+                        // a document Som shows (markdown) scrolls by its rows
+                        state.wheel(event.kind);
                     }
                     return Key::Taken;
                 }
