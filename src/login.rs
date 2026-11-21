@@ -52,15 +52,21 @@ pub fn is_farsh(program: &str) -> bool {
 
 /// The shell the user chose, if any: `$FARSH_SHELL`, the profile's
 /// `Shell.Program`, or `$SHELL`, the first that is set and is not farsh (with
-/// farsh as the login shell `$SHELL` is farsh).
+/// farsh as the login shell `$SHELL` is farsh). `$SHELL` is skipped on
+/// Windows: there it is not a user's choice but an inherited MSYS/Git-Bash
+/// environment variable, and a farsh started from such a shell went on to
+/// spawn that bash (MINGW64) instead of PowerShell.
 pub fn chosen_shell() -> Option<String> {
-    [
+    let mut candidates = vec![
         std::env::var("FARSH_SHELL").unwrap_or_default(),
         crate::settings::string("Shell.Program"),
-        std::env::var("SHELL").unwrap_or_default(),
-    ]
-    .into_iter()
-    .find(|shell| !shell.is_empty() && !is_farsh(shell))
+    ];
+    if !cfg!(windows) {
+        candidates.push(std::env::var("SHELL").unwrap_or_default());
+    }
+    candidates
+        .into_iter()
+        .find(|shell| !shell.is_empty() && !is_farsh(shell))
 }
 
 /// Becomes the real shell, with `args`, as a login shell if `login`. Returns
