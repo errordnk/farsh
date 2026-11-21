@@ -79,7 +79,7 @@ pub fn kind_of(path: &Path) -> Option<Kind> {
         "jpg" | "jpeg" => Kind::Image(ContentType::Jpeg),
         "gif" => Kind::Image(ContentType::Gif),
         "mp3" | "flac" | "ogg" | "oga" => Kind::Audio,
-        "mp4" | "mkv" | "avi" => Kind::Video,
+        "mp4" | "m4v" | "mkv" | "mov" | "webm" | "avi" => Kind::Video,
         "m3u" | "m3u8" => Kind::Playlist,
         "cue" => Kind::Cue,
         "md" => Kind::Markdown,
@@ -243,6 +243,8 @@ pub struct Shared {
     position: Mutex<Option<(usize, usize)>>,
     /// How many rows of cells a document has now (it starts with one; Som asks for more).
     rows: AtomicU32,
+    /// The placement's info line (`i`): what the last toggle set.
+    info_visible: std::sync::atomic::AtomicBool,
 }
 
 impl Shared {
@@ -257,6 +259,7 @@ impl Shared {
             step: AtomicI32::new(0),
             position: Mutex::new(None),
             rows: AtomicU32::new(1),
+            info_visible: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
@@ -363,6 +366,18 @@ impl Media {
         matches!(self.kind, Kind::Playlist | Kind::Cue)
     }
 
+    /// Shows or hides the placement's info line (the transfer speed and
+    /// the lost-frame counters Som paints): `i` in the viewer. Sent
+    /// fire-and-forget — a placement the daemon no longer knows just
+    /// ignores it.
+    pub fn toggle_info(&self) {
+        let visible = self.shared.info_visible.fetch_not(Ordering::AcqRel);
+        if let Ok(channel) = Channel::connect() {
+            let (session_id, file_id) = self.shared.ids();
+            let _ = channel.send(&SrvRequest::AnnounceInfo { session_id, file_id, enabled: visible });
+        }
+    }
+
     /// The rows of cells a document has now.
     pub fn rows(&self) -> u32 {
         self.shared.rows.load(Ordering::Relaxed)
@@ -447,6 +462,9 @@ mod tests {
         assert_eq!(kind_of(Path::new("x.oga")), Some(Kind::Audio));
         assert_eq!(kind_of(Path::new("film.MKV")), Some(Kind::Video));
         assert_eq!(kind_of(Path::new("clip.mp4")), Some(Kind::Video));
+        assert_eq!(kind_of(Path::new("clip.m4v")), Some(Kind::Video));
+        assert_eq!(kind_of(Path::new("clip.mov")), Some(Kind::Video));
+        assert_eq!(kind_of(Path::new("clip.webm")), Some(Kind::Video));
         assert_eq!(kind_of(Path::new("a.M3U8")), Some(Kind::Playlist));
         assert_eq!(kind_of(Path::new("a.cue")), Some(Kind::Cue));
         assert_eq!(kind_of(Path::new("README.md")), Some(Kind::Markdown));

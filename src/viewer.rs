@@ -232,6 +232,11 @@ impl Viewer {
     fn choose_stream(&mut self, key: KeyCode) -> bool {
         let is_video = self.media.as_ref().is_some_and(|media| media.kind == crate::srp::Kind::Video);
         match (key, self.stream_key.take()) {
+            // `i`: the placement's info line — transfer speed, frames lost.
+            (KeyCode::Char('i'), _) if is_video => {
+                self.media.as_ref().inspect(|media| media.toggle_info());
+                true
+            }
             (KeyCode::Char(letter @ ('a' | 's')), _) if is_video => {
                 let path = self.path.clone();
                 let list = self.stream_list.get_or_insert_with(|| crate::srp::streams::list(&path)).clone();
